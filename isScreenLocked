@@ -1,0 +1,29 @@
+function isScreenLocked {
+<#
+
+.SYNOPSIS
+    If the screen is locked, Return True
+
+.INPUTS
+    None.
+
+.OUTPUTS
+    Boolen and Object when true, otherwise Null.
+
+.EXAMPLE
+    if ( isScreenLocked -eq $true ) {write-host "Screen is locked"}
+
+.LINK
+    https://github.com/MatthewCKelly/PSCode/isScreenLocked
+
+ #>
+   
+    $LockedScreen = [System.Diagnostics.Process]::GetProcessesByName("logonui");
+     if ($lockedScreen -ne $null) {
+        return $true,$LockedScreen
+     } else {
+        return $false,$null;     
+     
+     }
+
+}
