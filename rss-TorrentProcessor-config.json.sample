@@ -1,0 +1,25 @@
+
+  "Plex": {
+    "ServerUrl": "http://server:port",
+    "Token": "YOUR_PLEX_TOKEN_HERE",
+    "LibraryId": 1
+  },
+  "Torrent": {
+    "RssUrl": "YOUR_RSS_URL_HERE",
+    "RateLimitMs": 500
+  },
+  "Paths": {
+    "Download": "\\\\destination\\path\\_ToGet\\Get",
+    "Completed": "\\\\destination\\path\\_ToGet\\Done"
+  },
+  "Logging": {
+    "Level": "Info",
+    "LogFile": "torrent_processor.log",
+    "RetainDays": 30
+  },
+  "Network": {
+    "TimeoutSeconds": 30,
+    "MaxRetries": 3,
+    "RetryDelaySeconds": 5
+  }
+}
