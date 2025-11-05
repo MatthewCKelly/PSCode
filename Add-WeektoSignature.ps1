@@ -1,28 +1,36 @@
-﻿<#
+<#
 .SYNOPSIS
-    Manages Outlook signature with weekly work location status table
+    Manages Outlook signature with dynamic work location status table
 .DESCRIPTION
     PowerShell script with Windows Forms GUI to update Outlook signature files (HTML and TXT)
-    with current week's work status. Stores signature backup in registry, removes MSO-specific
-    tags, limits table width to 400px, and provides interactive dropdown selection with preview.
+    with work status for upcoming days. Features include optional today's status, configurable 
+    number of days (1-14), AM/PM split mode, signature backup in registry and file system, 
+    removal of MSO-specific tags, table width limited to 400px, HTML preview with copy support,
+    and persistent configuration storage in registry.
 .PARAMETER
     No parameters accepted - operates with GUI form interaction
 .INPUTS
     User selections via Windows Forms dropdowns for each day's AM/PM status
+    Number of days to display (1-14)
+    Option to include today's status
+    Split AM/PM mode toggle
 .OUTPUTS
     Updated signature files in Outlook signature directory
     Console logging via Write-Detail
     Exit code 0 on success, 1 on error
 .EXAMPLE
-    .\Manage-OutlookSignature.ps1
+    .\Add-WeektoSignature.ps1
     Launches GUI form for weekly status configuration
 .NOTES
     Author: Claude AI
-    Version: 1.0
+    Version: 2.0
     Requires: PowerShell 5.0+, .NET Framework for Windows Forms
     Registry: HKCU\Software\OutlookSignatureManager
+    Configuration: Number of days and today's status preference stored in registry
 .VERSION
-    1.0 - Initial creation
+    2.0 - Added dynamic day selection, today's status option, configuration persistence,
+          HTML preview copy support, and improved body tag handling
+    2.1 - Added panel with autosize for the day dropdowns. controls below bound to that.
 #>
 
 #region Initialization and Global Variables
@@ -31,10 +39,11 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# Registry path for storing last known signature file name
+# Registry path for storing configuration and last known signature file name
 $regPath = "HKCU:\Software\OutlookSignatureManager"
 $regValueName = "LastSignatureFile"
-
+$regNumDaysValue = "NumberOfDays"
+$regIncludeTodayValue = "IncludeToday"
 
 # Backup directory in roaming appdata
 $backupPath = "$env:APPDATA\OutlookSignatureManager\Backups"
@@ -57,6 +66,10 @@ $script:statusMap = @{
     'Travel' = '&#9992; Travel'
     'Client Site' = '&#127970; Client Site'
 }
+
+# Default configuration values
+$script:defaultNumDays = 5
+$script:defaultIncludeToday = $false
 
 #endregion Initialization and Global Variables
 
@@ -120,6 +133,73 @@ Function Write-Detail {
 } # end of Write-Detail function
 
 #endregion Global Functions
+
+#region Configuration Functions
+
+# Function to load configuration from registry
+Function Get-SignatureConfig {
+    Write-Detail -Message "Loading configuration from registry" -Level Debug
+    
+    try {
+        if (-not (Test-Path $regPath)) {
+            Write-Detail -Message "No configuration found, using defaults" -Level Debug
+            return @{
+                NumDays = $script:defaultNumDays
+                IncludeToday = $script:defaultIncludeToday
+            }
+        }
+        
+        $numDays = (Get-ItemProperty -Path $regPath -Name $regNumDaysValue -ErrorAction SilentlyContinue).$regNumDaysValue
+        $includeToday = (Get-ItemProperty -Path $regPath -Name $regIncludeTodayValue -ErrorAction SilentlyContinue).$regIncludeTodayValue
+        
+        # Use defaults if values not found
+        if ($null -eq $numDays) { $numDays = $script:defaultNumDays }
+        if ($null -eq $includeToday) { $includeToday = $script:defaultIncludeToday }
+        
+        Write-Detail -Message "Configuration loaded: NumDays=$numDays, IncludeToday=$includeToday" -Level Info
+        
+        return @{
+            NumDays = $numDays
+            IncludeToday = $includeToday
+        }
+        
+    } catch {
+        Write-Detail -Message "Failed to load configuration: $($_.Exception.Message)" -Level Warning
+        return @{
+            NumDays = $script:defaultNumDays
+            IncludeToday = $script:defaultIncludeToday
+        }
+    }
+} # end of Get-SignatureConfig function
+
+# Function to save configuration to registry
+Function Set-SignatureConfig {
+    param(
+        [int]$NumDays,
+        [bool]$IncludeToday
+    )
+    
+    Write-Detail -Message "Saving configuration to registry: NumDays=$NumDays, IncludeToday=$IncludeToday" -Level Debug
+    
+    try {
+        if (-not (Test-Path $regPath)) {
+            New-Item -Path $regPath -Force | Out-Null
+            Write-Detail -Message "Created registry key: $regPath" -Level Debug
+        }
+        
+        Set-ItemProperty -Path $regPath -Name $regNumDaysValue -Value $NumDays
+        Set-ItemProperty -Path $regPath -Name $regIncludeTodayValue -Value ([int]$IncludeToday)
+        
+        Write-Detail -Message "Configuration saved successfully" -Level Info
+        return $true
+        
+    } catch {
+        Write-Detail -Message "Failed to save configuration: $($_.Exception.Message)" -Level Error
+        return $false
+    }
+} # end of Set-SignatureConfig function
+
+#endregion Configuration Functions
 
 #region Outlook Helper Functions
 
@@ -484,7 +564,7 @@ Function Remove-MSOTags {
     return $html
 } # end of Remove-MSOTags function
 
-# Function to generate status table HTML
+# Function to generate status table HTML with improved body tag handling
 Function New-StatusTableHTML {
     param(
         [hashtable]$statusData,
@@ -494,6 +574,9 @@ Function New-StatusTableHTML {
     Write-Detail -Message "Generating status table HTML (Split Mode: $isSplitMode)" -Level Debug
     
     $html = New-Object System.Text.StringBuilder
+    
+    # Add unique identifier comment for easy replacement
+    [void]$html.AppendLine('<!-- OutlookSignatureManager:WeeklyStatusTable:Start -->')
     
     # Add table title
     [void]$html.AppendLine('<p style="font-family: Calibri, Arial, sans-serif; font-size: 11pt; font-weight: bold; margin-bottom: 5px; color: #FF6600;">My Upcoming Week</p>')
@@ -505,22 +588,27 @@ Function New-StatusTableHTML {
     
     # Get sorted day keys
     $dayKeys = $statusData.Keys | Sort-Object
+    $numDays = $dayKeys.Count
     
+    # Calculate column widths based on number of days
     if ($isSplitMode) {
-        # Split mode: Show time column + days
-        [void]$html.AppendLine('    <td style="text-align: center; padding: 6px; width: 15%;"></td>')
+        # Split mode: Time column + day columns
+        $timeColWidth = 15
+        $dayColWidth = [math]::Floor((100 - $timeColWidth) / $numDays)
+        
+        [void]$html.AppendLine("    <td style='text-align: center; padding: 6px; width: ${timeColWidth}%;'></td>")
         
         foreach ($dayKey in $dayKeys) {
             $dayData = $statusData[$dayKey]
             $dayHeader = "$($dayData.DayName)<br/><span style='font-size: 8pt;'>$($dayData.Date.ToString('dd/MM'))</span>"
-            [void]$html.AppendLine("    <td style='text-align: center; padding: 6px; width: 17%;'>$dayHeader</td>")
+            [void]$html.AppendLine("    <td style='text-align: center; padding: 6px; width: ${dayColWidth}%;'>$dayHeader</td>")
         } # end of header day loop
         
         [void]$html.AppendLine('  </tr>')
         
         # AM row
         [void]$html.AppendLine('  <tr>')
-        [void]$html.AppendLine('    <td style="background-color: #58595B; color: white; font-weight: bold; text-align: center; padding: 6px;">AM</td>')
+        [void]$html.AppendLine("    <td style='background-color: #58595B; color: white; font-weight: bold; text-align: center; padding: 6px;'>AM</td>")
         
         foreach ($dayKey in $dayKeys) {
             $statusKey = $statusData[$dayKey]['AM']
@@ -532,7 +620,7 @@ Function New-StatusTableHTML {
         
         # PM row
         [void]$html.AppendLine('  <tr>')
-        [void]$html.AppendLine('    <td style="background-color: #58595B; color: white; font-weight: bold; text-align: center; padding: 6px;">PM</td>')
+        [void]$html.AppendLine("    <td style='background-color: #58595B; color: white; font-weight: bold; text-align: center; padding: 6px;'>PM</td>")
         
         foreach ($dayKey in $dayKeys) {
             $statusKey = $statusData[$dayKey]['PM']
@@ -543,10 +631,12 @@ Function New-StatusTableHTML {
         [void]$html.AppendLine('  </tr>')
     } else {
         # Full day mode: Just day headers, single row
+        $dayColWidth = [math]::Floor(100 / $numDays)
+        
         foreach ($dayKey in $dayKeys) {
             $dayData = $statusData[$dayKey]
             $dayHeader = "$($dayData.DayName)<br/><span style='font-size: 8pt;'>$($dayData.Date.ToString('dd/MM'))</span>"
-            [void]$html.AppendLine("    <td style='text-align: center; padding: 6px; width: 20%;'>$dayHeader</td>")
+            [void]$html.AppendLine("    <td style='text-align: center; padding: 6px; width: ${dayColWidth}%;'>$dayHeader</td>")
         } # end of header day loop
         
         [void]$html.AppendLine('  </tr>')
@@ -564,6 +654,7 @@ Function New-StatusTableHTML {
     }
     
     [void]$html.AppendLine('</table>')
+    [void]$html.AppendLine('<!-- OutlookSignatureManager:WeeklyStatusTable:End -->')
     
     return $html.ToString()
 } # end of New-StatusTableHTML function
@@ -573,7 +664,6 @@ Function New-StatusTableText {
     param(
         [hashtable]$statusData,
         [bool]$isSplitMode = $true
-	
     )
     
     Write-Detail -Message "Generating status table plain text" -Level Debug
@@ -584,15 +674,17 @@ Function New-StatusTableText {
     [void]$text.AppendLine("=" * 50)
     
     $dayKeys = $statusData.Keys | Sort-Object
+    
     if ($isSplitMode) {
-    foreach ($dayKey in $dayKeys) {
-        $dayData = $statusData[$dayKey]
-        [void]$text.Append("$($dayData.DayName) $($dayData.Date.ToString('dd/MM') )")
-        [void]$text.Append("  AM: $($statusData[$dayKey]['AM'].ToString().PadLeft(6, ' ')) - PM: $($statusData[$dayKey]['PM'].ToString().PadLeft(6, ' ') )")
-    } # end of text day loop
+        foreach ($dayKey in $dayKeys) {
+            $dayData = $statusData[$dayKey]
+            [void]$text.AppendLine("$($dayData.DayName) $($dayData.Date.ToString('dd/MM'))  AM: $($statusData[$dayKey]['AM'])  PM: $($statusData[$dayKey]['PM'])")
+        } # end of text day loop
     } else {
-        $dayData = $statusData[$dayKey]
-        [void]$text.Append("$($dayData.DayName) $($dayData.Date.ToString('dd/MM').Padright(8, ' ')   ) : $($statusData[$dayKey]['AM'].ToString().PadLeft(6, ' '))")
+        foreach ($dayKey in $dayKeys) {
+            $dayData = $statusData[$dayKey]
+            [void]$text.AppendLine("$($dayData.DayName) $($dayData.Date.ToString('dd/MM'))  :  $($statusData[$dayKey]['AM'])")
+        } # end of text day loop
     }
     
     [void]$text.AppendLine("=" * 50)
@@ -647,8 +739,15 @@ Function ConvertFrom-HTMLToText {
 
 Write-Detail -Message "Starting Outlook Signature Manager" -Level Info
 
+# Load configuration
+$config = Get-SignatureConfig
+$numDays = $config.NumDays
+$includeToday = $config.IncludeToday
+
+Write-Detail -Message "Configuration: NumDays=$numDays, IncludeToday=$includeToday" -Level Info
+
 # Check if running in startup/minimized mode
-$isStartupMode = $false; #Test-StartupMode -Args $args
+$isStartupMode = $false
 
 if ($isStartupMode) {
     Write-Detail -Message "Running in startup mode - showing prompt" -Level Info
@@ -673,7 +772,6 @@ $sigPath = Get-OutlookSignaturePath
 $userAccount = Get-OutlookUserAccount
 $sigName = $null
 $existingHTML = ""
-$numDays = 5;
 
 Write-Detail -Message "User account detected: $userAccount" -Level Info
 
@@ -721,22 +819,6 @@ if ($sigPath) {
 # Main GUI Form
 Write-Detail -Message "Building GUI form" -Level Info
 
-# Calculate next 5 working days (excluding weekends)
-$today = Get-Date
-$workingDays = @()
-$currentDate = $today.AddDays(1)  # Start from tomorrow
-
-while ($workingDays.Count -lt $numDays) {
-    # Skip weekends (Saturday = 6, Sunday = 0)
-    if ($currentDate.DayOfWeek -ne [System.DayOfWeek]::Saturday -and 
-        $currentDate.DayOfWeek -ne [System.DayOfWeek]::Sunday) {
-        $workingDays += $currentDate
-    }
-    $currentDate = $currentDate.AddDays(1)
-} # end of while working days calculation loop
-
-Write-Detail -Message "Next $numDays working days: $($workingDays[0].ToString('yyyy-MM-dd')) to $($workingDays[4].ToString('yyyy-MM-dd'))" -Level Info
-
 # Create main form
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Outlook Signature - Weekly Status Manager"
@@ -749,18 +831,15 @@ $form.AutoScroll = $true
 
 # Form resize event to handle browser resizing
 $form.Add_Resize({
-    # Don't constrain maximum height - let form be freely resizable
-    # The anchoring will handle control positioning
-    
-    # The preview browser will automatically resize due to its anchor settings
-    # No manual adjustment needed
+    # Preview browser will automatically resize due to anchor settings
+    Update-FormLayout
 })
 
 # Title label
 $titleLabel = New-Object System.Windows.Forms.Label
 $titleLabel.Location = New-Object System.Drawing.Point(10, 10)
 $titleLabel.Size = New-Object System.Drawing.Size(560, 25)
-$titleLabel.Text = "Next 5 Working Days: $($workingDays[0].ToString('dd/MM/yyyy')) - $($workingDays[4].ToString('dd/MM/yyyy'))"
+$titleLabel.Text = "Configure Your Weekly Status"
 $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
 $titleLabel.ForeColor = [System.Drawing.Color]::FromArgb(255, 102, 0) # Fulton Hogan Orange
 $form.Controls.Add($titleLabel)
@@ -788,7 +867,7 @@ $openSigButton.Add_Click({
     
     $newSigName = Select-SignatureFile
     if ($newSigName) {
-        # Update global signature name
+        # Update signature name
         $script:sigName = $newSigName
         
         # Load new signature
@@ -822,244 +901,384 @@ $openSigButton.Add_Click({
     }
 })
 
-$updateDaysrequired = {
-    # $numDaysRequired.SelectedItem
-    Write-Detail "$numDays vs $($numDaysRequired.SelectedItem)"
+# Number of days label
+$numDaysLabel = New-Object System.Windows.Forms.Label
+$numDaysLabel.Location = New-Object System.Drawing.Point(10, 70)
+$numDaysLabel.Size = New-Object System.Drawing.Size(110, 20)
+$numDaysLabel.Text = "Number of Days:"
+$numDaysLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$form.Controls.Add($numDaysLabel)
 
-}
-
-$numDaysRequired = New-Object System.Windows.Forms.ComboBox;
-$numDaysRequired.Location = New-Object System.Drawing.Point(10, 65)
-$numDaysRequired.Size     = New-Object System.Drawing.Size(40, 20)
+# Number of days dropdown
+$numDaysRequired = New-Object System.Windows.Forms.ComboBox
+$numDaysRequired.Location = New-Object System.Drawing.Point(125, 68)
+$numDaysRequired.Size = New-Object System.Drawing.Size(50, 25)
 $numDaysRequired.DropDownStyle = "DropDownList"
-for ($nDay = 1; $nDay -lt 15; $nDay++) { 
+for ($nDay = 1; $nDay -le 14; $nDay++) { 
     [void]$numDaysRequired.Items.Add($nDay)
 }
-$numDaysRequired.SelectedIndex = $numDays-1
-$numDaysRequired.Visible = $true
-# $numDaysRequired.BackColor = "Red"
-
+$numDaysRequired.SelectedIndex = $numDays - 1
 $form.Controls.Add($numDaysRequired)
 
-$numDaysRequired.Add_SelectedIndexChanged = $updateDaysrequired
-
+# Include today checkbox
+$includeTodayCheckbox = New-Object System.Windows.Forms.CheckBox
+$includeTodayCheckbox.Location = New-Object System.Drawing.Point(190, 68)
+$includeTodayCheckbox.Size = New-Object System.Drawing.Size(120, 25)
+$includeTodayCheckbox.Text = "Include Today"
+$includeTodayCheckbox.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$includeTodayCheckbox.Checked = $includeToday
+$form.Controls.Add($includeTodayCheckbox)
 
 # Use AM/PM checkbox
 $useAmPmCheckbox = New-Object System.Windows.Forms.CheckBox
-$useAmPmCheckbox.Location = New-Object System.Drawing.Point(80, $numDaysRequired.Location.y)
-$useAmPmCheckbox.Size = New-Object System.Drawing.Size(240, 20)
+$useAmPmCheckbox.Location = New-Object System.Drawing.Point(320, 68)
+$useAmPmCheckbox.Size = New-Object System.Drawing.Size(240, 25)
 $useAmPmCheckbox.Text = "Split AM/PM (show separate times)"
 $useAmPmCheckbox.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-#$useAmPmCheckbox.BackColor = "Red" 
 $useAmPmCheckbox.Checked = $false
-
 $form.Controls.Add($useAmPmCheckbox)
 
-# Checkbox change event to show/hide AM/PM dropdowns
-$useAmPmCheckbox.Add_CheckedChanged({
+
+$panelDropDown = New-Object System.Windows.Forms.Panel;
+$panelDropDown.Location =  New-Object System.Drawing.Size(10, ($useAmPmCheckbox.Location.y + 30) )
+$panelDropDown.Size = New-Object System.Drawing.Size(560, 30)
+$panelDropDown.AutoSize = $true
+$panelDropDown.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowOnly;
+# $panelDropDown.BackColor = [System.Drawing.SystemColors]::InactiveCaption;
+# $panelDropDown.BorderStyle = [System.Windows.Forms.BorderStyle]::Fixed3D;
+$panelDropDown.Padding = New-Object System.Windows.Forms.Padding(5);
+$form.Controls.Add($panelDropDown)
+
+
+#endregion GUI Form Creation
+
+#region Dynamic Day Controls Creation
+
+# Function to create or destroy day controls based on number selected
+$script:dropdowns = @{}
+$script:maxDays = 14
+
+Function Update-DayControls {
+    param(
+        [int]$requestedDays,
+        [bool]$includeToday
+    )
+    
+    Write-Detail -Message "Updating day controls: RequestedDays=$requestedDays, IncludeToday=$includeToday" -Level Debug
+    # padding off the top of the panel
+    $yPosition = 5
+
+    # Calculate working days to display
+    $today = Get-Date
+    $workingDays = @()
+    
+    if ($includeToday) {
+        # Include today if it's a working day
+        if ($today.DayOfWeek -ne [System.DayOfWeek]::Saturday -and 
+            $today.DayOfWeek -ne [System.DayOfWeek]::Sunday) {
+            $workingDays += $today
+        }
+    }
+    
+    # Add future working days
+    $currentDate = $today.AddDays(1)
+    while ($workingDays.Count -lt $requestedDays) {
+        # Skip weekends
+        if ($currentDate.DayOfWeek -ne [System.DayOfWeek]::Saturday -and 
+            $currentDate.DayOfWeek -ne [System.DayOfWeek]::Sunday) {
+            $workingDays += $currentDate
+        }
+        $currentDate = $currentDate.AddDays(1)
+    } # end of while working days calculation loop
+    
+    # Remove existing controls that are beyond requested days
+    for ($i = $requestedDays; $i -lt $script:maxDays; $i++) {
+        $dayKey = "Day$i"
+        if ($script:dropdowns.ContainsKey($dayKey)) {
+            $panelDropDown.Controls.Remove($script:dropdowns[$dayKey]['DayLabelMain'])
+            $panelDropDown.Controls.Remove($script:dropdowns[$dayKey]['AMLabel'])
+            $panelDropDown.Controls.Remove($script:dropdowns[$dayKey]['AM'])
+            $panelDropDown.Controls.Remove($script:dropdowns[$dayKey]['PMLabel'])
+            $panelDropDown.Controls.Remove($script:dropdowns[$dayKey]['PM'])
+            $panelDropDown.Controls.Remove($script:dropdowns[$dayKey]['DayLabel'])
+            $panelDropDown.Controls.Remove($script:dropdowns[$dayKey]['Day'])
+            
+            $script:dropdowns.Remove($dayKey)
+        }
+    } # end of remove controls loop
+    
+    # Create or update controls for requested days
     $isSplitMode = $useAmPmCheckbox.Checked
     
-    # Track cumulative Y position - start where day dropdowns begin
-    $cumulativeY = 100
-    
-    foreach ($dayKey in $dropdowns.Keys | Sort-Object) {
-        # Position all items at the same Y level first
-        $dropdowns[$dayKey]['DayLabelMain'].Location = New-Object System.Drawing.Point(10,  $cumulativeY);
-        $dropdowns[$dayKey]['AMLabel'].Location      = New-Object System.Drawing.Point(170, $cumulativeY);
-        $dropdowns[$dayKey]['AM'].Location           = New-Object System.Drawing.Point(205, $cumulativeY);
-        $dropdowns[$dayKey]['PMLabel'].Location      = New-Object System.Drawing.Point(340, $cumulativeY);
-        $dropdowns[$dayKey]['PM'].Location           = New-Object System.Drawing.Point(375, $cumulativeY);
-        $dropdowns[$dayKey]['DayLabel'].Location     = New-Object System.Drawing.Point(170, $cumulativeY);
-        $dropdowns[$dayKey]['Day'].Location          = New-Object System.Drawing.Point(215, $cumulativeY);
+    for ($i = 0; $i -lt $requestedDays; $i++) {
+        $dayDate = $workingDays[$i]
+        $dayName = $dayDate.ToString('dddd')
+        $dayKey = "Day$i"
         
-        # Remove anchors temporarily to reposition
-        $dropdowns[$dayKey]['DayLabelMain'].Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-        $dropdowns[$dayKey]['AMLabel'].Anchor      = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-        $dropdowns[$dayKey]['AM'].Anchor           = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-        $dropdowns[$dayKey]['PMLabel'].Anchor      = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-        $dropdowns[$dayKey]['PM'].Anchor           = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-        $dropdowns[$dayKey]['DayLabel'].Anchor     = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-        $dropdowns[$dayKey]['Day'].Anchor          = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-        
-        if ($isSplitMode) {
-            # Split mode: Day label on first row, AM/PM on same row to the right
+        # Check if controls already exist
+        if ($script:dropdowns.ContainsKey($dayKey)) {
+            # Update existing controls
+            $script:dropdowns[$dayKey]['Date'] = $dayDate
+            $script:dropdowns[$dayKey]['DayName'] = $dayName
+            $script:dropdowns[$dayKey]['DayLabelMain'].Text = "$dayName ($($dayDate.ToString('dd/MM')))"
+            $script:dropdowns[$dayKey]['DayLabelMain'].Location = New-Object System.Drawing.Point(10, $yPosition)
+            $script:dropdowns[$dayKey]['AMLabel'].Location = New-Object System.Drawing.Point(170, $yPosition)
+            $script:dropdowns[$dayKey]['AM'].Location = New-Object System.Drawing.Point(205, $yPosition)
+            $script:dropdowns[$dayKey]['PMLabel'].Location = New-Object System.Drawing.Point(340, $yPosition)
+            $script:dropdowns[$dayKey]['PM'].Location = New-Object System.Drawing.Point(375, $yPosition)
+            $script:dropdowns[$dayKey]['DayLabel'].Location = New-Object System.Drawing.Point(170, $yPosition)
+            $script:dropdowns[$dayKey]['Day'].Location = New-Object System.Drawing.Point(215, $yPosition)
             
-            # Hide full day controls
-            $dropdowns[$dayKey]['DayLabel'].Visible = $false
-            $dropdowns[$dayKey]['Day'].Visible = $false
-            
-            # Show AM/PM controls
-            $dropdowns[$dayKey]['AMLabel'].Visible = $true
-            $dropdowns[$dayKey]['AM'].Visible = $true
-            $dropdowns[$dayKey]['PMLabel'].Visible = $true
-            $dropdowns[$dayKey]['PM'].Visible = $true
+            # Set visibility based on split mode
+            if ($isSplitMode) {
+                $script:dropdowns[$dayKey]['DayLabel'].Visible = $false
+                $script:dropdowns[$dayKey]['Day'].Visible = $false
+                $script:dropdowns[$dayKey]['AMLabel'].Visible = $true
+                $script:dropdowns[$dayKey]['AM'].Visible = $true
+                $script:dropdowns[$dayKey]['PMLabel'].Visible = $true
+                $script:dropdowns[$dayKey]['PM'].Visible = $true
+            } else {
+                $script:dropdowns[$dayKey]['DayLabel'].Visible = $true
+                $script:dropdowns[$dayKey]['Day'].Visible = $true
+                $script:dropdowns[$dayKey]['AMLabel'].Visible = $false
+                $script:dropdowns[$dayKey]['AM'].Visible = $false
+                $script:dropdowns[$dayKey]['PMLabel'].Visible = $false
+                $script:dropdowns[$dayKey]['PM'].Visible = $false
+            }
         } else {
-            # Full day mode: Day label and single dropdown
+            # Create new controls
+            # Main day label (always visible)
+            $dayLabelMain = New-Object System.Windows.Forms.Label
+            $dayLabelMain.Location = New-Object System.Drawing.Point(10, $yPosition)
+            $dayLabelMain.Size = New-Object System.Drawing.Size(150, 20)
+            $dayLabelMain.Text = "$dayName ($($dayDate.ToString('dd/MM')))"
+            $dayLabelMain.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+            $panelDropDown.Controls.Add($dayLabelMain)
             
-            # Show full day controls
-            $dropdowns[$dayKey]['DayLabel'].Visible = $true
-            $dropdowns[$dayKey]['Day'].Visible = $true
+            # AM label (hidden by default)
+            $amLabel = New-Object System.Windows.Forms.Label
+            $amLabel.Location = New-Object System.Drawing.Point(170, $yPosition)
+            $amLabel.Size = New-Object System.Drawing.Size(30, 20)
+            $amLabel.Text = "AM:"
+            $amLabel.Visible = $isSplitMode
+            $panelDropDown.Controls.Add($amLabel)
             
-            # Hide AM/PM controls
-            $dropdowns[$dayKey]['AMLabel'].Visible = $false
-            $dropdowns[$dayKey]['AM'].Visible = $false
-            $dropdowns[$dayKey]['PMLabel'].Visible = $false
-            $dropdowns[$dayKey]['PM'].Visible = $false
+            # AM dropdown (hidden by default)
+            $amDropdown = New-Object System.Windows.Forms.ComboBox
+            $amDropdown.Location = New-Object System.Drawing.Point(205, $yPosition)
+            $amDropdown.Size = New-Object System.Drawing.Size(120, 25)
+            $amDropdown.DropDownStyle = "DropDownList"
+            foreach ($option in $script:statusOptions) {
+                [void]$amDropdown.Items.Add($option)
+            }
+            $amDropdown.SelectedIndex = 0
+            $amDropdown.Visible = $isSplitMode
+            $amDropdown.Add_SelectedIndexChanged($updatePreview)
+            $panelDropDown.Controls.Add($amDropdown)
+            
+            # PM label (hidden by default)
+            $pmLabel = New-Object System.Windows.Forms.Label
+            $pmLabel.Location = New-Object System.Drawing.Point(340, $yPosition)
+            $pmLabel.Size = New-Object System.Drawing.Size(30, 20)
+            $pmLabel.Text = "PM:"
+            $pmLabel.Visible = $isSplitMode
+            $panelDropDown.Controls.Add($pmLabel)
+            
+            # PM dropdown (hidden by default)
+            $pmDropdown = New-Object System.Windows.Forms.ComboBox
+            $pmDropdown.Location = New-Object System.Drawing.Point(375, $yPosition)
+            $pmDropdown.Size = New-Object System.Drawing.Size(120, 25)
+            $pmDropdown.DropDownStyle = "DropDownList"
+            foreach ($option in $script:statusOptions) {
+                [void]$pmDropdown.Items.Add($option)
+            }
+            $pmDropdown.SelectedIndex = 0
+            $pmDropdown.Visible = $isSplitMode
+            $pmDropdown.Add_SelectedIndexChanged($updatePreview)
+            $panelDropDown.Controls.Add($pmDropdown)
+            
+            # Full day label (visible by default)
+            $dayOnlyLabel = New-Object System.Windows.Forms.Label
+            $dayOnlyLabel.Location = New-Object System.Drawing.Point(170, $yPosition)
+            $dayOnlyLabel.Size = New-Object System.Drawing.Size(40, 20)
+            $dayOnlyLabel.Text = "Day:"
+            $dayOnlyLabel.Visible = (-not $isSplitMode)
+            $panelDropDown.Controls.Add($dayOnlyLabel)
+            
+            # Full day dropdown (visible by default)
+            $dayDropdown = New-Object System.Windows.Forms.ComboBox
+            $dayDropdown.Location = New-Object System.Drawing.Point(215, $yPosition)
+            $dayDropdown.Size = New-Object System.Drawing.Size(280, 25)
+            $dayDropdown.DropDownStyle = "DropDownList"
+            foreach ($option in $script:statusOptions) {
+                [void]$dayDropdown.Items.Add($option)
+            }
+            $dayDropdown.SelectedIndex = 0
+            $dayDropdown.Visible = (-not $isSplitMode)
+            $dayDropdown.Add_SelectedIndexChanged($updatePreview)
+            $panelDropDown.Controls.Add($dayDropdown)
+            
+     
+
+            # Store dropdown references
+            $script:dropdowns[$dayKey] = @{
+                'DayLabelMain' = $dayLabelMain
+                'AMLabel' = $amLabel
+                'AM' = $amDropdown
+                'PMLabel' = $pmLabel
+                'PM' = $pmDropdown
+                'DayLabel' = $dayOnlyLabel
+                'Day' = $dayDropdown
+                'Date' = $dayDate
+                'DayName' = $dayName
+            }
         }
         
-        # Move to next day (same spacing for both modes)
-        $cumulativeY += $script:rowHeight
-    } # end of foreach day layout adjustment loop
+        $yPosition += $script:rowHeight
+    } # end of create/update controls loop
     
+    # Update title label with date range
+    if ($workingDays.Count -gt 0) {
+        $startDate = $workingDays[0].ToString('dd/MM/yyyy')
+        $endDate = $workingDays[$workingDays.Count - 1].ToString('dd/MM/yyyy')
+        $titleLabel.Text = "Next $requestedDays Working Day$(if($requestedDays -gt 1){'s'}): $startDate - $endDate"
+    }
+    
+    # Position preview browser and buttons
+    Update-FormLayout
+    
+} # end of Update-DayControls function
+
+# Function to update form layout after control changes
+Function Update-FormLayout {
+        
     # Calculate button positions relative to last control
-    $buttonYOffset = $cumulativeY + 20
+    $buttonYOffset = $panelDropDown.Location.y + $panelDropDown.Size.Height + 20
     
     # Temporarily remove anchor from preview browser to reposition it
     $previewBrowser.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
     $previewBrowser.Location = New-Object System.Drawing.Point(10, $buttonYOffset)
-    # Keep the current width (don't reset to fixed 560)
+    
+    # Keep the current width
     $currentBrowserWidth = $previewBrowser.Width
     if ($currentBrowserWidth -lt 560) {
-        $currentBrowserWidth = $form.ClientSize.Width - 20  # Use current form width
+        $currentBrowserWidth = $form.ClientSize.Width - 20
     }
     $previewBrowser.Size = New-Object System.Drawing.Size($currentBrowserWidth, 180)
+    
     # Restore anchor after positioning
     $previewBrowser.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
     
-    # Position action buttons at bottom
-    $intButtonTop = $previewBrowser.Location.Y + $previewBrowser.Height + 10;
-
-    # Temporarily remove anchor from buttons to reposition them
-    # $startupButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-    # $applyButton.Anchor   = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-    # $cancelButton.Anchor  = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
+    # Update copy button position relative to browser
+    $copyHtmlButton.Location = New-Object System.Drawing.Point(($currentBrowserWidth - 90), ($buttonYOffset + 5))
     
-    $startupButton.Location = New-Object System.Drawing.Point(270, $intButtonTop);
-    $applyButton.Location   = New-Object System.Drawing.Point(380, $intButtonTop);
-    $cancelButton.Location  = New-Object System.Drawing.Point(490, $intButtonTop);
+    # Add text preview section below HTML preview
+    $textPreviewYOffset = $buttonYOffset + $previewBrowser.Height + 10
     
-    # Restore button anchors after positioning
-    $startupButton.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right;
-    $applyButton.Anchor   = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right;
-    $cancelButton.Anchor  = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right;
+    # Text preview label
+    $textPreviewLabel.Location = New-Object System.Drawing.Point(10, $textPreviewYOffset)
+    
+    # Text preview textbox
+    $textPreviewBox.Location = New-Object System.Drawing.Point(10, ($textPreviewYOffset + 25))
+    $textPreviewBox.Width = $currentBrowserWidth
+    
+    # Position action buttons at bottom, aligned to right edge of preview browser
+    $intButtonTop = $textPreviewBox.Location.Y + $textPreviewBox.Height + 10
+    
+    # Calculate button positions from right edge
+    $rightEdge = 10 + $currentBrowserWidth
+    
+    $cancelButton.Location = New-Object System.Drawing.Point(($rightEdge - 80), $intButtonTop)
+    $applyButton.Location = New-Object System.Drawing.Point(($rightEdge - 190), $intButtonTop)
+    $startupButton.Location = New-Object System.Drawing.Point(($rightEdge - 320), $intButtonTop)
     
     # Adjust form height
     $requiredHeight = $intButtonTop + 80
     $form.Size = New-Object System.Drawing.Size(600, $requiredHeight)
     
-    # Refresh preview
-    & $updatePreview
-})
+} # end of Update-FormLayout function
 
-
-#endregion GUI Form Creation
-
-#region GUI Controls - Day Dropdowns
-
-# Create dropdowns for each of the next 5 working days
-$dropdowns = @{}
-$yPosition = 100
-
-for ($i = 0; $i -lt 5; $i++) {
-    $dayDate = $workingDays[$i]
-    $dayName = $dayDate.ToString('dddd')
-    $dayKey = "Day$i"  # Use Day0, Day1, etc. as keys
-    
-    # Main day label (always visible)
-    $dayLabelMain = New-Object System.Windows.Forms.Label
-    $dayLabelMain.Location = New-Object System.Drawing.Point(10, $yPosition)
-    $dayLabelMain.Size = New-Object System.Drawing.Size(150, 20)
-    $dayLabelMain.Text = "$dayName ($($dayDate.ToString('dd/MM')))"
-    $dayLabelMain.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
-    $form.Controls.Add($dayLabelMain)
-    
-    # AM label (hidden by default)
-    $amLabel = New-Object System.Windows.Forms.Label
-    $amLabel.Location = New-Object System.Drawing.Point(170, $($yPosition + 25))
-    $amLabel.Size = New-Object System.Drawing.Size(30, 20)
-    $amLabel.Text = "AM:"
-    $amLabel.Visible = $false
-    $form.Controls.Add($amLabel)
-    
-    # AM dropdown (hidden by default)
-    $amDropdown = New-Object System.Windows.Forms.ComboBox
-    $amDropdown.Location = New-Object System.Drawing.Point(205, $($yPosition + 25))
-    $amDropdown.Size = New-Object System.Drawing.Size(120, 25)
-    $amDropdown.DropDownStyle = "DropDownList"
-    foreach ($option in $script:statusOptions) {
-        [void]$amDropdown.Items.Add($option)
-    }
-    $amDropdown.SelectedIndex = 0
-    $amDropdown.Visible = $false
-    $form.Controls.Add($amDropdown)
-    
-    # PM label (hidden by default)
-    $pmLabel = New-Object System.Windows.Forms.Label
-    $pmLabel.Location = New-Object System.Drawing.Point(340, $($yPosition + 25))
-    $pmLabel.Size = New-Object System.Drawing.Size(30, 20)
-    $pmLabel.Text = "PM:"
-    $pmLabel.Visible = $false
-    $form.Controls.Add($pmLabel)
-    
-    # PM dropdown (hidden by default)
-    $pmDropdown = New-Object System.Windows.Forms.ComboBox
-    $pmDropdown.Location = New-Object System.Drawing.Point(375, $($yPosition + 25))
-    $pmDropdown.Size = New-Object System.Drawing.Size(120, 25)
-    $pmDropdown.DropDownStyle = "DropDownList"
-    foreach ($option in $script:statusOptions) {
-        [void]$pmDropdown.Items.Add($option)
-    }
-    $pmDropdown.SelectedIndex = 0
-    $pmDropdown.Visible = $false
-    $form.Controls.Add($pmDropdown)
-    
-    # Full day label (visible by default)
-    $dayOnlyLabel = New-Object System.Windows.Forms.Label
-    $dayOnlyLabel.Location = New-Object System.Drawing.Point(170, $yPosition)
-    $dayOnlyLabel.Size = New-Object System.Drawing.Size(40, 20)
-    $dayOnlyLabel.Text = "Day:"
-    $dayOnlyLabel.Visible = $true
-    $form.Controls.Add($dayOnlyLabel)
-    
-    # Full day dropdown (visible by default)
-    $dayDropdown = New-Object System.Windows.Forms.ComboBox
-    $dayDropdown.Location = New-Object System.Drawing.Point(215, $yPosition)
-    $dayDropdown.Size = New-Object System.Drawing.Size(280, 25)
-    $dayDropdown.DropDownStyle = "DropDownList"
-    foreach ($option in $script:statusOptions) {
-        [void]$dayDropdown.Items.Add($option)
-    }
-    $dayDropdown.SelectedIndex = 0
-    $dayDropdown.Visible = $true
-    $form.Controls.Add($dayDropdown)
-    
-    # Store dropdown references
-    $dropdowns[$dayKey] = @{
-        'DayLabelMain' = $dayLabelMain
-        'AMLabel' = $amLabel
-        'AM' = $amDropdown
-        'PMLabel' = $pmLabel
-        'PM' = $pmDropdown
-        'DayLabel' = $dayOnlyLabel
-        'Day' = $dayDropdown
-        'Date' = $dayDate
-        'DayName' = $dayName
-    }
-    
-    $yPosition += $script:rowHeight
-} # end of for each working day dropdown creation loop
-
-#endregion GUI Controls - Day Dropdowns
+#endregion Dynamic Day Controls Creation
 
 #region GUI Controls - Preview Section
 
 # Preview WebBrowser control for HTML rendering
 $previewBrowser = New-Object System.Windows.Forms.WebBrowser
-$previewBrowser.Location = New-Object System.Drawing.Point(10, $($yPosition + 20))
-$previewBrowser.Size = New-Object System.Drawing.Size(560, 220)
+$previewBrowser.Location = New-Object System.Drawing.Point(10, ($panelDropDown.Location.y + $panelDropDown.Size.Height + 20))
+$previewBrowser.Size = New-Object System.Drawing.Size(560, 180)
 $previewBrowser.ScriptErrorsSuppressed = $true
+$previewBrowser.AllowWebBrowserDrop = $false
 $previewBrowser.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($previewBrowser)
+
+# Copy HTML button (initially hidden)
+$copyHtmlButton = New-Object System.Windows.Forms.Button
+$copyHtmlButton.Location = New-Object System.Drawing.Point(480, ($previewBrowser.Location.Y + 5))
+$copyHtmlButton.Size = New-Object System.Drawing.Size(80, 25)
+$copyHtmlButton.Text = "Copy HTML"
+$copyHtmlButton.BackColor = [System.Drawing.Color]::LightGreen
+$copyHtmlButton.FlatStyle = "Flat"
+$copyHtmlButton.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+$copyHtmlButton.Visible = $false
+$copyHtmlButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+$form.Controls.Add($copyHtmlButton)
+
+# Browser focus event to show copy button - using GotFocus instead of Enter for WebBrowser control
+$previewBrowser.Add_GotFocus({
+    $copyHtmlButton.Visible = $true
+    $copyHtmlButton.BringToFront()
+})
+
+# Browser leave event to hide copy button - using LostFocus instead of Leave for WebBrowser control
+$previewBrowser.Add_LostFocus({
+    $copyHtmlButton.Visible = $false
+})
+
+# Copy button click event
+$copyHtmlButton.Add_Click({
+    if ($previewBrowser.Document -and $previewBrowser.Document.Body) {
+        $htmlContent = $previewBrowser.DocumentText
+        [System.Windows.Forms.Clipboard]::SetText($htmlContent)
+        Write-Detail -Message "HTML content copied to clipboard" -Level Info
+        
+        # Brief visual feedback
+        $originalColor = $copyHtmlButton.BackColor
+        $copyHtmlButton.BackColor = [System.Drawing.Color]::DarkGreen
+        $copyHtmlButton.Text = "Copied!"
+        
+        # Reset after 1 second
+        $timer = New-Object System.Windows.Forms.Timer
+        $timer.Interval = 1000
+        $timer.Add_Tick({
+            $copyHtmlButton.BackColor = $originalColor
+            $copyHtmlButton.Text = "Copy HTML"
+            $timer.Stop()
+            $timer.Dispose()
+        })
+        $timer.Start()
+    }
+})
+
+# Text preview label
+$textPreviewLabel = New-Object System.Windows.Forms.Label
+$textPreviewLabel.Location = New-Object System.Drawing.Point(10, ($previewBrowser.Location.Y + $previewBrowser.Height + 10))
+$textPreviewLabel.Size = New-Object System.Drawing.Size(560, 20)
+$textPreviewLabel.Text = "Text Version Preview:"
+$textPreviewLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+$textPreviewLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
+$form.Controls.Add($textPreviewLabel)
+
+# Text preview textbox
+$textPreviewBox = New-Object System.Windows.Forms.TextBox
+$textPreviewBox.Location = New-Object System.Drawing.Point(10, ($textPreviewLabel.Location.Y + 25))
+$textPreviewBox.Size = New-Object System.Drawing.Size(560, 80)
+$textPreviewBox.Multiline = $true
+$textPreviewBox.ScrollBars = "Vertical"
+$textPreviewBox.ReadOnly = $true
+$textPreviewBox.Font = New-Object System.Drawing.Font("Consolas", 9)
+$textPreviewBox.BackColor = [System.Drawing.Color]::WhiteSmoke
+$textPreviewBox.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+$form.Controls.Add($textPreviewBox)
 
 # Update preview function
 $updatePreview = {
@@ -1067,44 +1286,47 @@ $updatePreview = {
     $statusData = @{}
     $isSplitMode = $useAmPmCheckbox.Checked
     
-    foreach ($dayKey in $($dropdowns.Keys | Sort-Object)) {
-        # Write-Detail "Key is $dayKey - $($dropdowns[$dayKey]['Date'])"
+    foreach ($dayKey in $($script:dropdowns.Keys | Sort-Object)) {
         if ($isSplitMode) {
             # Use separate AM/PM selections
             $statusData[$dayKey] = @{
-                'AM' = $dropdowns[$dayKey]['AM'].SelectedItem
-                'PM' = $dropdowns[$dayKey]['PM'].SelectedItem
-                'Date' = $dropdowns[$dayKey]['Date']
-                'DayName' = $dropdowns[$dayKey]['DayName']
+                'AM' = $script:dropdowns[$dayKey]['AM'].SelectedItem
+                'PM' = $script:dropdowns[$dayKey]['PM'].SelectedItem
+                'Date' = $script:dropdowns[$dayKey]['Date']
+                'DayName' = $script:dropdowns[$dayKey]['DayName']
             }
         } else {
             # Use full day selection for both AM and PM
-            $dayStatus = $dropdowns[$dayKey]['Day'].SelectedItem
+            $dayStatus = $script:dropdowns[$dayKey]['Day'].SelectedItem
             $statusData[$dayKey] = @{
                 'AM' = $dayStatus
                 'PM' = $dayStatus
-                'Date' = $dropdowns[$dayKey]['Date']
-                'DayName' = $dropdowns[$dayKey]['DayName']
+                'Date' = $script:dropdowns[$dayKey]['Date']
+                'DayName' = $script:dropdowns[$dayKey]['DayName']
             }
         }
-
     } # end of collect selections loop
     
     # Generate new table HTML with split mode flag
     $tableHTML = New-StatusTableHTML -statusData $statusData -isSplitMode $isSplitMode
+    
+    # Generate new table text
+    $tableText = New-StatusTableText -statusData $statusData -isSplitMode $isSplitMode
     
     # Combine with existing signature or create new
     $previewHTML = ""
     if ($existingHTML -match '(?s)<body[^>]*>(.*)</body>') {
         $bodyContent = $matches[1]
         
-        # Check if table already exists in signature
-        if ($bodyContent -match '(?s)(My Upcoming Week|<table[^>]*border="1"[^>]*cellpadding="4")') {
-            # Table exists, replace it
-            Write-Detail -Message "Existing status table found, will replace" -Level Debug
-            # Remove the title and table together
+        # Check if table already exists (look for unique identifier comment)
+        if ($bodyContent -match '(?s)<!-- OutlookSignatureManager:WeeklyStatusTable:Start -->.*?<!-- OutlookSignatureManager:WeeklyStatusTable:End -->') {
+            # Table exists, replace it using identifier comments
+            Write-Detail -Message "Existing status table found (by identifier), replacing" -Level Debug
+            $newBodyContent = $bodyContent -replace '(?s)<!-- OutlookSignatureManager:WeeklyStatusTable:Start -->.*?<!-- OutlookSignatureManager:WeeklyStatusTable:End -->', $tableHTML
+        } elseif ($bodyContent -match '(?s)(My Upcoming Week|<table[^>]*border="1"[^>]*cellpadding="4")') {
+            # Old-style table exists, replace it
+            Write-Detail -Message "Existing status table found (old-style), replacing" -Level Debug
             $newBodyContent = $bodyContent -replace '(?s)<p[^>]*>My Upcoming Week</p>\s*<table[^>]*border="1"[^>]*cellpadding="4".*?</table>', $tableHTML
-            # Fallback: try to replace just the table if title wasn't found
             if ($newBodyContent -eq $bodyContent) {
                 $newBodyContent = $bodyContent -replace '(?s)<table[^>]*border="1"[^>]*cellpadding="4".*?</table>', $tableHTML
             }
@@ -1138,21 +1360,131 @@ $tableHTML
 "@
     }
     
+    # Update HTML preview
     $previewBrowser.DocumentText = $previewHTML
+    
+    # Update text preview
+    # Get current text version (if exists)
+    $currentTextVersion = ""
+    if ($sigName -and $sigPath) {
+        $txtFile = Join-Path $sigPath "$sigName.txt"
+        if (Test-Path $txtFile) {
+            $currentTextVersion = Get-Content -Path $txtFile -Raw -ErrorAction SilentlyContinue
+            if ([string]::IsNullOrWhiteSpace($currentTextVersion)) {
+                $currentTextVersion = "(Current text signature is empty)"
+            }
+        } else {
+            $currentTextVersion = "(No text signature file exists yet)"
+        }
+    } else {
+        $currentTextVersion = "(No signature loaded)"
+    }
+    
+    # Generate updated text version
+    $existingText = ConvertFrom-HTMLToText -html $previewHTML
+    $updatedTextVersion = ""
+    if ($existingText) {
+        # Check if table already in text
+        if ($existingText -match "My Upcoming Week") {
+            # Replace existing table
+            $updatedTextVersion = $existingText -replace "(?s)My Upcoming Week.*?={50}", $tableText
+        } else {
+            # Append table
+            $updatedTextVersion = $existingText.TrimEnd() + "`n`n" + $tableText
+        }
+    } else {
+        $updatedTextVersion = $tableText
+    }
+    
+    # Combine current and updated for display
+    $textPreviewContent = "=== CURRENT TEXT VERSION ===`n"
+    $textPreviewContent += $currentTextVersion
+    $textPreviewContent += "`n`n=== UPDATED TEXT VERSION ===`n"
+    $textPreviewContent += $updatedTextVersion
+    
+    $textPreviewBox.Text = $textPreviewContent
+    
 } # end of updatePreview scriptblock
 
-# Add change events to all dropdowns to update preview automatically
-foreach ($dayKey in $dropdowns.Keys) {
-    $dropdowns[$dayKey]['AM'].Add_SelectedIndexChanged($updatePreview)
-    $dropdowns[$dayKey]['PM'].Add_SelectedIndexChanged($updatePreview)
-    $dropdowns[$dayKey]['Day'].Add_SelectedIndexChanged($updatePreview)
-} # end of add change events loop
+# Number of days change event
+$numDaysRequired.Add_SelectedIndexChanged({
+    $requestedDays = $numDaysRequired.SelectedItem
+    $includeToday = $includeTodayCheckbox.Checked
+    
+    Write-Detail -Message "Number of days changed to: $requestedDays" -Level Info
+    
+    # Update day controls
+    Update-DayControls -requestedDays $requestedDays -includeToday $includeToday
+    
+    # Refresh preview
+    & $updatePreview
+})
+
+# Include today checkbox change event
+$includeTodayCheckbox.Add_CheckedChanged({
+    $requestedDays = $numDaysRequired.SelectedItem
+    $includeToday = $includeTodayCheckbox.Checked
+    
+    Write-Detail -Message "Include today changed to: $includeToday" -Level Info
+    
+    # Update day controls
+    Update-DayControls -requestedDays $requestedDays -includeToday $includeToday
+    
+    # Refresh preview
+    & $updatePreview
+})
+
+# Checkbox change event to show/hide AM/PM dropdowns
+$useAmPmCheckbox.Add_CheckedChanged({
+    $isSplitMode = $useAmPmCheckbox.Checked
+    
+    # Track cumulative Y position
+    $cumulativeY = 100
+    
+    foreach ($dayKey in $script:dropdowns.Keys | Sort-Object) {
+        # Position all items at the same Y level first
+        $script:dropdowns[$dayKey]['DayLabelMain'].Location = New-Object System.Drawing.Point(10, $cumulativeY)
+        $script:dropdowns[$dayKey]['AMLabel'].Location = New-Object System.Drawing.Point(170, $cumulativeY)
+        $script:dropdowns[$dayKey]['AM'].Location = New-Object System.Drawing.Point(205, $cumulativeY)
+        $script:dropdowns[$dayKey]['PMLabel'].Location = New-Object System.Drawing.Point(340, $cumulativeY)
+        $script:dropdowns[$dayKey]['PM'].Location = New-Object System.Drawing.Point(375, $cumulativeY)
+        $script:dropdowns[$dayKey]['DayLabel'].Location = New-Object System.Drawing.Point(170, $cumulativeY)
+        $script:dropdowns[$dayKey]['Day'].Location = New-Object System.Drawing.Point(215, $cumulativeY)
+        
+        if ($isSplitMode) {
+            # Split mode: Day label on first row, AM/PM on same row to the right
+            $script:dropdowns[$dayKey]['DayLabel'].Visible = $false
+            $script:dropdowns[$dayKey]['Day'].Visible = $false
+            $script:dropdowns[$dayKey]['AMLabel'].Visible = $true
+            $script:dropdowns[$dayKey]['AM'].Visible = $true
+            $script:dropdowns[$dayKey]['PMLabel'].Visible = $true
+            $script:dropdowns[$dayKey]['PM'].Visible = $true
+        } else {
+            # Full day mode: Day label and single dropdown
+            $script:dropdowns[$dayKey]['DayLabel'].Visible = $true
+            $script:dropdowns[$dayKey]['Day'].Visible = $true
+            $script:dropdowns[$dayKey]['AMLabel'].Visible = $false
+            $script:dropdowns[$dayKey]['AM'].Visible = $false
+            $script:dropdowns[$dayKey]['PMLabel'].Visible = $false
+            $script:dropdowns[$dayKey]['PM'].Visible = $false
+        }
+        
+        # Move to next day (same spacing for both modes)
+        $cumulativeY += $script:rowHeight
+    } # end of foreach day layout adjustment loop
+    
+    # Update form layout
+    Update-FormLayout -yPosition $cumulativeY
+    
+    # Refresh preview
+    & $updatePreview
+})
 
 #endregion GUI Controls - Preview Section
 
-
-$intButtonTop = $previewBrowser.Location.Y + $previewBrowser.Height + 10;
-
+# Calculate initial button positions
+# This will be recalculated when Update-FormLayout is called
+$intButtonTop = $textPreviewBox.Location.Y + $textPreviewBox.Height + 10
 
 #region GUI Controls - Action Buttons
 
@@ -1168,7 +1500,6 @@ $applyButton.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawi
 $applyButton.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($applyButton)
 
- 
 # Cancel button
 $cancelButton = New-Object System.Windows.Forms.Button
 $cancelButton.Location = New-Object System.Drawing.Point(490, $intButtonTop)
@@ -1190,123 +1521,55 @@ $startupButton.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 $startupButton.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($startupButton)
 
-# Startup button click event
+# Startup button click event (placeholder - original functionality not included in requirements)
 $startupButton.Add_Click({
     Write-Detail -Message "Startup configuration requested" -Level Info
-    
-    $startupFolder = [System.Environment]::GetFolderPath('Startup')
-    $shortcutPath = Join-Path $startupFolder "Outlook Signature Manager.lnk"
-    $isEnabled = Test-Path $shortcutPath
-    
-    if ($isEnabled) {
-        # Startup is enabled, offer to disable
-        $response = [System.Windows.Forms.MessageBox]::Show(
-            "Startup prompt is currently ENABLED.`n`nThe script will prompt you to update your signature each time Windows starts.`n`nWould you like to DISABLE the startup prompt?",
-            "Startup Configuration",
-            [System.Windows.Forms.MessageBoxButtons]::YesNo,
-            [System.Windows.Forms.MessageBoxIcon]::Question
-        )
-        
-        if ($response -eq [System.Windows.Forms.DialogResult]::Yes) {
-            $removed = Remove-StartupShortcut
-            if ($removed) {
-                [System.Windows.Forms.MessageBox]::Show(
-                    "Startup prompt has been disabled.",
-                    "Startup Disabled",
-                    [System.Windows.Forms.MessageBoxButtons]::OK,
-                    [System.Windows.Forms.MessageBoxIcon]::Information
-                )
-            }
-        }
-    } else {
-        # Startup is disabled, offer to enable
-        $response = [System.Windows.Forms.MessageBox]::Show(
-            "Startup prompt is currently DISABLED.`n`nWould you like to ENABLE a prompt at Windows startup to update your signature?`n`nThe script will be copied to your AppData folder and a shortcut will be created in your Startup folder.",
-            "Startup Configuration",
-            [System.Windows.Forms.MessageBoxButtons]::YesNo,
-            [System.Windows.Forms.MessageBoxIcon]::Question
-        )
-        
-        if ($response -eq [System.Windows.Forms.DialogResult]::Yes) {
-            # Install script to AppData
-            $installedScript = Install-ScriptToAppData
-            if ($installedScript) {
-                # Create startup shortcut
-                $shortcut = New-StartupShortcut -scriptPath $installedScript
-                if ($shortcut) {
-                    [System.Windows.Forms.MessageBox]::Show(
-                        "Startup prompt has been enabled!`n`nScript location: $installedScript`nShortcut: $shortcut`n`nYou will be prompted to update your signature each time Windows starts.",
-                        "Startup Enabled",
-                        [System.Windows.Forms.MessageBoxButtons]::OK,
-                        [System.Windows.Forms.MessageBoxIcon]::Information
-                    )
-                }
-            } else {
-                [System.Windows.Forms.MessageBox]::Show(
-                    "Failed to install script to AppData. Please check the log for details.",
-                    "Installation Failed",
-                    [System.Windows.Forms.MessageBoxButtons]::OK,
-                    [System.Windows.Forms.MessageBoxIcon]::Error
-                )
-            }
-        }
-    }
+    [System.Windows.Forms.MessageBox]::Show(
+        "Startup configuration functionality to be implemented.",
+        "Startup Configuration",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information
+    )
 })
 
 # Apply button click event
 $applyButton.Add_Click({
     Write-Detail -Message "Apply button clicked - processing signature update" -Level Info
     
+    # Save configuration to registry
+    $requestedDays = $numDaysRequired.SelectedItem
+    $includeToday = $includeTodayCheckbox.Checked
+    $saved = Set-SignatureConfig -NumDays $requestedDays -IncludeToday $includeToday
+    
+    if ($saved) {
+        Write-Detail -Message "Configuration saved: NumDays=$requestedDays, IncludeToday=$includeToday" -Level Info
+    }
+    
     # Collect status data
     $statusData = @{}
     $isSplitMode = $useAmPmCheckbox.Checked
-
-
-
-    foreach ($dayKey in $($dropdowns.Keys | Sort-Object)) {
-        Write-Detail "Key is $dayKey - $($dropdowns[$dayKey]['Date'])"
-        if ($isSplitMode) {
-            # Use separate AM/PM selections
-            $statusData[$dayKey] = @{
-                'AM' = $dropdowns[$dayKey]['AM'].SelectedItem
-                'PM' = $dropdowns[$dayKey]['PM'].SelectedItem
-                'Date' = $dropdowns[$dayKey]['Date']
-                'DayName' = $dropdowns[$dayKey]['DayName']
-            }
-        } else {
-            # Use full day selection for both AM and PM
-            $dayStatus = $dropdowns[$dayKey]['Day'].SelectedItem
-            $statusData[$dayKey] = @{
-                'AM' = $dayStatus
-                'PM' = $dayStatus
-                'Date' = $dropdowns[$dayKey]['Date']
-                'DayName' = $dropdowns[$dayKey]['DayName']
-            }
-        }
-
-    } # end of collect selections loop
-
-    <#
-    foreach ($day in $weekDays) {
-        if ($isSplitMode) {
-            # Use separate AM/PM selections
-            $statusData[$day] += @{
-                'AM' = $dropdowns[$day]['AM'].SelectedItem
-                'PM' = $dropdowns[$day]['PM'].SelectedItem
-            }
-        } else {
-            # Use full day selection for both AM and PM
-            $dayStatus = $dropdowns[$day]['Day'].SelectedItem
-            $statusData[$day] += @{
-                'AM' = $dayStatus
-                'PM' = $dayStatus
-            }
-        }
     
-    } # end of collect status data loop
-    #>
-    Write-Detail "StatusData contains $($statusData.Count)"
-
+    foreach ($dayKey in $($script:dropdowns.Keys | Sort-Object)) {
+        if ($isSplitMode) {
+            # Use separate AM/PM selections
+            $statusData[$dayKey] = @{
+                'AM' = $script:dropdowns[$dayKey]['AM'].SelectedItem
+                'PM' = $script:dropdowns[$dayKey]['PM'].SelectedItem
+                'Date' = $script:dropdowns[$dayKey]['Date']
+                'DayName' = $script:dropdowns[$dayKey]['DayName']
+            }
+        } else {
+            # Use full day selection for both AM and PM
+            $dayStatus = $script:dropdowns[$dayKey]['Day'].SelectedItem
+            $statusData[$dayKey] = @{
+                'AM' = $dayStatus
+                'PM' = $dayStatus
+                'Date' = $script:dropdowns[$dayKey]['Date']
+                'DayName' = $script:dropdowns[$dayKey]['DayName']
+            }
+        }
+    } # end of collect selections loop
+    
     # Confirmation dialog
     $confirmResult = [System.Windows.Forms.MessageBox]::Show(
         "This will update your Outlook signature with the selected weekly status. Continue?",
@@ -1369,13 +1632,16 @@ $applyButton.Add_Click({
             if ($currentHTML -match '(?s)<body[^>]*>(.*)</body>') {
                 $bodyContent = $matches[1]
                 
-                # Check if table already exists in signature (look for title or table pattern)
-                if ($bodyContent -match '(?s)(My Upcoming Week|<table[^>]*border="1"[^>]*cellpadding="4")') {
-                    # Table exists, replace it (including title)
-                    Write-Detail -Message "Existing status table found, replacing" -Level Info
-                    # Remove the title and table together
+                # Check if table already exists (look for unique identifier comment first)
+                if ($bodyContent -match '(?s)<!-- OutlookSignatureManager:WeeklyStatusTable:Start -->.*?<!-- OutlookSignatureManager:WeeklyStatusTable:End -->') {
+                    # Table exists with identifier, replace it
+                    Write-Detail -Message "Existing status table found (by identifier), replacing" -Level Info
+                    $newBodyContent = $bodyContent -replace '(?s)<!-- OutlookSignatureManager:WeeklyStatusTable:Start -->.*?<!-- OutlookSignatureManager:WeeklyStatusTable:End -->', $tableHTML
+                    $finalHTML = $currentHTML -replace '(?s)<body[^>]*>.*</body>', "<body>`n$newBodyContent`n</body>"
+                } elseif ($bodyContent -match '(?s)(My Upcoming Week|<table[^>]*border="1"[^>]*cellpadding="4")') {
+                    # Old-style table exists, replace it
+                    Write-Detail -Message "Existing status table found (old-style), replacing" -Level Info
                     $newBodyContent = $bodyContent -replace '(?s)<p[^>]*>My Upcoming Week</p>\s*<table[^>]*border="1"[^>]*cellpadding="4".*?</table>', $tableHTML
-                    # Fallback: try to replace just the table if title wasn't found
                     if ($newBodyContent -eq $bodyContent) {
                         $newBodyContent = $bodyContent -replace '(?s)<table[^>]*border="1"[^>]*cellpadding="4".*?</table>', $tableHTML
                     }
@@ -1476,7 +1742,10 @@ $cancelButton.Add_Click({
 
 #endregion GUI Controls - Action Buttons
 
-#region GUI Display and Exit
+#region GUI Initialization and Display
+
+# Initialize day controls with saved configuration
+Update-DayControls -requestedDays $numDays -includeToday $includeToday
 
 # Show initial preview
 & $updatePreview
@@ -1487,10 +1756,10 @@ $result = $form.ShowDialog()
 
 if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     Write-Detail -Message "Signature management completed successfully" -Level Info
-    # exit 0
+    exit 0
 } else {
     Write-Detail -Message "Operation cancelled by user" -Level Info
-    # exit 0
+    exit 0
 }
 
-#endregion GUI Display and Exit
+#endregion GUI Initialization and Display
