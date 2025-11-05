@@ -573,30 +573,36 @@ Function New-StatusTableText {
     param(
         [hashtable]$statusData,
         [bool]$isSplitMode = $true
-	
     )
-    
+
     Write-Detail -Message "Generating status table plain text" -Level Debug
-    
+
     $text = New-Object System.Text.StringBuilder
-    
+
     [void]$text.AppendLine("My Upcoming Week")
     [void]$text.AppendLine("=" * 50)
-    
+
     $dayKeys = $statusData.Keys | Sort-Object
+
     if ($isSplitMode) {
-    foreach ($dayKey in $dayKeys) {
-        $dayData = $statusData[$dayKey]
-        [void]$text.Append("$($dayData.DayName) $($dayData.Date.ToString('dd/MM') )")
-        [void]$text.Append("  AM: $($statusData[$dayKey]['AM'].ToString().PadLeft(6, ' ')) - PM: $($statusData[$dayKey]['PM'].ToString().PadLeft(6, ' ') )")
-    } # end of text day loop
+        # Split mode: Show AM and PM for each day
+        foreach ($dayKey in $dayKeys) {
+            $dayData = $statusData[$dayKey]
+            [void]$text.Append("$($dayData.DayName) $($dayData.Date.ToString('dd/MM'))")
+            [void]$text.Append("  AM: $($statusData[$dayKey]['AM']) - PM: $($statusData[$dayKey]['PM'])")
+            [void]$text.AppendLine()
+        } # end of text day loop
     } else {
-        $dayData = $statusData[$dayKey]
-        [void]$text.Append("$($dayData.DayName) $($dayData.Date.ToString('dd/MM').Padright(8, ' ')   ) : $($statusData[$dayKey]['AM'].ToString().PadLeft(6, ' '))")
+        # Full day mode: Show single status for each day
+        foreach ($dayKey in $dayKeys) {
+            $dayData = $statusData[$dayKey]
+            [void]$text.Append("$($dayData.DayName) $($dayData.Date.ToString('dd/MM').PadRight(12, ' ')): $($statusData[$dayKey]['AM'])")
+            [void]$text.AppendLine()
+        }
     }
-    
+
     [void]$text.AppendLine("=" * 50)
-    
+
     return $text.ToString()
 } # end of New-StatusTableText function
 
@@ -855,98 +861,93 @@ $useAmPmCheckbox.Checked = $false
 
 $form.Controls.Add($useAmPmCheckbox)
 
-# Checkbox change event to show/hide AM/PM dropdowns
-$useAmPmCheckbox.Add_CheckedChanged({
-    $isSplitMode = $useAmPmCheckbox.Checked
-    
+# Function to manage form layout - centralized layout logic
+Function Update-FormLayout {
+    param(
+        [hashtable]$dropdowns,
+        [bool]$isSplitMode,
+        [System.Windows.Forms.WebBrowser]$previewBrowser,
+        [System.Windows.Forms.Button]$startupButton,
+        [System.Windows.Forms.Button]$applyButton,
+        [System.Windows.Forms.Button]$cancelButton,
+        [System.Windows.Forms.Form]$form
+    )
+
+    Write-Detail -Message "Updating form layout (Split Mode: $isSplitMode)" -Level Debug
+
     # Track cumulative Y position - start where day dropdowns begin
     $cumulativeY = 100
-    
+
     foreach ($dayKey in $dropdowns.Keys | Sort-Object) {
-        # Position all items at the same Y level first
-        $dropdowns[$dayKey]['DayLabelMain'].Location = New-Object System.Drawing.Point(10,  $cumulativeY);
-        $dropdowns[$dayKey]['AMLabel'].Location      = New-Object System.Drawing.Point(170, $cumulativeY);
-        $dropdowns[$dayKey]['AM'].Location           = New-Object System.Drawing.Point(205, $cumulativeY);
-        $dropdowns[$dayKey]['PMLabel'].Location      = New-Object System.Drawing.Point(340, $cumulativeY);
-        $dropdowns[$dayKey]['PM'].Location           = New-Object System.Drawing.Point(375, $cumulativeY);
-        $dropdowns[$dayKey]['DayLabel'].Location     = New-Object System.Drawing.Point(170, $cumulativeY);
-        $dropdowns[$dayKey]['Day'].Location          = New-Object System.Drawing.Point(215, $cumulativeY);
-        
-        # Remove anchors temporarily to reposition
-        $dropdowns[$dayKey]['DayLabelMain'].Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-        $dropdowns[$dayKey]['AMLabel'].Anchor      = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-        $dropdowns[$dayKey]['AM'].Anchor           = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-        $dropdowns[$dayKey]['PMLabel'].Anchor      = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-        $dropdowns[$dayKey]['PM'].Anchor           = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-        $dropdowns[$dayKey]['DayLabel'].Anchor     = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-        $dropdowns[$dayKey]['Day'].Anchor          = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-        
+        # Position day label (always visible)
+        $dropdowns[$dayKey]['DayLabelMain'].Location = New-Object System.Drawing.Point(10, $cumulativeY)
+
         if ($isSplitMode) {
-            # Split mode: Day label on first row, AM/PM on same row to the right
-            
-            # Hide full day controls
-            $dropdowns[$dayKey]['DayLabel'].Visible = $false
-            $dropdowns[$dayKey]['Day'].Visible = $false
-            
+            # Split mode: Show AM/PM labels and dropdowns on the same row
+            $dropdowns[$dayKey]['AMLabel'].Location = New-Object System.Drawing.Point(170, $cumulativeY)
+            $dropdowns[$dayKey]['AM'].Location = New-Object System.Drawing.Point(205, $cumulativeY)
+            $dropdowns[$dayKey]['PMLabel'].Location = New-Object System.Drawing.Point(340, $cumulativeY)
+            $dropdowns[$dayKey]['PM'].Location = New-Object System.Drawing.Point(375, $cumulativeY)
+
             # Show AM/PM controls
             $dropdowns[$dayKey]['AMLabel'].Visible = $true
             $dropdowns[$dayKey]['AM'].Visible = $true
             $dropdowns[$dayKey]['PMLabel'].Visible = $true
             $dropdowns[$dayKey]['PM'].Visible = $true
+
+            # Hide full day controls
+            $dropdowns[$dayKey]['DayLabel'].Visible = $false
+            $dropdowns[$dayKey]['Day'].Visible = $false
         } else {
-            # Full day mode: Day label and single dropdown
-            
+            # Full day mode: Show single dropdown
+            $dropdowns[$dayKey]['DayLabel'].Location = New-Object System.Drawing.Point(170, $cumulativeY)
+            $dropdowns[$dayKey]['Day'].Location = New-Object System.Drawing.Point(215, $cumulativeY)
+
             # Show full day controls
             $dropdowns[$dayKey]['DayLabel'].Visible = $true
             $dropdowns[$dayKey]['Day'].Visible = $true
-            
+
             # Hide AM/PM controls
             $dropdowns[$dayKey]['AMLabel'].Visible = $false
             $dropdowns[$dayKey]['AM'].Visible = $false
             $dropdowns[$dayKey]['PMLabel'].Visible = $false
             $dropdowns[$dayKey]['PM'].Visible = $false
         }
-        
-        # Move to next day (same spacing for both modes)
+
+        # Move to next day row
         $cumulativeY += $script:rowHeight
     } # end of foreach day layout adjustment loop
-    
-    # Calculate button positions relative to last control
-    $buttonYOffset = $cumulativeY + 20
-    
-    # Temporarily remove anchor from preview browser to reposition it
-    $previewBrowser.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
-    $previewBrowser.Location = New-Object System.Drawing.Point(10, $buttonYOffset)
-    # Keep the current width (don't reset to fixed 560)
-    $currentBrowserWidth = $previewBrowser.Width
-    if ($currentBrowserWidth -lt 560) {
-        $currentBrowserWidth = $form.ClientSize.Width - 20  # Use current form width
-    }
-    $previewBrowser.Size = New-Object System.Drawing.Size($currentBrowserWidth, 180)
-    # Restore anchor after positioning
-    $previewBrowser.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
-    
-    # Position action buttons at bottom
-    $intButtonTop = $previewBrowser.Location.Y + $previewBrowser.Height + 10;
 
-    # Temporarily remove anchor from buttons to reposition them
-    # $startupButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-    # $applyButton.Anchor   = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-    # $cancelButton.Anchor  = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left;
-    
-    $startupButton.Location = New-Object System.Drawing.Point(270, $intButtonTop);
-    $applyButton.Location   = New-Object System.Drawing.Point(380, $intButtonTop);
-    $cancelButton.Location  = New-Object System.Drawing.Point(490, $intButtonTop);
-    
-    # Restore button anchors after positioning
-    $startupButton.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right;
-    $applyButton.Anchor   = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right;
-    $cancelButton.Anchor  = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right;
-    
-    # Adjust form height
-    $requiredHeight = $intButtonTop + 80
-    $form.Size = New-Object System.Drawing.Size(600, $requiredHeight)
-    
+    # Position preview browser
+    $previewY = $cumulativeY + 10
+    $previewBrowser.Location = New-Object System.Drawing.Point(10, $previewY)
+    $previewBrowser.Size = New-Object System.Drawing.Size(($form.ClientSize.Width - 20), 200)
+
+    # Position action buttons at bottom
+    $buttonY = $previewY + $previewBrowser.Height + 10
+    $startupButton.Location = New-Object System.Drawing.Point(($form.ClientSize.Width - 340), $buttonY)
+    $applyButton.Location = New-Object System.Drawing.Point(($form.ClientSize.Width - 230), $buttonY)
+    $cancelButton.Location = New-Object System.Drawing.Point(($form.ClientSize.Width - 120), $buttonY)
+
+    # Adjust form height to fit all controls
+    $requiredHeight = $buttonY + 70
+    if ($form.Height -ne $requiredHeight) {
+        $form.Height = $requiredHeight
+    }
+
+    Write-Detail -Message "Form layout updated" -Level Debug
+} # end of Update-FormLayout function
+
+# Checkbox change event to show/hide AM/PM dropdowns
+$useAmPmCheckbox.Add_CheckedChanged({
+    $isSplitMode = $useAmPmCheckbox.Checked
+
+    # Use centralized layout function
+    Update-FormLayout -dropdowns $dropdowns -isSplitMode $isSplitMode `
+                      -previewBrowser $previewBrowser `
+                      -startupButton $startupButton -applyButton $applyButton -cancelButton $cancelButton `
+                      -form $form
+
     # Refresh preview
     & $updatePreview
 })
