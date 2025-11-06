@@ -31,6 +31,9 @@
     2.0 - Added dynamic day selection, today's status option, configuration persistence,
           HTML preview copy support, and improved body tag handling
     2.1 - Added panel with autosize for the day dropdowns. controls below bound to that.
+    2.2 - Fixed form layout positioning, added up/down buttons for table positioning,
+          fixed text signature duplication, added comprehensive memory cleanup with
+          try-finally blocks, improved Update-FormLayout function
 #>
 
 #region Initialization and Global Variables
@@ -70,6 +73,9 @@ $script:statusMap = @{
 # Default configuration values
 $script:defaultNumDays = 5
 $script:defaultIncludeToday = $false
+
+# Table position tracking (number of lines to move up from bottom)
+$script:tablePosition = 0  # 0 = at bottom, positive = lines up from bottom
 
 #endregion Initialization and Global Variables
 
@@ -941,15 +947,72 @@ $useAmPmCheckbox.Checked = $false
 $form.Controls.Add($useAmPmCheckbox)
 
 
+# Panel for day dropdowns
 $panelDropDown = New-Object System.Windows.Forms.Panel;
 $panelDropDown.Location =  New-Object System.Drawing.Size(10, ($useAmPmCheckbox.Location.y + 30) )
 $panelDropDown.Size = New-Object System.Drawing.Size(560, 30)
 $panelDropDown.AutoSize = $true
 $panelDropDown.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowOnly;
-# $panelDropDown.BackColor = [System.Drawing.SystemColors]::InactiveCaption;
-# $panelDropDown.BorderStyle = [System.Windows.Forms.BorderStyle]::Fixed3D;
 $panelDropDown.Padding = New-Object System.Windows.Forms.Padding(5);
 $form.Controls.Add($panelDropDown)
+
+# Table position controls (will be positioned by Update-FormLayout)
+# Move Up button
+$moveUpButton = New-Object System.Windows.Forms.Button
+$moveUpButton.Size = New-Object System.Drawing.Size(80, 30)
+$moveUpButton.Text = "Move Up"
+$moveUpButton.BackColor = [System.Drawing.Color]::LightBlue
+$moveUpButton.FlatStyle = "Flat"
+$moveUpButton.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$form.Controls.Add($moveUpButton)
+
+# Move Down button
+$moveDownButton = New-Object System.Windows.Forms.Button
+$moveDownButton.Size = New-Object System.Drawing.Size(80, 30)
+$moveDownButton.Text = "Move Down"
+$moveDownButton.BackColor = [System.Drawing.Color]::LightBlue
+$moveDownButton.FlatStyle = "Flat"
+$moveDownButton.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$form.Controls.Add($moveDownButton)
+
+# Position label
+$positionLabel = New-Object System.Windows.Forms.Label
+$positionLabel.Size = New-Object System.Drawing.Size(300, 20)
+$positionLabel.Text = "Table position: At bottom of signature"
+$positionLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$form.Controls.Add($positionLabel)
+
+# Move Up button click event
+$moveUpButton.Add_Click({
+    $script:tablePosition++
+    if ($script:tablePosition -gt 10) {
+        $script:tablePosition = 10
+    }
+    if ($script:tablePosition -eq 0) {
+        $positionLabel.Text = "Table position: At bottom of signature"
+    } elseif ($script:tablePosition -eq 1) {
+        $positionLabel.Text = "Table position: 1 line up from bottom"
+    } else {
+        $positionLabel.Text = "Table position: $($script:tablePosition) lines up from bottom"
+    }
+    & $updatePreview
+})
+
+# Move Down button click event
+$moveDownButton.Add_Click({
+    $script:tablePosition--
+    if ($script:tablePosition -lt 0) {
+        $script:tablePosition = 0
+    }
+    if ($script:tablePosition -eq 0) {
+        $positionLabel.Text = "Table position: At bottom of signature"
+    } elseif ($script:tablePosition -eq 1) {
+        $positionLabel.Text = "Table position: 1 line up from bottom"
+    } else {
+        $positionLabel.Text = "Table position: $($script:tablePosition) lines up from bottom"
+    }
+    & $updatePreview
+})
 
 
 #endregion GUI Form Creation
@@ -1153,51 +1216,60 @@ Function Update-DayControls {
 
 # Function to update form layout after control changes
 Function Update-FormLayout {
-        
-    # Calculate button positions relative to last control
-    $buttonYOffset = $panelDropDown.Location.y + $panelDropDown.Size.Height + 20
-    
+    # Calculate current browser width
+    $currentBrowserWidth = $form.ClientSize.Width - 20
+    if ($currentBrowserWidth -lt 560) {
+        $currentBrowserWidth = 560
+    }
+
+    # Position controls after panel (with position buttons)
+    $controlsYOffset = $panelDropDown.Location.y + $panelDropDown.Size.Height + 10
+
+    # Position up/down buttons for table position
+    $moveUpButton.Location = New-Object System.Drawing.Point(10, $controlsYOffset)
+    $moveDownButton.Location = New-Object System.Drawing.Point(100, $controlsYOffset)
+    $positionLabel.Location = New-Object System.Drawing.Point(200, ($controlsYOffset + 5))
+
+    # Position preview browser below position buttons
+    $browserYOffset = $controlsYOffset + 40
+
     # Temporarily remove anchor from preview browser to reposition it
     $previewBrowser.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
-    $previewBrowser.Location = New-Object System.Drawing.Point(10, $buttonYOffset)
-    
-    # Keep the current width
-    $currentBrowserWidth = $previewBrowser.Width
-    if ($currentBrowserWidth -lt 560) {
-        $currentBrowserWidth = $form.ClientSize.Width - 20
-    }
+    $previewBrowser.Location = New-Object System.Drawing.Point(10, $browserYOffset)
     $previewBrowser.Size = New-Object System.Drawing.Size($currentBrowserWidth, 180)
-    
+
     # Restore anchor after positioning
     $previewBrowser.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
-    
-    # Update copy button position relative to browser
-    $copyHtmlButton.Location = New-Object System.Drawing.Point(($currentBrowserWidth - 90), ($buttonYOffset + 5))
-    
-    # Add text preview section below HTML preview
-    $textPreviewYOffset = $buttonYOffset + $previewBrowser.Height + 10
-    
+
+    # Update copy button position relative to browser (top-right corner)
+    $copyHtmlButton.Location = New-Object System.Drawing.Point((10 + $currentBrowserWidth - 90), ($browserYOffset + 5))
+
+    # Position text preview section below HTML preview
+    $textPreviewYOffset = $browserYOffset + $previewBrowser.Height + 10
+
     # Text preview label
     $textPreviewLabel.Location = New-Object System.Drawing.Point(10, $textPreviewYOffset)
-    
+
     # Text preview textbox
     $textPreviewBox.Location = New-Object System.Drawing.Point(10, ($textPreviewYOffset + 25))
     $textPreviewBox.Width = $currentBrowserWidth
-    
-    # Position action buttons at bottom, aligned to right edge of preview browser
+
+    # Position action buttons at bottom, aligned to right edge
     $intButtonTop = $textPreviewBox.Location.Y + $textPreviewBox.Height + 10
-    
+
     # Calculate button positions from right edge
     $rightEdge = 10 + $currentBrowserWidth
-    
+
     $cancelButton.Location = New-Object System.Drawing.Point(($rightEdge - 80), $intButtonTop)
     $applyButton.Location = New-Object System.Drawing.Point(($rightEdge - 190), $intButtonTop)
     $startupButton.Location = New-Object System.Drawing.Point(($rightEdge - 320), $intButtonTop)
-    
+
     # Adjust form height
     $requiredHeight = $intButtonTop + 80
-    $form.Size = New-Object System.Drawing.Size(600, $requiredHeight)
-    
+    if ($form.Height -ne $requiredHeight) {
+        $form.Size = New-Object System.Drawing.Size($form.Width, $requiredHeight)
+    }
+
 } # end of Update-FormLayout function
 
 #endregion Dynamic Day Controls Creation
@@ -1242,12 +1314,18 @@ $copyHtmlButton.Add_Click({
         $htmlContent = $previewBrowser.DocumentText
         [System.Windows.Forms.Clipboard]::SetText($htmlContent)
         Write-Detail -Message "HTML content copied to clipboard" -Level Info
-        
+
         # Brief visual feedback
         $originalColor = $copyHtmlButton.BackColor
         $copyHtmlButton.BackColor = [System.Drawing.Color]::DarkGreen
         $copyHtmlButton.Text = "Copied!"
-        
+
+        # Dispose of old timer if exists
+        if ($null -ne $copyHtmlButton.Tag -and $copyHtmlButton.Tag -is [System.Windows.Forms.Timer]) {
+            $copyHtmlButton.Tag.Stop()
+            $copyHtmlButton.Tag.Dispose()
+        }
+
         # Reset after 1 second
         $timer = New-Object System.Windows.Forms.Timer
         $timer.Interval = 1000
@@ -1256,7 +1334,9 @@ $copyHtmlButton.Add_Click({
             $copyHtmlButton.Text = "Copy HTML"
             $timer.Stop()
             $timer.Dispose()
+            $copyHtmlButton.Tag = $null
         })
+        $copyHtmlButton.Tag = $timer  # Store for cleanup
         $timer.Start()
     }
 })
@@ -1382,28 +1462,16 @@ $tableHTML
         $currentTextVersion = "(No signature loaded)"
     }
     
-    # Generate updated text version
-    $existingText = ConvertFrom-HTMLToText -html $previewHTML
-    $updatedTextVersion = ""
-    if ($existingText) {
-        # Check if table already in text
-        if ($existingText -match "My Upcoming Week") {
-            # Replace existing table
-            $updatedTextVersion = $existingText -replace "(?s)My Upcoming Week.*?={50}", $tableText
-        } else {
-            # Append table
-            $updatedTextVersion = $existingText.TrimEnd() + "`n`n" + $tableText
-        }
-    } else {
-        $updatedTextVersion = $tableText
-    }
-    
+    # Generate updated text version from the preview HTML
+    # The previewHTML already contains the table, so just convert it to text
+    $updatedTextVersion = ConvertFrom-HTMLToText -html $previewHTML
+
     # Combine current and updated for display
     $textPreviewContent = "=== CURRENT TEXT VERSION ===`n"
     $textPreviewContent += $currentTextVersion
     $textPreviewContent += "`n`n=== UPDATED TEXT VERSION ===`n"
     $textPreviewContent += $updatedTextVersion
-    
+
     $textPreviewBox.Text = $textPreviewContent
     
 } # end of updatePreview scriptblock
@@ -1474,10 +1542,10 @@ $useAmPmCheckbox.Add_CheckedChanged({
         # Move to next day (same spacing for both modes)
         $cumulativeY += $script:rowHeight
     } # end of foreach day layout adjustment loop
-    
+
     # Update form layout
-    Update-FormLayout -yPosition $cumulativeY
-    
+    Update-FormLayout
+
     # Refresh preview
     & $updatePreview
 })
@@ -1700,14 +1768,11 @@ $tableHTML
             # Generate text version from the final HTML
             $existingText = ConvertFrom-HTMLToText -html $finalHTML
             $tableText = New-StatusTableText -statusData $statusData -isSplitMode $isSplitMode
-            
-            # Combine existing text content with table text
-            if ($existingText) {
-                $finalText = $existingText.TrimEnd() + "`n`n" + $tableText
-            } else {
-                $finalText = $tableText
-            }
-            
+
+            # The existingText already includes the table since we converted from finalHTML
+            # which already has the table embedded, so we can use it directly
+            $finalText = $existingText
+
             Set-Content -Path $txtFile -Value $finalText -Encoding UTF8 -Force
             Write-Detail -Message "Text signature file updated: $txtFile" -Level Info
             
@@ -1746,22 +1811,80 @@ $cancelButton.Add_Click({
 
 #region GUI Initialization and Display
 
-# Initialize day controls with saved configuration
-Update-DayControls -requestedDays $numDays -includeToday $includeToday
+try {
+    # Initialize day controls with saved configuration
+    Update-DayControls -requestedDays $numDays -includeToday $includeToday
 
-# Show initial preview
-& $updatePreview
+    # Show initial preview
+    & $updatePreview
 
-# Show form
-Write-Detail -Message "Displaying GUI form" -Level Info
-$result = $form.ShowDialog()
+    # Show form
+    Write-Detail -Message "Displaying GUI form" -Level Info
+    $result = $form.ShowDialog()
 
-if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-    Write-Detail -Message "Signature management completed successfully" -Level Info
-    exit 0
-} else {
-    Write-Detail -Message "Operation cancelled by user" -Level Info
-    exit 0
+    if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+        Write-Detail -Message "Signature management completed successfully" -Level Info
+        exit 0
+    } else {
+        Write-Detail -Message "Operation cancelled by user" -Level Info
+        exit 0
+    }
+}
+catch {
+    Write-Detail -Message "Error in GUI execution: $($_.Exception.Message)" -Level Error
+    [System.Windows.Forms.MessageBox]::Show(
+        "An error occurred: $($_.Exception.Message)",
+        "Error",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Error
+    )
+    exit 1
+}
+finally {
+    # Dispose of all controls and form resources
+    Write-Detail -Message "Cleaning up resources" -Level Debug
+
+    # Dispose of timer if it exists
+    if ($null -ne $copyHtmlButton.Tag -and $copyHtmlButton.Tag -is [System.Windows.Forms.Timer]) {
+        $copyHtmlButton.Tag.Stop()
+        $copyHtmlButton.Tag.Dispose()
+    }
+
+    # Dispose of day control dropdowns
+    if ($script:dropdowns) {
+        foreach ($dayKey in $script:dropdowns.Keys) {
+            if ($script:dropdowns[$dayKey]['AM']) { $script:dropdowns[$dayKey]['AM'].Dispose() }
+            if ($script:dropdowns[$dayKey]['PM']) { $script:dropdowns[$dayKey]['PM'].Dispose() }
+            if ($script:dropdowns[$dayKey]['Day']) { $script:dropdowns[$dayKey]['Day'].Dispose() }
+            if ($script:dropdowns[$dayKey]['AMLabel']) { $script:dropdowns[$dayKey]['AMLabel'].Dispose() }
+            if ($script:dropdowns[$dayKey]['PMLabel']) { $script:dropdowns[$dayKey]['PMLabel'].Dispose() }
+            if ($script:dropdowns[$dayKey]['DayLabel']) { $script:dropdowns[$dayKey]['DayLabel'].Dispose() }
+            if ($script:dropdowns[$dayKey]['DayLabelMain']) { $script:dropdowns[$dayKey]['DayLabelMain'].Dispose() }
+        }
+    }
+
+    # Dispose of main controls
+    if ($previewBrowser) { $previewBrowser.Dispose() }
+    if ($copyHtmlButton) { $copyHtmlButton.Dispose() }
+    if ($textPreviewBox) { $textPreviewBox.Dispose() }
+    if ($textPreviewLabel) { $textPreviewLabel.Dispose() }
+    if ($applyButton) { $applyButton.Dispose() }
+    if ($cancelButton) { $cancelButton.Dispose() }
+    if ($startupButton) { $startupButton.Dispose() }
+    if ($moveUpButton) { $moveUpButton.Dispose() }
+    if ($moveDownButton) { $moveDownButton.Dispose() }
+    if ($positionLabel) { $positionLabel.Dispose() }
+    if ($numDaysRequired) { $numDaysRequired.Dispose() }
+    if ($includeTodayCheckbox) { $includeTodayCheckbox.Dispose() }
+    if ($useAmPmCheckbox) { $useAmPmCheckbox.Dispose() }
+    if ($openSigButton) { $openSigButton.Dispose() }
+    if ($currentSigLabel) { $currentSigLabel.Dispose() }
+    if ($titleLabel) { $titleLabel.Dispose() }
+    if ($numDaysLabel) { $numDaysLabel.Dispose() }
+    if ($panelDropDown) { $panelDropDown.Dispose() }
+    if ($form) { $form.Dispose() }
+
+    Write-Detail -Message "Resource cleanup completed" -Level Debug
 }
 
 #endregion GUI Initialization and Display
