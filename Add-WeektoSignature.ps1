@@ -665,35 +665,32 @@ Function New-StatusTableText {
         [hashtable]$statusData,
         [bool]$isSplitMode = $true
     )
-
+    
     Write-Detail -Message "Generating status table plain text" -Level Debug
-
+    
     $text = New-Object System.Text.StringBuilder
-
+    
     [void]$text.AppendLine("My Upcoming Week")
     [void]$text.AppendLine("=" * 50)
-
+    
     $dayKeys = $statusData.Keys | Sort-Object
-
+    
     if ($isSplitMode) {
         # Split mode: Show AM and PM for each day
         foreach ($dayKey in $dayKeys) {
             $dayData = $statusData[$dayKey]
-            [void]$text.Append("$($dayData.DayName) $($dayData.Date.ToString('dd/MM'))")
-            [void]$text.Append("  AM: $($statusData[$dayKey]['AM']) - PM: $($statusData[$dayKey]['PM'])")
-            [void]$text.AppendLine()
+            [void]$text.AppendLine("$($dayData.DayName) $($dayData.Date.ToString('dd/MM'))  AM: $($statusData[$dayKey]['AM'])  PM: $($statusData[$dayKey]['PM'])")
         } # end of text day loop
     } else {
         # Full day mode: Show single status for each day
         foreach ($dayKey in $dayKeys) {
             $dayData = $statusData[$dayKey]
-            [void]$text.Append("$($dayData.DayName) $($dayData.Date.ToString('dd/MM').PadRight(12, ' ')): $($statusData[$dayKey]['AM'])")
-            [void]$text.AppendLine()
-        }
+            [void]$text.AppendLine("$($dayData.DayName) $($dayData.Date.ToString('dd/MM'))  :  $($statusData[$dayKey]['AM'])")
+        } # end of text day loop
     }
-
+    
     [void]$text.AppendLine("=" * 50)
-
+    
     return $text.ToString()
 } # end of New-StatusTableText function
 
@@ -943,96 +940,265 @@ $useAmPmCheckbox.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 $useAmPmCheckbox.Checked = $false
 $form.Controls.Add($useAmPmCheckbox)
 
-# Function to manage form layout - centralized layout logic
-Function Update-FormLayout {
+
+$panelDropDown = New-Object System.Windows.Forms.Panel;
+$panelDropDown.Location =  New-Object System.Drawing.Size(10, ($useAmPmCheckbox.Location.y + 30) )
+$panelDropDown.Size = New-Object System.Drawing.Size(560, 30)
+$panelDropDown.AutoSize = $true
+$panelDropDown.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowOnly;
+# $panelDropDown.BackColor = [System.Drawing.SystemColors]::InactiveCaption;
+# $panelDropDown.BorderStyle = [System.Windows.Forms.BorderStyle]::Fixed3D;
+$panelDropDown.Padding = New-Object System.Windows.Forms.Padding(5);
+$form.Controls.Add($panelDropDown)
+
+
+#endregion GUI Form Creation
+
+#region Dynamic Day Controls Creation
+
+# Function to create or destroy day controls based on number selected
+$script:dropdowns = @{}
+$script:maxDays = 14
+
+Function Update-DayControls {
     param(
-        [hashtable]$dropdowns,
-        [bool]$isSplitMode,
-        [System.Windows.Forms.WebBrowser]$previewBrowser,
-        [System.Windows.Forms.Button]$startupButton,
-        [System.Windows.Forms.Button]$applyButton,
-        [System.Windows.Forms.Button]$cancelButton,
-        [System.Windows.Forms.Form]$form
+        [int]$requestedDays,
+        [bool]$includeToday
     )
+    
+    Write-Detail -Message "Updating day controls: RequestedDays=$requestedDays, IncludeToday=$includeToday" -Level Debug
+    # padding off the top of the panel
+    $yPosition = 5
 
-    Write-Detail -Message "Updating form layout (Split Mode: $isSplitMode)" -Level Debug
-
-    # Track cumulative Y position - start where day dropdowns begin
-    $cumulativeY = 100
-
-    foreach ($dayKey in $dropdowns.Keys | Sort-Object) {
-        # Position day label (always visible)
-        $dropdowns[$dayKey]['DayLabelMain'].Location = New-Object System.Drawing.Point(10, $cumulativeY)
-
-        if ($isSplitMode) {
-            # Split mode: Show AM/PM labels and dropdowns on the same row
-            $dropdowns[$dayKey]['AMLabel'].Location = New-Object System.Drawing.Point(170, $cumulativeY)
-            $dropdowns[$dayKey]['AM'].Location = New-Object System.Drawing.Point(205, $cumulativeY)
-            $dropdowns[$dayKey]['PMLabel'].Location = New-Object System.Drawing.Point(340, $cumulativeY)
-            $dropdowns[$dayKey]['PM'].Location = New-Object System.Drawing.Point(375, $cumulativeY)
-
-            # Show AM/PM controls
-            $dropdowns[$dayKey]['AMLabel'].Visible = $true
-            $dropdowns[$dayKey]['AM'].Visible = $true
-            $dropdowns[$dayKey]['PMLabel'].Visible = $true
-            $dropdowns[$dayKey]['PM'].Visible = $true
-
-            # Hide full day controls
-            $dropdowns[$dayKey]['DayLabel'].Visible = $false
-            $dropdowns[$dayKey]['Day'].Visible = $false
-        } else {
-            # Full day mode: Show single dropdown
-            $dropdowns[$dayKey]['DayLabel'].Location = New-Object System.Drawing.Point(170, $cumulativeY)
-            $dropdowns[$dayKey]['Day'].Location = New-Object System.Drawing.Point(215, $cumulativeY)
-
-            # Show full day controls
-            $dropdowns[$dayKey]['DayLabel'].Visible = $true
-            $dropdowns[$dayKey]['Day'].Visible = $true
-
-            # Hide AM/PM controls
-            $dropdowns[$dayKey]['AMLabel'].Visible = $false
-            $dropdowns[$dayKey]['AM'].Visible = $false
-            $dropdowns[$dayKey]['PMLabel'].Visible = $false
-            $dropdowns[$dayKey]['PM'].Visible = $false
+    # Calculate working days to display
+    $today = Get-Date
+    $workingDays = @()
+    
+    if ($includeToday) {
+        # Include today if it's a working day
+        if ($today.DayOfWeek -ne [System.DayOfWeek]::Saturday -and 
+            $today.DayOfWeek -ne [System.DayOfWeek]::Sunday) {
+            $workingDays += $today
         }
-
-        # Move to next day row
-        $cumulativeY += $script:rowHeight
-    } # end of foreach day layout adjustment loop
-
-    # Position preview browser
-    $previewY = $cumulativeY + 10
-    $previewBrowser.Location = New-Object System.Drawing.Point(10, $previewY)
-    $previewBrowser.Size = New-Object System.Drawing.Size(($form.ClientSize.Width - 20), 200)
-
-    # Position action buttons at bottom
-    $buttonY = $previewY + $previewBrowser.Height + 10
-    $startupButton.Location = New-Object System.Drawing.Point(($form.ClientSize.Width - 340), $buttonY)
-    $applyButton.Location = New-Object System.Drawing.Point(($form.ClientSize.Width - 230), $buttonY)
-    $cancelButton.Location = New-Object System.Drawing.Point(($form.ClientSize.Width - 120), $buttonY)
-
-    # Adjust form height to fit all controls
-    $requiredHeight = $buttonY + 70
-    if ($form.Height -ne $requiredHeight) {
-        $form.Height = $requiredHeight
     }
-
-    Write-Detail -Message "Form layout updated" -Level Debug
-} # end of Update-FormLayout function
-
-# Checkbox change event to show/hide AM/PM dropdowns
-$useAmPmCheckbox.Add_CheckedChanged({
+    
+    # Add future working days
+    $currentDate = $today.AddDays(1)
+    while ($workingDays.Count -lt $requestedDays) {
+        # Skip weekends
+        if ($currentDate.DayOfWeek -ne [System.DayOfWeek]::Saturday -and 
+            $currentDate.DayOfWeek -ne [System.DayOfWeek]::Sunday) {
+            $workingDays += $currentDate
+        }
+        $currentDate = $currentDate.AddDays(1)
+    } # end of while working days calculation loop
+    
+    # Remove existing controls that are beyond requested days
+    for ($i = $requestedDays; $i -lt $script:maxDays; $i++) {
+        $dayKey = "Day$i"
+        if ($script:dropdowns.ContainsKey($dayKey)) {
+            $panelDropDown.Controls.Remove($script:dropdowns[$dayKey]['DayLabelMain'])
+            $panelDropDown.Controls.Remove($script:dropdowns[$dayKey]['AMLabel'])
+            $panelDropDown.Controls.Remove($script:dropdowns[$dayKey]['AM'])
+            $panelDropDown.Controls.Remove($script:dropdowns[$dayKey]['PMLabel'])
+            $panelDropDown.Controls.Remove($script:dropdowns[$dayKey]['PM'])
+            $panelDropDown.Controls.Remove($script:dropdowns[$dayKey]['DayLabel'])
+            $panelDropDown.Controls.Remove($script:dropdowns[$dayKey]['Day'])
+            
+            $script:dropdowns.Remove($dayKey)
+        }
+    } # end of remove controls loop
+    
+    # Create or update controls for requested days
     $isSplitMode = $useAmPmCheckbox.Checked
+    
+    for ($i = 0; $i -lt $requestedDays; $i++) {
+        $dayDate = $workingDays[$i]
+        $dayName = $dayDate.ToString('dddd')
+        $dayKey = "Day$i"
+        
+        # Check if controls already exist
+        if ($script:dropdowns.ContainsKey($dayKey)) {
+            # Update existing controls
+            $script:dropdowns[$dayKey]['Date'] = $dayDate
+            $script:dropdowns[$dayKey]['DayName'] = $dayName
+            $script:dropdowns[$dayKey]['DayLabelMain'].Text = "$dayName ($($dayDate.ToString('dd/MM')))"
+            $script:dropdowns[$dayKey]['DayLabelMain'].Location = New-Object System.Drawing.Point(10, $yPosition)
+            $script:dropdowns[$dayKey]['AMLabel'].Location = New-Object System.Drawing.Point(170, $yPosition)
+            $script:dropdowns[$dayKey]['AM'].Location = New-Object System.Drawing.Point(205, $yPosition)
+            $script:dropdowns[$dayKey]['PMLabel'].Location = New-Object System.Drawing.Point(340, $yPosition)
+            $script:dropdowns[$dayKey]['PM'].Location = New-Object System.Drawing.Point(375, $yPosition)
+            $script:dropdowns[$dayKey]['DayLabel'].Location = New-Object System.Drawing.Point(170, $yPosition)
+            $script:dropdowns[$dayKey]['Day'].Location = New-Object System.Drawing.Point(215, $yPosition)
+            
+            # Set visibility based on split mode
+            if ($isSplitMode) {
+                $script:dropdowns[$dayKey]['DayLabel'].Visible = $false
+                $script:dropdowns[$dayKey]['Day'].Visible = $false
+                $script:dropdowns[$dayKey]['AMLabel'].Visible = $true
+                $script:dropdowns[$dayKey]['AM'].Visible = $true
+                $script:dropdowns[$dayKey]['PMLabel'].Visible = $true
+                $script:dropdowns[$dayKey]['PM'].Visible = $true
+            } else {
+                $script:dropdowns[$dayKey]['DayLabel'].Visible = $true
+                $script:dropdowns[$dayKey]['Day'].Visible = $true
+                $script:dropdowns[$dayKey]['AMLabel'].Visible = $false
+                $script:dropdowns[$dayKey]['AM'].Visible = $false
+                $script:dropdowns[$dayKey]['PMLabel'].Visible = $false
+                $script:dropdowns[$dayKey]['PM'].Visible = $false
+            }
+        } else {
+            # Create new controls
+            # Main day label (always visible)
+            $dayLabelMain = New-Object System.Windows.Forms.Label
+            $dayLabelMain.Location = New-Object System.Drawing.Point(10, $yPosition)
+            $dayLabelMain.Size = New-Object System.Drawing.Size(150, 20)
+            $dayLabelMain.Text = "$dayName ($($dayDate.ToString('dd/MM')))"
+            $dayLabelMain.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+            $panelDropDown.Controls.Add($dayLabelMain)
+            
+            # AM label (hidden by default)
+            $amLabel = New-Object System.Windows.Forms.Label
+            $amLabel.Location = New-Object System.Drawing.Point(170, $yPosition)
+            $amLabel.Size = New-Object System.Drawing.Size(30, 20)
+            $amLabel.Text = "AM:"
+            $amLabel.Visible = $isSplitMode
+            $panelDropDown.Controls.Add($amLabel)
+            
+            # AM dropdown (hidden by default)
+            $amDropdown = New-Object System.Windows.Forms.ComboBox
+            $amDropdown.Location = New-Object System.Drawing.Point(205, $yPosition)
+            $amDropdown.Size = New-Object System.Drawing.Size(120, 25)
+            $amDropdown.DropDownStyle = "DropDownList"
+            foreach ($option in $script:statusOptions) {
+                [void]$amDropdown.Items.Add($option)
+            }
+            $amDropdown.SelectedIndex = 0
+            $amDropdown.Visible = $isSplitMode
+            $amDropdown.Add_SelectedIndexChanged($updatePreview)
+            $panelDropDown.Controls.Add($amDropdown)
+            
+            # PM label (hidden by default)
+            $pmLabel = New-Object System.Windows.Forms.Label
+            $pmLabel.Location = New-Object System.Drawing.Point(340, $yPosition)
+            $pmLabel.Size = New-Object System.Drawing.Size(30, 20)
+            $pmLabel.Text = "PM:"
+            $pmLabel.Visible = $isSplitMode
+            $panelDropDown.Controls.Add($pmLabel)
+            
+            # PM dropdown (hidden by default)
+            $pmDropdown = New-Object System.Windows.Forms.ComboBox
+            $pmDropdown.Location = New-Object System.Drawing.Point(375, $yPosition)
+            $pmDropdown.Size = New-Object System.Drawing.Size(120, 25)
+            $pmDropdown.DropDownStyle = "DropDownList"
+            foreach ($option in $script:statusOptions) {
+                [void]$pmDropdown.Items.Add($option)
+            }
+            $pmDropdown.SelectedIndex = 0
+            $pmDropdown.Visible = $isSplitMode
+            $pmDropdown.Add_SelectedIndexChanged($updatePreview)
+            $panelDropDown.Controls.Add($pmDropdown)
+            
+            # Full day label (visible by default)
+            $dayOnlyLabel = New-Object System.Windows.Forms.Label
+            $dayOnlyLabel.Location = New-Object System.Drawing.Point(170, $yPosition)
+            $dayOnlyLabel.Size = New-Object System.Drawing.Size(40, 20)
+            $dayOnlyLabel.Text = "Day:"
+            $dayOnlyLabel.Visible = (-not $isSplitMode)
+            $panelDropDown.Controls.Add($dayOnlyLabel)
+            
+            # Full day dropdown (visible by default)
+            $dayDropdown = New-Object System.Windows.Forms.ComboBox
+            $dayDropdown.Location = New-Object System.Drawing.Point(215, $yPosition)
+            $dayDropdown.Size = New-Object System.Drawing.Size(280, 25)
+            $dayDropdown.DropDownStyle = "DropDownList"
+            foreach ($option in $script:statusOptions) {
+                [void]$dayDropdown.Items.Add($option)
+            }
+            $dayDropdown.SelectedIndex = 0
+            $dayDropdown.Visible = (-not $isSplitMode)
+            $dayDropdown.Add_SelectedIndexChanged($updatePreview)
+            $panelDropDown.Controls.Add($dayDropdown)
+            
+     
 
-    # Use centralized layout function
-    Update-FormLayout -dropdowns $dropdowns -isSplitMode $isSplitMode `
-                      -previewBrowser $previewBrowser `
-                      -startupButton $startupButton -applyButton $applyButton -cancelButton $cancelButton `
-                      -form $form
+            # Store dropdown references
+            $script:dropdowns[$dayKey] = @{
+                'DayLabelMain' = $dayLabelMain
+                'AMLabel' = $amLabel
+                'AM' = $amDropdown
+                'PMLabel' = $pmLabel
+                'PM' = $pmDropdown
+                'DayLabel' = $dayOnlyLabel
+                'Day' = $dayDropdown
+                'Date' = $dayDate
+                'DayName' = $dayName
+            }
+        }
+        
+        $yPosition += $script:rowHeight
+    } # end of create/update controls loop
+    
+    # Update title label with date range
+    if ($workingDays.Count -gt 0) {
+        $startDate = $workingDays[0].ToString('dd/MM/yyyy')
+        $endDate = $workingDays[$workingDays.Count - 1].ToString('dd/MM/yyyy')
+        $titleLabel.Text = "Next $requestedDays Working Day$(if($requestedDays -gt 1){'s'}): $startDate - $endDate"
+    }
+    
+    # Position preview browser and buttons
+    Update-FormLayout
+    
+} # end of Update-DayControls function
 
-    # Refresh preview
-    & $updatePreview
-})
+# Function to update form layout after control changes
+Function Update-FormLayout {
+        
+    # Calculate button positions relative to last control
+    $buttonYOffset = $panelDropDown.Location.y + $panelDropDown.Size.Height + 20
+    
+    # Temporarily remove anchor from preview browser to reposition it
+    $previewBrowser.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
+    $previewBrowser.Location = New-Object System.Drawing.Point(10, $buttonYOffset)
+    
+    # Keep the current width
+    $currentBrowserWidth = $previewBrowser.Width
+    if ($currentBrowserWidth -lt 560) {
+        $currentBrowserWidth = $form.ClientSize.Width - 20
+    }
+    $previewBrowser.Size = New-Object System.Drawing.Size($currentBrowserWidth, 180)
+    
+    # Restore anchor after positioning
+    $previewBrowser.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+    
+    # Update copy button position relative to browser
+    $copyHtmlButton.Location = New-Object System.Drawing.Point(($currentBrowserWidth - 90), ($buttonYOffset + 5))
+    
+    # Add text preview section below HTML preview
+    $textPreviewYOffset = $buttonYOffset + $previewBrowser.Height + 10
+    
+    # Text preview label
+    $textPreviewLabel.Location = New-Object System.Drawing.Point(10, $textPreviewYOffset)
+    
+    # Text preview textbox
+    $textPreviewBox.Location = New-Object System.Drawing.Point(10, ($textPreviewYOffset + 25))
+    $textPreviewBox.Width = $currentBrowserWidth
+    
+    # Position action buttons at bottom, aligned to right edge of preview browser
+    $intButtonTop = $textPreviewBox.Location.Y + $textPreviewBox.Height + 10
+    
+    # Calculate button positions from right edge
+    $rightEdge = 10 + $currentBrowserWidth
+    
+    $cancelButton.Location = New-Object System.Drawing.Point(($rightEdge - 80), $intButtonTop)
+    $applyButton.Location = New-Object System.Drawing.Point(($rightEdge - 190), $intButtonTop)
+    $startupButton.Location = New-Object System.Drawing.Point(($rightEdge - 320), $intButtonTop)
+    
+    # Adjust form height
+    $requiredHeight = $intButtonTop + 80
+    $form.Size = New-Object System.Drawing.Size(600, $requiredHeight)
+    
+} # end of Update-FormLayout function
 
 #endregion Dynamic Day Controls Creation
 
