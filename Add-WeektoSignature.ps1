@@ -31,6 +31,9 @@
     2.0 - Added dynamic day selection, today's status option, configuration persistence,
           HTML preview copy support, and improved body tag handling
     2.1 - Added panel with autosize for the day dropdowns. controls below bound to that.
+    2.2 - Fixed form layout positioning, added up/down buttons for table positioning,
+          fixed text signature duplication, added comprehensive memory cleanup with
+          try-finally blocks, improved Update-FormLayout function
 #>
 
 #region Initialization and Global Variables
@@ -679,11 +682,13 @@ Function New-StatusTableText {
     $dayKeys = $statusData.Keys | Sort-Object
     
     if ($isSplitMode) {
+        # Split mode: Show AM and PM for each day
         foreach ($dayKey in $dayKeys) {
             $dayData = $statusData[$dayKey]
             [void]$text.AppendLine("$($dayData.DayName) $($dayData.Date.ToString('dd/MM'))  AM: $($statusData[$dayKey]['AM'])  PM: $($statusData[$dayKey]['PM'])")
         } # end of text day loop
     } else {
+        # Full day mode: Show single status for each day
         foreach ($dayKey in $dayKeys) {
             $dayData = $statusData[$dayKey]
             [void]$text.AppendLine("$($dayData.DayName) $($dayData.Date.ToString('dd/MM'))  :  $($statusData[$dayKey]['AM'])")
@@ -1841,6 +1846,7 @@ finally {
 
     # Dispose of timer if it exists
     if ($null -ne $copyHtmlButton.Tag -and $copyHtmlButton.Tag -is [System.Windows.Forms.Timer]) {
+        $copyHtmlButton.Tag.Stop()
         $copyHtmlButton.Tag.Dispose()
     }
 
