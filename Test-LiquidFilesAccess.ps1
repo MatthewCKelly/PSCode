@@ -103,6 +103,34 @@ function Get-LiquidFilesConfig {
     }
 }
 
+# Generate authentication headers
+function Get-AuthHeaders {
+    <#
+        .SYNOPSIS
+            Creates authentication headers for LiquidFiles API
+        .DESCRIPTION
+            Generates HTTP Basic Authentication header using base64 encoding
+            of ApiKey followed by colon as per LiquidFiles API spec
+        .PARAMETER ApiKey
+            The API key from configuration
+        .OUTPUTS
+            [Hashtable] Headers with Authorization and Accept
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ApiKey
+    )
+
+    # LiquidFiles uses Basic Auth with ApiKey followed by colon
+    $authString = "${ApiKey}:"
+    $encodedAuth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($authString))
+
+    return @{
+        "Authorization" = "Basic $encodedAuth"
+        "Accept" = "application/json"
+    }
+}
+
 # Test basic API connectivity
 function Test-ApiConnection {
     <#
@@ -125,10 +153,7 @@ function Test-ApiConnection {
         Write-Detail "Testing API connection to $($Config.ServerUrl)" -Level Info
 
         $uri = "$($Config.ServerUrl)/account"
-        $headers = @{
-            "Authorization" = "Bearer $($Config.ApiKey)"
-            "Accept" = "application/json"
-        }
+        $headers = Get-AuthHeaders -ApiKey $Config.ApiKey
 
         $response = Invoke-RestMethod -Uri $uri -Method Get -Headers $headers -ErrorAction Stop
 
@@ -182,10 +207,7 @@ function Get-LiquidFile {
         Write-Detail "Retrieving file information for ID: $FileId" -Level Info
 
         $uri = "$($Config.ServerUrl)/files/$FileId"
-        $headers = @{
-            "Authorization" = "Bearer $($Config.ApiKey)"
-            "Accept" = "application/json"
-        }
+        $headers = Get-AuthHeaders -ApiKey $Config.ApiKey
 
         $response = Invoke-RestMethod -Uri $uri -Method Get -Headers $headers
 
@@ -227,10 +249,7 @@ function Get-LiquidMessage {
         Write-Detail "Retrieving message information for ID: $MessageId" -Level Info
 
         $uri = "$($Config.ServerUrl)/messages/$MessageId"
-        $headers = @{
-            "Authorization" = "Bearer $($Config.ApiKey)"
-            "Accept" = "application/json"
-        }
+        $headers = Get-AuthHeaders -ApiKey $Config.ApiKey
 
         $response = Invoke-RestMethod -Uri $uri -Method Get -Headers $headers
 
@@ -267,10 +286,7 @@ function Get-LiquidMessages {
         Write-Detail "Retrieving recent messages" -Level Info
 
         $uri = "$($Config.ServerUrl)/messages"
-        $headers = @{
-            "Authorization" = "Bearer $($Config.ApiKey)"
-            "Accept" = "application/json"
-        }
+        $headers = Get-AuthHeaders -ApiKey $Config.ApiKey
 
         $response = Invoke-RestMethod -Uri $uri -Method Get -Headers $headers
 
@@ -325,10 +341,7 @@ function Get-LiquidFilelinks {
         Write-Detail "Retrieving recent filelinks" -Level Info
 
         $uri = "$($Config.ServerUrl)/filelinks"
-        $headers = @{
-            "Authorization" = "Bearer $($Config.ApiKey)"
-            "Accept" = "application/json"
-        }
+        $headers = Get-AuthHeaders -ApiKey $Config.ApiKey
 
         $response = Invoke-RestMethod -Uri $uri -Method Get -Headers $headers
 

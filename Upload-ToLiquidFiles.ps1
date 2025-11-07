@@ -143,6 +143,33 @@ function Get-LiquidFilesConfig {
     }
 }
 
+# Generate authentication headers
+function Get-AuthHeaders {
+    <#
+        .SYNOPSIS
+            Creates authentication headers for LiquidFiles API
+        .DESCRIPTION
+            Generates HTTP Basic Authentication header using base64 encoding
+            of ApiKey followed by colon as per LiquidFiles API spec
+        .PARAMETER ApiKey
+            The API key from configuration
+        .OUTPUTS
+            [Hashtable] Headers with Authorization
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ApiKey
+    )
+
+    # LiquidFiles uses Basic Auth with ApiKey followed by colon
+    $authString = "${ApiKey}:"
+    $encodedAuth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($authString))
+
+    return @{
+        "Authorization" = "Basic $encodedAuth"
+    }
+}
+
 # Upload file to LiquidFiles
 function Send-FileToLiquidFiles {
     <#
@@ -196,10 +223,8 @@ function Send-FileToLiquidFiles {
         $body = $bodyLines -join "`r`n"
 
         # Prepare headers
-        $headers = @{
-            "Authorization" = "Bearer $($Config.ApiKey)"
-            "Content-Type" = "multipart/form-data; boundary=$boundary"
-        }
+        $headers = Get-AuthHeaders -ApiKey $Config.ApiKey
+        $headers["Content-Type"] = "multipart/form-data; boundary=$boundary"
 
         # Upload file
         $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body ([System.Text.Encoding]::GetEncoding("iso-8859-1").GetBytes($body))
@@ -269,10 +294,8 @@ function Send-LiquidFilesMessage {
             }
         }
 
-        $headers = @{
-            "Authorization" = "Bearer $($Config.ApiKey)"
-            "Content-Type" = "application/json"
-        }
+        $headers = Get-AuthHeaders -ApiKey $Config.ApiKey
+        $headers["Content-Type"] = "application/json"
 
         $body = $messageData | ConvertTo-Json -Depth 10
 
@@ -334,10 +357,8 @@ function New-LiquidFilesLink {
             }
         }
 
-        $headers = @{
-            "Authorization" = "Bearer $($Config.ApiKey)"
-            "Content-Type" = "application/json"
-        }
+        $headers = Get-AuthHeaders -ApiKey $Config.ApiKey
+        $headers["Content-Type"] = "application/json"
 
         $body = $linkData | ConvertTo-Json -Depth 10
 
