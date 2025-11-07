@@ -1,0 +1,21 @@
+{
+  "_comment": "LiquidFiles API Configuration Template",
+  "_instructions": [
+    "1. Copy this file to 'liquidfiles-config.json' in the same directory",
+    "2. Replace the placeholder values with your actual LiquidFiles server details",
+    "3. Keep the actual config file secure and do not commit it to version control",
+    "4. Add 'liquidfiles-config.json' to .gitignore to prevent accidental commits"
+  ],
+  "ServerUrl": "https://your-server.liquidfiles.com",
+  "ApiKey": "your-api-key-here",
+  "_apiKeyInstructions": [
+    "To get your API key:",
+    "1. Log into your LiquidFiles server",
+    "2. Go to Settings > API",
+    "3. Generate a new API key or use an existing one",
+    "4. Copy the key and paste it above"
+  ],
+  "DefaultExpirationDays": 7,
+  "DefaultSubject": "File Transfer via LiquidFiles",
+  "DefaultMessage": "Files have been shared with you via LiquidFiles"
+}

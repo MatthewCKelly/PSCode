@@ -1,0 +1,13 @@
+# LiquidFiles Configuration (contains sensitive API keys)
+liquidfiles-config.json
+
+# Other sensitive configuration files
+*-config.json
+!*.template
+
+# PowerShell logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
