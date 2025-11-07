@@ -4,7 +4,8 @@
     "1. Copy this file to 'liquidfiles-config.json' in the same directory",
     "2. Replace the placeholder values with your actual LiquidFiles server details",
     "3. Keep the actual config file secure and do not commit it to version control",
-    "4. Add 'liquidfiles-config.json' to .gitignore to prevent accidental commits"
+    "4. Add 'liquidfiles-config.json' to .gitignore to prevent accidental commits",
+    "5. Test your configuration with: .\\Test-LiquidFilesAccess.ps1"
   ],
   "ServerUrl": "https://your-server.liquidfiles.com",
   "ApiKey": "your-api-key-here",
