@@ -34,6 +34,9 @@
     2.2 - Fixed form layout positioning, added up/down buttons for table positioning,
           fixed text signature duplication, added comprehensive memory cleanup with
           try-finally blocks, improved Update-FormLayout function
+    2.3 - Enabled vertical form resizing, removed scrollbars, repositioned move buttons
+          to right of each preview section, fixed text-only view to show clean text
+          without HTML entities, dynamic height allocation for preview areas
 #>
 
 #region Initialization and Global Variables
@@ -60,6 +63,8 @@ $script:labelToControlGap = 25  # Gap between day label and AM/PM controls in sp
 
 # Global status options and display mapping
 $script:statusOptions = @('Office', 'WFH', 'Leave', 'Meeting', 'Training', 'Travel', 'Client Site')
+
+# HTML display with emoji HTML entities
 $script:statusMap = @{
     'Office' = '&#127970; Office'
     'WFH' = '&#127968; WFH'
@@ -68,6 +73,17 @@ $script:statusMap = @{
     'Training' = '&#128218; Training'
     'Travel' = '&#9992; Travel'
     'Client Site' = '&#127970; Client Site'
+}
+
+# Plain text display without HTML entities
+$script:statusMapText = @{
+    'Office' = 'Office'
+    'WFH' = 'WFH'
+    'Leave' = 'Leave'
+    'Meeting' = 'Meeting'
+    'Training' = 'Training'
+    'Travel' = 'Travel'
+    'Client Site' = 'Client Site'
 }
 
 # Default configuration values
@@ -671,32 +687,36 @@ Function New-StatusTableText {
         [hashtable]$statusData,
         [bool]$isSplitMode = $true
     )
-    
+
     Write-Detail -Message "Generating status table plain text" -Level Debug
-    
+
     $text = New-Object System.Text.StringBuilder
-    
-    [void]$text.AppendLine("My Upcoming Week")
+
     [void]$text.AppendLine("=" * 50)
-    
+
     $dayKeys = $statusData.Keys | Sort-Object
-    
+
     if ($isSplitMode) {
         # Split mode: Show AM and PM for each day
         foreach ($dayKey in $dayKeys) {
             $dayData = $statusData[$dayKey]
-            [void]$text.AppendLine("$($dayData.DayName) $($dayData.Date.ToString('dd/MM'))  AM: $($statusData[$dayKey]['AM'])  PM: $($statusData[$dayKey]['PM'])")
+            $amStatus = $script:statusMapText[$statusData[$dayKey]['AM']]
+            $pmStatus = $script:statusMapText[$statusData[$dayKey]['PM']]
+            $dayLine = "{0,-16} :  AM: {1}  PM: {2}" -f "$($dayData.DayName) $($dayData.Date.ToString('dd/MM'))", $amStatus, $pmStatus
+            [void]$text.AppendLine($dayLine)
         } # end of text day loop
     } else {
         # Full day mode: Show single status for each day
         foreach ($dayKey in $dayKeys) {
             $dayData = $statusData[$dayKey]
-            [void]$text.AppendLine("$($dayData.DayName) $($dayData.Date.ToString('dd/MM'))  :  $($statusData[$dayKey]['AM'])")
+            $status = $script:statusMapText[$statusData[$dayKey]['AM']]
+            $dayLine = "{0,-16} :  {1}" -f "$($dayData.DayName) $($dayData.Date.ToString('dd/MM'))", $status
+            [void]$text.AppendLine($dayLine)
         } # end of text day loop
     }
-    
+
     [void]$text.AppendLine("=" * 50)
-    
+
     return $text.ToString()
 } # end of New-StatusTableText function
 
@@ -830,17 +850,19 @@ Write-Detail -Message "Building GUI form" -Level Info
 # Create main form
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Outlook Signature - Weekly Status Manager"
-$form.Size = New-Object System.Drawing.Size(600, 620)
+$form.Size = New-Object System.Drawing.Size(600, 800)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "Sizable"
 $form.MaximizeBox = $true
-$form.MinimumSize = New-Object System.Drawing.Size(600, 500)
-$form.AutoScroll = $true
+$form.MinimumSize = New-Object System.Drawing.Size(600, 600)
+$form.AutoScroll = $false
 
 # Form resize event to handle browser resizing
 $form.Add_Resize({
-    # Preview browser will automatically resize due to anchor settings
-    Update-FormLayout
+    # Preview browser and text box will automatically resize due to anchor settings
+    if ($previewBrowser -and $textPreviewBox) {
+        Update-FormLayout
+    }
 })
 
 # Title label
@@ -956,60 +978,85 @@ $panelDropDown.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowOnly;
 $panelDropDown.Padding = New-Object System.Windows.Forms.Padding(5);
 $form.Controls.Add($panelDropDown)
 
-# Table position controls (will be positioned by Update-FormLayout)
-# Move Up button
-$moveUpButton = New-Object System.Windows.Forms.Button
-$moveUpButton.Size = New-Object System.Drawing.Size(80, 30)
-$moveUpButton.Text = "Move Up"
-$moveUpButton.BackColor = [System.Drawing.Color]::LightBlue
-$moveUpButton.FlatStyle = "Flat"
-$moveUpButton.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-$form.Controls.Add($moveUpButton)
+# HTML Preview Label
+$htmlPreviewLabel = New-Object System.Windows.Forms.Label
+$htmlPreviewLabel.Size = New-Object System.Drawing.Size(200, 20)
+$htmlPreviewLabel.Text = "HTML Preview:"
+$htmlPreviewLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+$form.Controls.Add($htmlPreviewLabel)
 
-# Move Down button
-$moveDownButton = New-Object System.Windows.Forms.Button
-$moveDownButton.Size = New-Object System.Drawing.Size(80, 30)
-$moveDownButton.Text = "Move Down"
-$moveDownButton.BackColor = [System.Drawing.Color]::LightBlue
-$moveDownButton.FlatStyle = "Flat"
-$moveDownButton.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-$form.Controls.Add($moveDownButton)
+# HTML section - Move Up button (will be positioned by Update-FormLayout)
+$htmlMoveUpButton = New-Object System.Windows.Forms.Button
+$htmlMoveUpButton.Size = New-Object System.Drawing.Size(80, 30)
+$htmlMoveUpButton.Text = "Move Up"
+$htmlMoveUpButton.BackColor = [System.Drawing.Color]::LightBlue
+$htmlMoveUpButton.FlatStyle = "Flat"
+$htmlMoveUpButton.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+$htmlMoveUpButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+$form.Controls.Add($htmlMoveUpButton)
 
-# Position label
-$positionLabel = New-Object System.Windows.Forms.Label
-$positionLabel.Size = New-Object System.Drawing.Size(300, 20)
-$positionLabel.Text = "Table position: At bottom of signature"
-$positionLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-$form.Controls.Add($positionLabel)
+# HTML section - Move Down button
+$htmlMoveDownButton = New-Object System.Windows.Forms.Button
+$htmlMoveDownButton.Size = New-Object System.Drawing.Size(80, 30)
+$htmlMoveDownButton.Text = "Move Down"
+$htmlMoveDownButton.BackColor = [System.Drawing.Color]::LightBlue
+$htmlMoveDownButton.FlatStyle = "Flat"
+$htmlMoveDownButton.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+$htmlMoveDownButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+$form.Controls.Add($htmlMoveDownButton)
 
-# Move Up button click event
-$moveUpButton.Add_Click({
+# Text section - Move Up button
+$textMoveUpButton = New-Object System.Windows.Forms.Button
+$textMoveUpButton.Size = New-Object System.Drawing.Size(80, 30)
+$textMoveUpButton.Text = "Move Up"
+$textMoveUpButton.BackColor = [System.Drawing.Color]::LightBlue
+$textMoveUpButton.FlatStyle = "Flat"
+$textMoveUpButton.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+$textMoveUpButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+$form.Controls.Add($textMoveUpButton)
+
+# Text section - Move Down button
+$textMoveDownButton = New-Object System.Windows.Forms.Button
+$textMoveDownButton.Size = New-Object System.Drawing.Size(80, 30)
+$textMoveDownButton.Text = "Move Down"
+$textMoveDownButton.BackColor = [System.Drawing.Color]::LightBlue
+$textMoveDownButton.FlatStyle = "Flat"
+$textMoveDownButton.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+$textMoveDownButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+$form.Controls.Add($textMoveDownButton)
+
+# HTML Move Up button click event
+$htmlMoveUpButton.Add_Click({
     $script:tablePosition++
     if ($script:tablePosition -gt 10) {
         $script:tablePosition = 10
     }
-    if ($script:tablePosition -eq 0) {
-        $positionLabel.Text = "Table position: At bottom of signature"
-    } elseif ($script:tablePosition -eq 1) {
-        $positionLabel.Text = "Table position: 1 line up from bottom"
-    } else {
-        $positionLabel.Text = "Table position: $($script:tablePosition) lines up from bottom"
-    }
     & $updatePreview
 })
 
-# Move Down button click event
-$moveDownButton.Add_Click({
+# HTML Move Down button click event
+$htmlMoveDownButton.Add_Click({
     $script:tablePosition--
     if ($script:tablePosition -lt 0) {
         $script:tablePosition = 0
     }
-    if ($script:tablePosition -eq 0) {
-        $positionLabel.Text = "Table position: At bottom of signature"
-    } elseif ($script:tablePosition -eq 1) {
-        $positionLabel.Text = "Table position: 1 line up from bottom"
-    } else {
-        $positionLabel.Text = "Table position: $($script:tablePosition) lines up from bottom"
+    & $updatePreview
+})
+
+# Text Move Up button click event
+$textMoveUpButton.Add_Click({
+    $script:tablePosition++
+    if ($script:tablePosition -gt 10) {
+        $script:tablePosition = 10
+    }
+    & $updatePreview
+})
+
+# Text Move Down button click event
+$textMoveDownButton.Add_Click({
+    $script:tablePosition--
+    if ($script:tablePosition -lt 0) {
+        $script:tablePosition = 0
     }
     & $updatePreview
 })
@@ -1222,27 +1269,33 @@ Function Update-FormLayout {
         $currentBrowserWidth = 560
     }
 
-    # Position controls after panel (with position buttons)
+    # Position controls after panel
     $controlsYOffset = $panelDropDown.Location.y + $panelDropDown.Size.Height + 10
 
-    # Position up/down buttons for table position
-    $moveUpButton.Location = New-Object System.Drawing.Point(10, $controlsYOffset)
-    $moveDownButton.Location = New-Object System.Drawing.Point(100, $controlsYOffset)
-    $positionLabel.Location = New-Object System.Drawing.Point(200, ($controlsYOffset + 5))
+    # HTML Preview label
+    $htmlPreviewLabel.Location = New-Object System.Drawing.Point(10, $controlsYOffset)
 
-    # Position preview browser below position buttons
-    $browserYOffset = $controlsYOffset + 40
+    # Position preview browser below label
+    $browserYOffset = $controlsYOffset + 25
 
     # Temporarily remove anchor from preview browser to reposition it
     $previewBrowser.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
     $previewBrowser.Location = New-Object System.Drawing.Point(10, $browserYOffset)
-    $previewBrowser.Size = New-Object System.Drawing.Size($currentBrowserWidth, 180)
+
+    # Calculate dynamic height for preview browser (40% of remaining form height)
+    $availableHeight = $form.ClientSize.Height - $browserYOffset - 300
+    $browserHeight = [Math]::Max(250, $availableHeight * 0.5)
+    $previewBrowser.Size = New-Object System.Drawing.Size($currentBrowserWidth, $browserHeight)
 
     # Restore anchor after positioning
     $previewBrowser.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 
     # Update copy button position relative to browser (top-right corner)
     $copyHtmlButton.Location = New-Object System.Drawing.Point((10 + $currentBrowserWidth - 90), ($browserYOffset + 5))
+
+    # Position HTML up/down buttons to the right of browser
+    $htmlMoveUpButton.Location = New-Object System.Drawing.Point((10 + $currentBrowserWidth - 180), ($browserYOffset + 5))
+    $htmlMoveDownButton.Location = New-Object System.Drawing.Point((10 + $currentBrowserWidth - 180), ($browserYOffset + 40))
 
     # Position text preview section below HTML preview
     $textPreviewYOffset = $browserYOffset + $previewBrowser.Height + 10
@@ -1254,6 +1307,14 @@ Function Update-FormLayout {
     $textPreviewBox.Location = New-Object System.Drawing.Point(10, ($textPreviewYOffset + 25))
     $textPreviewBox.Width = $currentBrowserWidth
 
+    # Calculate dynamic height for text preview (remaining space)
+    $textBoxHeight = [Math]::Max(150, $availableHeight * 0.4)
+    $textPreviewBox.Height = $textBoxHeight
+
+    # Position text up/down buttons to the right of text box
+    $textMoveUpButton.Location = New-Object System.Drawing.Point((10 + $currentBrowserWidth - 180), ($textPreviewYOffset + 30))
+    $textMoveDownButton.Location = New-Object System.Drawing.Point((10 + $currentBrowserWidth - 180), ($textPreviewYOffset + 65))
+
     # Position action buttons at bottom, aligned to right edge
     $intButtonTop = $textPreviewBox.Location.Y + $textPreviewBox.Height + 10
 
@@ -1264,12 +1325,6 @@ Function Update-FormLayout {
     $applyButton.Location = New-Object System.Drawing.Point(($rightEdge - 190), $intButtonTop)
     $startupButton.Location = New-Object System.Drawing.Point(($rightEdge - 320), $intButtonTop)
 
-    # Adjust form height
-    $requiredHeight = $intButtonTop + 80
-    if ($form.Height -ne $requiredHeight) {
-        $form.Size = New-Object System.Drawing.Size($form.Width, $requiredHeight)
-    }
-
 } # end of Update-FormLayout function
 
 #endregion Dynamic Day Controls Creation
@@ -1279,9 +1334,10 @@ Function Update-FormLayout {
 # Preview WebBrowser control for HTML rendering
 $previewBrowser = New-Object System.Windows.Forms.WebBrowser
 $previewBrowser.Location = New-Object System.Drawing.Point(10, ($panelDropDown.Location.y + $panelDropDown.Size.Height + 20))
-$previewBrowser.Size = New-Object System.Drawing.Size(560, 180)
+$previewBrowser.Size = New-Object System.Drawing.Size(560, 250)
 $previewBrowser.ScriptErrorsSuppressed = $true
 $previewBrowser.AllowWebBrowserDrop = $false
+$previewBrowser.ScrollBarsEnabled = $false
 $previewBrowser.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($previewBrowser)
 
@@ -1353,13 +1409,13 @@ $form.Controls.Add($textPreviewLabel)
 # Text preview textbox
 $textPreviewBox = New-Object System.Windows.Forms.TextBox
 $textPreviewBox.Location = New-Object System.Drawing.Point(10, ($textPreviewLabel.Location.Y + 25))
-$textPreviewBox.Size = New-Object System.Drawing.Size(560, 80)
+$textPreviewBox.Size = New-Object System.Drawing.Size(560, 150)
 $textPreviewBox.Multiline = $true
-$textPreviewBox.ScrollBars = "Vertical"
+$textPreviewBox.ScrollBars = "None"
 $textPreviewBox.ReadOnly = $true
 $textPreviewBox.Font = New-Object System.Drawing.Font("Consolas", 9)
 $textPreviewBox.BackColor = [System.Drawing.Color]::WhiteSmoke
-$textPreviewBox.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+$textPreviewBox.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($textPreviewBox)
 
 # Update preview function
@@ -1868,12 +1924,14 @@ finally {
     if ($copyHtmlButton) { $copyHtmlButton.Dispose() }
     if ($textPreviewBox) { $textPreviewBox.Dispose() }
     if ($textPreviewLabel) { $textPreviewLabel.Dispose() }
+    if ($htmlPreviewLabel) { $htmlPreviewLabel.Dispose() }
     if ($applyButton) { $applyButton.Dispose() }
     if ($cancelButton) { $cancelButton.Dispose() }
     if ($startupButton) { $startupButton.Dispose() }
-    if ($moveUpButton) { $moveUpButton.Dispose() }
-    if ($moveDownButton) { $moveDownButton.Dispose() }
-    if ($positionLabel) { $positionLabel.Dispose() }
+    if ($htmlMoveUpButton) { $htmlMoveUpButton.Dispose() }
+    if ($htmlMoveDownButton) { $htmlMoveDownButton.Dispose() }
+    if ($textMoveUpButton) { $textMoveUpButton.Dispose() }
+    if ($textMoveDownButton) { $textMoveDownButton.Dispose() }
     if ($numDaysRequired) { $numDaysRequired.Dispose() }
     if ($includeTodayCheckbox) { $includeTodayCheckbox.Dispose() }
     if ($useAmPmCheckbox) { $useAmPmCheckbox.Dispose() }
