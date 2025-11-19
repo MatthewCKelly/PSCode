@@ -57,6 +57,7 @@
     <div class="row">
       <button id="testCanvasVisible">Test Canvas Visibility</button>
       <button id="testSimpleTriangle">Test Simple 2D Triangle</button>
+      <button id="toggleDepthTest">Disable Depth Test</button>
       <button id="resetPivot">Reset 3D pivot</button>
     </div>
     <div class="row">
@@ -341,6 +342,15 @@ if (pivotGL) {
 
     checkGLError(pivotGL, 'after pivot setup');
 
+    // Verify buffer contains data
+    pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, vbo);
+    const bufferSize = pivotGL.getBufferParameter(pivotGL.ARRAY_BUFFER, pivotGL.BUFFER_SIZE);
+    console.log('VBO buffer size:', bufferSize, 'bytes (expected 192 = 8 vertices * 6 floats * 4 bytes)');
+
+    pivotGL.bindBuffer(pivotGL.ELEMENT_ARRAY_BUFFER, ibo);
+    const indexBufferSize = pivotGL.getBufferParameter(pivotGL.ELEMENT_ARRAY_BUFFER, pivotGL.BUFFER_SIZE);
+    console.log('IBO buffer size:', indexBufferSize, 'bytes (expected 72 = 36 indices * 2 bytes)');
+
     addStatus('3D pivot program compiled/linked.');
     console.log('Pivot setup OK', {
       api: pivotAPI,
@@ -495,6 +505,20 @@ document.getElementById('testSimpleTriangle').onclick = ()=>{
   }
 };
 
+let depthTestDisabled = false;
+document.getElementById('toggleDepthTest').onclick = ()=>{
+  depthTestDisabled = !depthTestDisabled;
+  if (depthTestDisabled) {
+    addStatus('Depth test DISABLED for cube rendering', 'warn');
+    console.log('Depth test disabled - cube should render without depth testing');
+    document.getElementById('toggleDepthTest').textContent = 'Enable Depth Test';
+  } else {
+    addStatus('Depth test ENABLED for cube rendering', 'ok');
+    console.log('Depth test enabled - normal 3D rendering');
+    document.getElementById('toggleDepthTest').textContent = 'Disable Depth Test';
+  }
+};
+
 /* Resize + draw loop (with robust size guards) */
 function resizeCanvas(gl,canvas){
   const w = canvas.clientWidth || 640, h = canvas.clientHeight || 360;
@@ -582,7 +606,11 @@ function drawPivot(){
   }
 
   // Normal 3D cube rendering
-  pivotGL.enable(pivotGL.DEPTH_TEST);
+  if (depthTestDisabled) {
+    pivotGL.disable(pivotGL.DEPTH_TEST);
+  } else {
+    pivotGL.enable(pivotGL.DEPTH_TEST);
+  }
 
   const t = (performance.now()-startTime)/1000.0;
   const aspect = pivotCanvas.width/pivotCanvas.height;
@@ -640,11 +668,18 @@ function drawPivot(){
   pivotGL.uniform1f(uTime, t);
 
   if (frameCount === 1) {
+    console.log('Uniforms set:', { uMVP, uTime, time: t });
     console.log('About to draw 36 triangles...');
     console.log('Current ARRAY_BUFFER binding:', pivotGL.getParameter(pivotGL.ARRAY_BUFFER_BINDING));
     console.log('Current ELEMENT_ARRAY_BUFFER binding:', pivotGL.getParameter(pivotGL.ELEMENT_ARRAY_BUFFER_BINDING));
     console.log('Vertex attrib 0 (pos) enabled:', pivotGL.getVertexAttrib(locPos, pivotGL.VERTEX_ATTRIB_ARRAY_ENABLED));
+    console.log('Vertex attrib 0 (pos) buffer:', pivotGL.getVertexAttrib(locPos, pivotGL.VERTEX_ATTRIB_ARRAY_BUFFER_BINDING));
+    console.log('Vertex attrib 0 (pos) size:', pivotGL.getVertexAttrib(locPos, pivotGL.VERTEX_ATTRIB_ARRAY_SIZE));
     console.log('Vertex attrib 1 (col) enabled:', pivotGL.getVertexAttrib(locCol, pivotGL.VERTEX_ATTRIB_ARRAY_ENABLED));
+    console.log('Vertex attrib 1 (col) buffer:', pivotGL.getVertexAttrib(locCol, pivotGL.VERTEX_ATTRIB_ARRAY_BUFFER_BINDING));
+    console.log('Vertex attrib 1 (col) size:', pivotGL.getVertexAttrib(locCol, pivotGL.VERTEX_ATTRIB_ARRAY_SIZE));
+    console.log('Expected VBO:', vbo);
+    console.log('Expected IBO:', ibo);
   }
 
   pivotGL.drawElements(pivotGL.TRIANGLES, 36, pivotGL.UNSIGNED_SHORT, 0);
