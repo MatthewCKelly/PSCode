@@ -158,8 +158,7 @@ Function Decode-ConnectionSettings {
         if ($Data.Length -gt ($Offset + 3)) {
             Write-Detail -Message "Reading proxy length from offset $Offset" -Level Debug
             Write-Detail -Message "Proxy length bytes: 0x$($Data[$Offset].ToString('X2')) 0x$($Data[$Offset+1].ToString('X2')) 0x$($Data[$Offset+2].ToString('X2')) 0x$($Data[$Offset+3].ToString('X2'))" -Level Debug
-            $ProxyLength = [System.BitConverter]::ToUInt32($Data, $Offset)
-            $ProxyLength = Read-UInt32FromBytes -Data $Data -start $Offset -Offset 4
+            $ProxyLength = Read-UInt32FromBytes -Data $Data -Start $Offset -Offset 0
             Write-Detail -Message "Proxy server section: $ProxyLength bytes at offset $Offset" -Level Debug
             $Offset += 4
             
@@ -196,9 +195,8 @@ Function Decode-ConnectionSettings {
                 $Settings.ProxyBypass = ""
                 return $Settings
             } # end of bounds check
-            
-            # $BypassLength = [System.BitConverter]::ToUInt32($Data, $Offset)
-            $BypassLength  = Read-UInt32FromBytes -Data $Data -start $Offset -Offset 4
+
+            $BypassLength  = Read-UInt32FromBytes -Data $Data -Start $Offset -Offset 0
             Write-Detail -Message "Proxy bypass section: $BypassLength bytes at offset $Offset" -Level Debug
             
             # Sanity check on bypass length
@@ -233,9 +231,8 @@ Function Decode-ConnectionSettings {
         if ($Data.Length -gt ($Offset + 3)) {
             Write-Detail -Message "Reading auto config length from offset $Offset, remaining bytes: $($Data.Length - $Offset)" -Level Debug
             Write-Detail -Message "Next 4 bytes: 0x$($Data[$Offset].ToString('X2')) 0x$($Data[$Offset+1].ToString('X2')) 0x$($Data[$Offset+2].ToString('X2')) 0x$($Data[$Offset+3].ToString('X2'))" -Level Debug
-            
-            # $ConfigLength = [System.BitConverter]::ToUInt32($Data, $Offset)
-            $ConfigLength  = Read-UInt32FromBytes -Data $Data -start $Offset -Offset 4
+
+            $ConfigLength  = Read-UInt32FromBytes -Data $Data -Start $Offset -Offset 0
             Write-Detail -Message "Auto config URL section: $ConfigLength bytes at offset $Offset" -Level Debug
             
             # Sanity check - if length is unreasonably large, we have a parsing error

@@ -250,14 +250,23 @@ $Position = $Start + $Offset
 
 **Usage Example:**
 ```powershell
-$Version = Read-UInt32FromBytes -Data $Bytes -Start 0 -Offset 0
-if ($null -eq $Version) {
-    Write-Detail -Message "Failed to read version field" -Level Error
+# Reading from the current offset position
+$Offset = 8
+$ProxyLength = Read-UInt32FromBytes -Data $Bytes -Start $Offset -Offset 0
+if ($null -eq $ProxyLength) {
+    Write-Detail -Message "Failed to read proxy length field" -Level Error
     return
 }
+
+# Or equivalently, reading from absolute position
+$ProxyLength = Read-UInt32FromBytes -Data $Bytes -Start 0 -Offset 8
 ```
 
-**IMPORTANT:** This function was added to fix issues with direct `[System.BitConverter]::ToUInt32()` calls that didn't properly validate bounds. Always use this function instead of direct BitConverter calls for safer parsing.
+**IMPORTANT:**
+- This function was added to fix issues with direct `[System.BitConverter]::ToUInt32()` calls that didn't properly validate bounds
+- **NEVER use `[System.BitConverter]::ToUInt32()` outside of this wrapper function**
+- Even with validation, always use this wrapper instead of calling BitConverter directly
+- The only place BitConverter should be called is inside the Read-UInt32FromBytes function itself
 
 ---
 
@@ -409,18 +418,28 @@ $Offset += $ProxyLength
 
 ### 2. Safe UInt32 Reading Pattern
 
-**DO NOT use direct BitConverter without validation:**
+**NEVER use direct BitConverter - ALWAYS use the Read-UInt32FromBytes wrapper:**
 ```powershell
-# ❌ WRONG - No bounds checking
+# ❌ WRONG - Never use BitConverter directly
 $Value = [System.BitConverter]::ToUInt32($Data, $Offset)
 
-# ✅ CORRECT - Uses safe wrapper
+# ✅ CORRECT - Use safe wrapper function
+# When reading from current offset position:
+$Value = Read-UInt32FromBytes -Data $Data -Start $Offset -Offset 0
+if ($null -eq $Value) {
+    Write-Detail -Message "Failed to read value at offset $Offset" -Level Error
+    return $null
+}
+
+# Or equivalently (reading from absolute position):
 $Value = Read-UInt32FromBytes -Data $Data -Start 0 -Offset $Offset
 if ($null -eq $Value) {
     Write-Detail -Message "Failed to read value at offset $Offset" -Level Error
     return $null
 }
 ```
+
+**Key Principle:** The position is calculated as `$Start + $Offset`, so use whichever makes your code clearer.
 
 ### 3. Hex Dump Display Pattern
 
@@ -625,8 +644,10 @@ Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Con
 **DO use Read-UInt32FromBytes for all DWORD reads:**
 ```powershell
 ✅ $Value = Read-UInt32FromBytes -Data $Bytes -Start $Offset -Offset 0
-❌ $Value = [System.BitConverter]::ToUInt32($Bytes, $Offset)  # No validation!
+❌ $Value = [System.BitConverter]::ToUInt32($Bytes, $Offset)  # NEVER use directly!
 ```
+
+**Note:** The ONLY place `[System.BitConverter]::ToUInt32()` should appear is inside the Read-UInt32FromBytes function itself.
 
 **DO check for null returns:**
 ```powershell
@@ -704,17 +725,21 @@ if ($Length -gt 0) {
 }
 ```
 
-❌ **Don't skip validation** - Binary data can be malformed
+❌ **Don't use BitConverter directly** - Always use Read-UInt32FromBytes wrapper
 ```powershell
-# WRONG
-$Value = [System.BitConverter]::ToUInt32($Data, $Offset)
-
-# CORRECT
+# WRONG - Even with validation, don't use BitConverter directly
 if (($Offset + 4) -gt $Data.Length) {
     Write-Detail -Message "Not enough bytes at offset $Offset" -Level Error
     return $null
 }
 $Value = [System.BitConverter]::ToUInt32($Data, $Offset)
+
+# CORRECT - Use the wrapper function
+$Value = Read-UInt32FromBytes -Data $Data -Start 0 -Offset $Offset
+if ($null -eq $Value) {
+    Write-Detail -Message "Failed to read value at offset $Offset" -Level Error
+    return $null
+}
 ```
 
 ❌ **Don't modify flags without understanding implications**
