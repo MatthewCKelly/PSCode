@@ -216,7 +216,7 @@ Function Read-UInt32FromBytes {
     param(
         [byte[]]$Data,
         [int]$Start,
-        [int]$Offset
+        [int]$Length = 4
     )
 }
 ```
@@ -226,7 +226,7 @@ Function Read-UInt32FromBytes {
 **Parameters:**
 - `$Data` - Byte array containing binary data
 - `$Start` - Starting position in array
-- `$Offset` - Offset from start position
+- `$Length` - Number of bytes to read (default: 4 for UInt32)
 
 **Returns:**
 - `[uint32]` - Decoded value on success
@@ -234,16 +234,19 @@ Function Read-UInt32FromBytes {
 
 **Implementation:**
 ```powershell
-$Position = $Start + $Offset
+# Validate we have enough bytes
+if (($Start + $Length) -gt $Data.Length) {
+    return $null
+}
 
-# Extract 4-byte subset from the data array
-$SubsetBytes = $Data[$Position..($Position + 3)]
+# Extract subset from the data array
+$SubsetBytes = $Data[$Start..($Start + $Length - 1)]
 
 # Convert the subset to UInt32 (reading from position 0 of the subset)
 $Value = [System.BitConverter]::ToUInt32($SubsetBytes, 0)
 ```
 
-**Key Principle:** This function extracts a **subset** of the data (4 bytes) and converts that subset, rather than passing the entire data array to BitConverter. This makes the operation more explicit and safer.
+**Key Principle:** This function extracts a **subset** of the specified length starting at the Start position, then converts that subset to UInt32. This makes the operation explicit and safer than passing the entire array to BitConverter.
 
 **Error Handling:**
 - Validates sufficient bytes available (needs 4 bytes)
@@ -252,21 +255,24 @@ $Value = [System.BitConverter]::ToUInt32($SubsetBytes, 0)
 
 **Debugging Output:**
 ```
-[2025-11-18 10:30:45] Debug    108 Read UInt32 at position 8 (start 0 + offset 8): 0x01 00 00 00 = 1
+[2025-11-18 10:30:45] Debug    110 Read UInt32 at position 8: 0x01 00 00 00 = 1
 ```
 
 **Usage Example:**
 ```powershell
-# Reading from the current offset position
+# Reading from a specific offset (Length defaults to 4)
 $Offset = 8
-$ProxyLength = Read-UInt32FromBytes -Data $Bytes -Start $Offset -Offset 0
+$ProxyLength = Read-UInt32FromBytes -Data $Bytes -Start $Offset
 if ($null -eq $ProxyLength) {
     Write-Detail -Message "Failed to read proxy length field" -Level Error
     return
 }
 
-# Or equivalently, reading from absolute position
-$ProxyLength = Read-UInt32FromBytes -Data $Bytes -Start 0 -Offset 8
+# Reading version at offset 0
+$Version = Read-UInt32FromBytes -Data $Bytes -Start 0
+
+# Reading flags at offset 4
+$Flags = Read-UInt32FromBytes -Data $Bytes -Start 4
 ```
 
 **IMPORTANT:**
@@ -274,7 +280,7 @@ $ProxyLength = Read-UInt32FromBytes -Data $Bytes -Start 0 -Offset 8
 - **NEVER use `[System.BitConverter]::ToUInt32()` outside of this wrapper function**
 - Even with validation, always use this wrapper instead of calling BitConverter directly
 - The only place BitConverter should be called is inside the Read-UInt32FromBytes function itself
-- **Implementation detail:** The function extracts a 4-byte subset first (`$Data[$Position..($Position+3)]`), then converts that subset at position 0, rather than passing the entire array to BitConverter
+- **Implementation:** The function extracts a subset of Length bytes (default 4) starting at Start position, then converts that subset at position 0
 
 ---
 
@@ -432,22 +438,19 @@ $Offset += $ProxyLength
 $Value = [System.BitConverter]::ToUInt32($Data, $Offset)
 
 # ✅ CORRECT - Use safe wrapper function
-# When reading from current offset position:
-$Value = Read-UInt32FromBytes -Data $Data -Start $Offset -Offset 0
+$Value = Read-UInt32FromBytes -Data $Data -Start $Offset
 if ($null -eq $Value) {
     Write-Detail -Message "Failed to read value at offset $Offset" -Level Error
     return $null
 }
 
-# Or equivalently (reading from absolute position):
-$Value = Read-UInt32FromBytes -Data $Data -Start 0 -Offset $Offset
-if ($null -eq $Value) {
-    Write-Detail -Message "Failed to read value at offset $Offset" -Level Error
-    return $null
-}
+# Reading from specific positions
+$Version = Read-UInt32FromBytes -Data $Data -Start 0   # Offset 0-3
+$Flags = Read-UInt32FromBytes -Data $Data -Start 4     # Offset 4-7
+$Length = Read-UInt32FromBytes -Data $Data -Start 8    # Offset 8-11
 ```
 
-**Key Principle:** The position is calculated as `$Start + $Offset`, so use whichever makes your code clearer.
+**Key Principle:** Pass the starting position directly. The function extracts 4 bytes from that position.
 
 ### 3. Hex Dump Display Pattern
 
@@ -651,7 +654,7 @@ Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Con
 
 **DO use Read-UInt32FromBytes for all DWORD reads:**
 ```powershell
-✅ $Value = Read-UInt32FromBytes -Data $Bytes -Start $Offset -Offset 0
+✅ $Value = Read-UInt32FromBytes -Data $Bytes -Start $Offset
 ❌ $Value = [System.BitConverter]::ToUInt32($Bytes, $Offset)  # NEVER use directly!
 ```
 
@@ -659,10 +662,10 @@ Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Con
 
 **DO check for null returns:**
 ```powershell
-✅ $Value = Read-UInt32FromBytes -Data $Bytes -Start 0 -Offset 4
+✅ $Value = Read-UInt32FromBytes -Data $Bytes -Start 4
    if ($null -eq $Value) { return $null }
 
-❌ $Value = Read-UInt32FromBytes -Data $Bytes -Start 0 -Offset 4
+❌ $Value = Read-UInt32FromBytes -Data $Bytes -Start 4
    # Continue without checking - will fail later!
 ```
 
@@ -727,8 +730,9 @@ if ($ProxyLength -gt 0) {
 $ProxyServer = [System.Text.Encoding]::ASCII.GetString($Data[12..63])
 
 # CORRECT
-$Length = Read-UInt32FromBytes -Data $Data -Start $Offset -Offset 0
+$Length = Read-UInt32FromBytes -Data $Data -Start $Offset
 if ($Length -gt 0) {
+    $Offset += 4  # Skip the length field
     $ProxyServer = [System.Text.Encoding]::ASCII.GetString($Data[$Offset..($Offset+$Length-1)])
 }
 ```
@@ -743,7 +747,7 @@ if (($Offset + 4) -gt $Data.Length) {
 $Value = [System.BitConverter]::ToUInt32($Data, $Offset)
 
 # CORRECT - Use the wrapper function
-$Value = Read-UInt32FromBytes -Data $Data -Start 0 -Offset $Offset
+$Value = Read-UInt32FromBytes -Data $Data -Start $Offset
 if ($null -eq $Value) {
     Write-Detail -Message "Failed to read value at offset $Offset" -Level Error
     return $null

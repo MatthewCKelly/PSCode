@@ -90,30 +90,27 @@ Function Read-UInt32FromBytes {
     param(
         [byte[]]$Data,
         [int]$Start,
-        [int]$Offset
+        [int]$Length = 4
     )
-    
-    # Calculate actual position in array
-    $Position = $Start + $Offset
-    
+
     # Validate we have enough bytes
-    if (($Position + 4) -gt $Data.Length) {
-        Write-Detail -Message "ERROR: Cannot read UInt32 at position $Position (start $Start + offset $Offset) - not enough bytes (need 4, have $($Data.Length - $Position))" -Level Error
+    if (($Start + $Length) -gt $Data.Length) {
+        Write-Detail -Message "ERROR: Cannot read UInt32 at position $Start - not enough bytes (need $Length, have $($Data.Length - $Start))" -Level Error
         return $null
     } # end of bounds check
-    
-    # Extract 4-byte subset and convert
+
+    # Extract subset and convert
     try {
-        # Extract only the 4 bytes we need
-        $SubsetBytes = $Data[$Position..($Position + 3)]
+        # Extract only the bytes we need (should always be 4 for UInt32)
+        $SubsetBytes = $Data[$Start..($Start + $Length - 1)]
 
         # Convert the subset to UInt32 (reading from position 0 of the subset)
         $Value = [System.BitConverter]::ToUInt32($SubsetBytes, 0)
 
-        Write-Detail -Message "Read UInt32 at position $Position (start $Start + offset $Offset): 0x$($Data[$Position].ToString('X2')) $($Data[$Position+1].ToString('X2')) $($Data[$Position+2].ToString('X2')) $($Data[$Position+3].ToString('X2')) = $Value" -Level Debug
+        Write-Detail -Message "Read UInt32 at position $Start: 0x$($Data[$Start].ToString('X2')) $($Data[$Start+1].ToString('X2')) $($Data[$Start+2].ToString('X2')) $($Data[$Start+3].ToString('X2')) = $Value" -Level Debug
         return $Value
     } catch {
-        Write-Detail -Message "ERROR: Failed to read UInt32 at position $Position : $($_.Exception.Message)" -Level Error
+        Write-Detail -Message "ERROR: Failed to read UInt32 at position $Start : $($_.Exception.Message)" -Level Error
         return $null
     } # end of try-catch
 } # end of Read-UInt32FromBytes function
@@ -129,15 +126,15 @@ Function Decode-ConnectionSettings {
     
     try {
         # Version/Counter (first 4 bytes as little-endian DWORD)
-        $Settings.Version = Read-UInt32FromBytes -Data $Data -Start 0 -Offset 0
+        $Settings.Version = Read-UInt32FromBytes -Data $Data -Start 0
         if ($null -eq $Settings.Version) {
             Write-Detail -Message "Failed to read version field" -Level Error
             return $Settings
         } # end of version check
         Write-Detail -Message "Version/Counter: $($Settings.Version)" -Level Debug
-        
+
         # Connection flags (bytes 4-7 as little-endian DWORD)
-        $Settings.Flags = Read-UInt32FromBytes -Data $Data -Start 0 -Offset 4
+        $Settings.Flags = Read-UInt32FromBytes -Data $Data -Start 4
         if ($null -eq $Settings.Flags) {
             Write-Detail -Message "Failed to read flags field" -Level Error
             return $Settings
@@ -163,7 +160,7 @@ Function Decode-ConnectionSettings {
         if ($Data.Length -gt ($Offset + 3)) {
             Write-Detail -Message "Reading proxy length from offset $Offset" -Level Debug
             Write-Detail -Message "Proxy length bytes: 0x$($Data[$Offset].ToString('X2')) 0x$($Data[$Offset+1].ToString('X2')) 0x$($Data[$Offset+2].ToString('X2')) 0x$($Data[$Offset+3].ToString('X2'))" -Level Debug
-            $ProxyLength = Read-UInt32FromBytes -Data $Data -Start $Offset -Offset 0
+            $ProxyLength = Read-UInt32FromBytes -Data $Data -Start $Offset
             Write-Detail -Message "Proxy server section: $ProxyLength bytes at offset $Offset" -Level Debug
             $Offset += 4
             
@@ -201,7 +198,7 @@ Function Decode-ConnectionSettings {
                 return $Settings
             } # end of bounds check
 
-            $BypassLength  = Read-UInt32FromBytes -Data $Data -Start $Offset -Offset 0
+            $BypassLength = Read-UInt32FromBytes -Data $Data -Start $Offset
             Write-Detail -Message "Proxy bypass section: $BypassLength bytes at offset $Offset" -Level Debug
             $Offset += 4
 
@@ -235,7 +232,7 @@ Function Decode-ConnectionSettings {
             Write-Detail -Message "Reading auto config length from offset $Offset, remaining bytes: $($Data.Length - $Offset)" -Level Debug
             Write-Detail -Message "Next 4 bytes: 0x$($Data[$Offset].ToString('X2')) 0x$($Data[$Offset+1].ToString('X2')) 0x$($Data[$Offset+2].ToString('X2')) 0x$($Data[$Offset+3].ToString('X2'))" -Level Debug
 
-            $ConfigLength  = Read-UInt32FromBytes -Data $Data -Start $Offset -Offset 0
+            $ConfigLength = Read-UInt32FromBytes -Data $Data -Start $Offset
             Write-Detail -Message "Auto config URL section: $ConfigLength bytes at offset $Offset" -Level Debug
             
             # Sanity check - if length is unreasonably large, we have a parsing error
