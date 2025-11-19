@@ -8,11 +8,12 @@
   :root { color-scheme: dark; }
   html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0;
     font-family: system-ui, Segoe UI, Arial, sans-serif; }
-  #wrap { display:grid; grid-template-columns: 1fr 400px; gap:16px; height:100%; }
-  #panel { padding:16px; border-left:1px solid #334155; overflow:auto; transition: margin-right 0.3s ease; }
-  #panel.collapsed { margin-right: -400px; }
+  #wrap { display:grid; grid-template-columns: 1fr 400px; gap:16px; height:100%; transition: grid-template-columns 0.3s ease; }
+  #wrap.panel-collapsed { grid-template-columns: 1fr 0px; gap:0; }
+  #panel { padding:16px; border-left:1px solid #334155; overflow:auto; transition: all 0.3s ease; }
+  #panel.collapsed { opacity: 0; padding: 0; width: 0; overflow: hidden; }
   #togglePanel { position:absolute; right:16px; top:16px; z-index:10; transition: right 0.3s ease; }
-  #panel.collapsed ~ #canvases #togglePanel { right:0; }
+  #wrap.panel-collapsed #togglePanel { right:0; }
   #workerSection { display:none; margin-top:12px; }
   #workerSection.visible { display:block; }
   h1,h2 { margin:0 0 8px; }
@@ -79,7 +80,7 @@
     <h2>Controls</h2>
     <div class="row">
       <button id="toggleRotation">Stop Rotation</button>
-      <button id="toggleCube">Hide Cube</button>
+      <button id="toggleCube">Show Cube</button>
       <button id="resetPivot">Reset 3D pivot</button>
     </div>
     <div class="row">
@@ -334,8 +335,9 @@ let locPos=-1, locCol=-1;
 let testProgram=null, testVAO=null, testVBO=null;
 
 // Terrain rendering (Mt Cook profile with Bézier curves)
-let terrainProgram=null, terrainVAO=null, terrainVBO=null, terrainCount=0;
+let terrainProgram=null, terrainVAO=null, terrainVBO=null, terrainIBO=null, terrainCount=0;
 let terrainMVP=null;
+let terrainIndexCount=0;
 let gridProgram=null, gridVAO=null, gridVBO=null, gridCount=0;
 let gridMVP=null;
 
@@ -525,25 +527,25 @@ if (pivotGL) {
     // Mt Cook terrain profile using Bézier curves
     // Simplified profile: left slope, main peak, right slope
     const mtCookProfile = [
-      // Left approach (gentle rise)
+      // Left approach (gentle rise) - base at ground level (y=0)
       [
-        {x: -10, y: -2}, {x: -8, y: -1.5}, {x: -6, y: -0.5}, {x: -4, y: 0.5}
+        {x: -10, y: 0}, {x: -8, y: 0.5}, {x: -6, y: 1.5}, {x: -4, y: 2.5}
       ],
       // Steep ascent to summit
       [
-        {x: -4, y: 0.5}, {x: -3, y: 2}, {x: -1, y: 3.5}, {x: 0, y: 4.2}
+        {x: -4, y: 2.5}, {x: -3, y: 4}, {x: -1, y: 5.5}, {x: 0, y: 6.2}
       ],
       // Summit ridge
       [
-        {x: 0, y: 4.2}, {x: 0.5, y: 4.1}, {x: 1, y: 3.8}
+        {x: 0, y: 6.2}, {x: 0.5, y: 6.1}, {x: 1, y: 5.8}
       ],
       // Right descent
       [
-        {x: 1, y: 3.8}, {x: 3, y: 2}, {x: 5, y: 0.5}, {x: 8, y: -1}
+        {x: 1, y: 5.8}, {x: 3, y: 4}, {x: 5, y: 2.5}, {x: 8, y: 1}
       ],
-      // Far right
+      // Far right - back to ground level
       [
-        {x: 8, y: -1}, {x: 9, y: -1.5}, {x: 10, y: -2}
+        {x: 8, y: 1}, {x: 9, y: 0.5}, {x: 10, y: 0}
       ]
     ];
 
@@ -587,6 +589,28 @@ if (pivotGL) {
 
     terrainCount = terrainVerts.length / 3;
 
+    // Generate indices for 3D mesh surface (triangles connecting Z-slices)
+    const terrainIndices = [];
+    const vertsPerSlice = terrainCount / zSlices; // Number of vertices in each Z-slice
+
+    for (let slice = 0; slice < zSlices - 1; slice++) {
+      const sliceStart = slice * vertsPerSlice;
+      const nextSliceStart = (slice + 1) * vertsPerSlice;
+
+      for (let i = 0; i < vertsPerSlice - 1; i++) {
+        const v0 = sliceStart + i;
+        const v1 = sliceStart + i + 1;
+        const v2 = nextSliceStart + i;
+        const v3 = nextSliceStart + i + 1;
+
+        // Create two triangles for each quad
+        terrainIndices.push(v0, v2, v1); // Triangle 1
+        terrainIndices.push(v1, v2, v3); // Triangle 2
+      }
+    }
+
+    terrainIndexCount = terrainIndices.length;
+
     if (pivotAPI === 'WebGL2') {
       terrainVAO = pivotGL.createVertexArray();
       pivotGL.bindVertexArray(terrainVAO);
@@ -596,6 +620,10 @@ if (pivotGL) {
     pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, terrainVBO);
     pivotGL.bufferData(pivotGL.ARRAY_BUFFER, new Float32Array(terrainVerts), pivotGL.STATIC_DRAW);
 
+    terrainIBO = pivotGL.createBuffer();
+    pivotGL.bindBuffer(pivotGL.ELEMENT_ARRAY_BUFFER, terrainIBO);
+    pivotGL.bufferData(pivotGL.ELEMENT_ARRAY_BUFFER, new Uint16Array(terrainIndices), pivotGL.STATIC_DRAW);
+
     const terrainLocPos = pivotAPI === 'WebGL2' ? 0 : pivotGL.getAttribLocation(terrainProgram, 'aPos');
     pivotGL.vertexAttribPointer(terrainLocPos, 3, pivotGL.FLOAT, false, 0, 0);
     pivotGL.enableVertexAttribArray(terrainLocPos);
@@ -604,7 +632,7 @@ if (pivotGL) {
       pivotGL.bindVertexArray(null);
     }
 
-    console.log(`Mt Cook terrain ready (${terrainCount} vertices)`);
+    console.log(`Mt Cook terrain ready (${terrainCount} vertices, ${terrainIndexCount} indices, ${terrainIndexCount/3} triangles)`);
   } catch (e) {
     console.error('Terrain setup error:', e);
   }
@@ -670,9 +698,10 @@ if (pivotGL) {
 
 /* Pivot interactions and cube controls */
 let yaw=0, pitch=0, dragging=false, lastX=0, lastY=0;
-let cubeVisible = true;
+let cubeVisible = false;  // Start with cube hidden
 let cubeScale = 1.5;
 let rotationEnabled = true;
+let zoomLevel = -6;  // Camera distance
 
 function resetPivot(){ yaw=0; pitch=0; }
 document.getElementById('resetPivot').onclick = resetPivot;
@@ -705,10 +734,19 @@ pivotCanvas.addEventListener('pointermove', e=>{
   yaw += dx*0.01; pitch += dy*0.01;
 });
 
+// Mouse wheel zoom
+pivotCanvas.addEventListener('wheel', e=>{
+  e.preventDefault();
+  zoomLevel += e.deltaY * 0.01;
+  zoomLevel = Math.max(-50, Math.min(-2, zoomLevel)); // Clamp between -50 and -2
+}, {passive: false});
+
 /* Panel toggle */
 document.getElementById('togglePanel').onclick = ()=>{
+  const wrap = document.getElementById('wrap');
   const panel = document.getElementById('panel');
   const btn = document.getElementById('togglePanel');
+  wrap.classList.toggle('panel-collapsed');
   panel.classList.toggle('collapsed');
   btn.textContent = panel.classList.contains('collapsed') ? '◀ Show Panel' : 'Hide Panel ▶';
 };
@@ -887,14 +925,14 @@ function drawPivot(){
   const t = (performance.now()-startTime)/1000.0;
   const aspect = pivotCanvas.width/pivotCanvas.height;
   const proj = matPerspective(60*Math.PI/180, aspect, 0.1, 100); // slightly wider FOV
-  const view = matTranslate(0,0,-6);
+  const view = matTranslate(0,0,zoomLevel);
   const autoRotation = rotationEnabled ? t * 1.5 : 0;
   const rot = matMul(matRotateY(yaw + autoRotation), matRotateX(pitch));
   // FIXED: Reverse order for column-major WebGL matrices (matMul uses row-major convention)
   const mvp = matMul(rot, matMul(view, proj));
 
-  // Render Mt Cook terrain (background) - rotates with scene
-  if (terrainProgram && terrainVBO) {
+  // Render Mt Cook terrain (background) - 3D mesh surface
+  if (terrainProgram && terrainVBO && terrainIBO) {
     pivotGL.useProgram(terrainProgram);
     // Apply same rotation as cube for terrain
     pivotGL.uniformMatrix4fv(terrainMVP, false, mvp);
@@ -904,13 +942,14 @@ function drawPivot(){
     } else {
       // WebGL1 path
       pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, terrainVBO);
+      pivotGL.bindBuffer(pivotGL.ELEMENT_ARRAY_BUFFER, terrainIBO);
       const terrainLocPos = pivotGL.getAttribLocation(terrainProgram, 'aPos');
       pivotGL.vertexAttribPointer(terrainLocPos, 3, pivotGL.FLOAT, false, 0, 0);
       pivotGL.enableVertexAttribArray(terrainLocPos);
     }
 
-    pivotGL.lineWidth(2.0);  // Thicker lines for visibility
-    pivotGL.drawArrays(pivotGL.LINE_STRIP, 0, terrainCount);
+    // Render as 3D mesh surface (triangles)
+    pivotGL.drawElements(pivotGL.TRIANGLES, terrainIndexCount, pivotGL.UNSIGNED_SHORT, 0);
   }
 
   // Render ground grid plane at y=0
