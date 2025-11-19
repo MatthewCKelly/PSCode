@@ -327,6 +327,8 @@ let testProgram=null, testVAO=null, testVBO=null;
 // Terrain rendering (Mt Cook profile with Bézier curves)
 let terrainProgram=null, terrainVAO=null, terrainVBO=null, terrainCount=0;
 let terrainMVP=null;
+let gridProgram=null, gridVAO=null, gridVBO=null, gridCount=0;
+let gridMVP=null;
 
 if (pivotGL) {
   try {
@@ -536,12 +538,20 @@ if (pivotGL) {
       ]
     ];
 
-    // Generate terrain vertices from Bézier curves
+    // Generate 3D terrain vertices by creating multiple Z slices
     const terrainVerts = [];
-    for (const curve of mtCookProfile) {
-      const points = generateBezierPoints(curve, 30, curve.length === 4);
-      for (const pt of points) {
-        terrainVerts.push(pt.x, pt.y, -12);  // Z = -12 (far behind cube)
+    const zSlices = 15;  // Number of depth slices
+    const zStart = -15;
+    const zEnd = -9;
+    const zStep = (zEnd - zStart) / (zSlices - 1);
+
+    for (let slice = 0; slice < zSlices; slice++) {
+      const z = zStart + slice * zStep;
+      for (const curve of mtCookProfile) {
+        const points = generateBezierPoints(curve, 30, curve.length === 4);
+        for (const pt of points) {
+          terrainVerts.push(pt.x, pt.y, z);
+        }
       }
     }
 
@@ -567,6 +577,58 @@ if (pivotGL) {
     console.log(`Mt Cook terrain ready (${terrainCount} vertices)`);
   } catch (e) {
     console.error('Terrain setup error:', e);
+  }
+
+  // Create ground grid plane at y=0
+  try {
+    console.log('Creating ground grid plane...');
+
+    // Reuse terrain shaders (same structure - position-only, MVP transform)
+    gridProgram = terrainProgram;  // Use same shader program
+    gridMVP = terrainMVP;           // Use same uniform location
+
+    // Generate grid lines at y=0 (ground plane)
+    const gridVerts = [];
+    const gridSize = 20;      // Grid extends from -10 to +10 in X and Z
+    const gridSpacing = 1;    // 1 unit spacing
+    const gridMin = -10;
+    const gridMax = 10;
+    const y = 0;              // Ground level
+
+    // Lines parallel to X-axis (varying Z)
+    for (let z = gridMin; z <= gridMax; z += gridSpacing) {
+      gridVerts.push(gridMin, y, z);
+      gridVerts.push(gridMax, y, z);
+    }
+
+    // Lines parallel to Z-axis (varying X)
+    for (let x = gridMin; x <= gridMax; x += gridSpacing) {
+      gridVerts.push(x, y, gridMin);
+      gridVerts.push(x, y, gridMax);
+    }
+
+    gridCount = gridVerts.length / 3;
+
+    if (pivotAPI === 'WebGL2') {
+      gridVAO = pivotGL.createVertexArray();
+      pivotGL.bindVertexArray(gridVAO);
+    }
+
+    gridVBO = pivotGL.createBuffer();
+    pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, gridVBO);
+    pivotGL.bufferData(pivotGL.ARRAY_BUFFER, new Float32Array(gridVerts), pivotGL.STATIC_DRAW);
+
+    const gridLocPos = pivotAPI === 'WebGL2' ? 0 : pivotGL.getAttribLocation(gridProgram, 'aPos');
+    pivotGL.vertexAttribPointer(gridLocPos, 3, pivotGL.FLOAT, false, 0, 0);
+    pivotGL.enableVertexAttribArray(gridLocPos);
+
+    if (pivotAPI === 'WebGL2') {
+      pivotGL.bindVertexArray(null);
+    }
+
+    console.log(`Ground grid ready (${gridCount} vertices, ${gridCount/2} lines)`);
+  } catch (e) {
+    console.error('Grid setup error:', e);
   }
 
   // Re-bind main cube VAO to ensure it's active for rendering
@@ -810,6 +872,25 @@ function drawPivot(){
 
     pivotGL.lineWidth(2.0);  // Thicker lines for visibility
     pivotGL.drawArrays(pivotGL.LINE_STRIP, 0, terrainCount);
+  }
+
+  // Render ground grid plane at y=0
+  if (gridProgram && gridVBO) {
+    pivotGL.useProgram(gridProgram);
+    pivotGL.uniformMatrix4fv(gridMVP, false, mvp);
+
+    if (gridVAO) {
+      pivotGL.bindVertexArray(gridVAO);
+    } else {
+      // WebGL1 path
+      pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, gridVBO);
+      const gridLocPos = pivotGL.getAttribLocation(gridProgram, 'aPos');
+      pivotGL.vertexAttribPointer(gridLocPos, 3, pivotGL.FLOAT, false, 0, 0);
+      pivotGL.enableVertexAttribArray(gridLocPos);
+    }
+
+    pivotGL.lineWidth(1.0);  // Thin lines for grid
+    pivotGL.drawArrays(pivotGL.LINES, 0, gridCount);
   }
 
   // Render cube (if visible)
