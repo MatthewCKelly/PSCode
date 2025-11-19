@@ -346,8 +346,24 @@ function drawPivot(){
   const mvp = matMul(matMul(proj, view), rot);
 
   pivotGL.useProgram(program);
-  if (vao) pivotGL.bindVertexArray(vao);               // WebGL2
-  pivotGL.bindBuffer(pivotGL.ELEMENT_ARRAY_BUFFER, ibo); // Ensure EBO bound (both WebGL2/1)
+
+  if (vao) {
+    // WebGL2: VAO stores all vertex attribute state
+    pivotGL.bindVertexArray(vao);
+  } else {
+    // WebGL1: Manually bind buffers and set up vertex attributes
+    pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, vbo);
+    pivotGL.bindBuffer(pivotGL.ELEMENT_ARRAY_BUFFER, ibo);
+
+    const stride = 6 * 4;
+    const offsetPos = 0;
+    const offsetCol = 3 * 4;
+
+    pivotGL.vertexAttribPointer(locPos, 3, pivotGL.FLOAT, false, stride, offsetPos);
+    pivotGL.enableVertexAttribArray(locPos);
+    pivotGL.vertexAttribPointer(locCol, 3, pivotGL.FLOAT, false, stride, offsetCol);
+    pivotGL.enableVertexAttribArray(locCol);
+  }
 
   pivotGL.uniformMatrix4fv(uMVP,false,mvp);
   pivotGL.uniform1f(uTime, t);
