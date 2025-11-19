@@ -9,7 +9,12 @@
   html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0;
     font-family: system-ui, Segoe UI, Arial, sans-serif; }
   #wrap { display:grid; grid-template-columns: 380px 1fr; gap:16px; height:100%; }
-  #panel { padding:16px; border-right:1px solid #334155; overflow:auto; }
+  #panel { padding:16px; border-right:1px solid #334155; overflow:auto; transition: margin-left 0.3s ease; }
+  #panel.collapsed { margin-left: -380px; }
+  #togglePanel { position:absolute; left:380px; top:16px; z-index:10; transition: left 0.3s ease; }
+  #panel.collapsed + #canvases #togglePanel { left:0; }
+  #workerSection { display:none; margin-top:12px; }
+  #workerSection.visible { display:block; }
   h1,h2 { margin:0 0 8px; }
   p,li { line-height:1.35; }
   button { padding:8px 12px; margin:4px 4px 8px 0; border:1px solid #334155;
@@ -77,12 +82,15 @@
   </div>
 
   <div id="canvases">
-    <h2 class="section-title">Pivot Scene (Rotating Cube) - <span id="renderStatus" style="color:#f59e0b;">Initializing...</span></h2>
+    <button id="togglePanel">◀ Hide Panel</button>
+    <h2 class="section-title">Pivot Scene (Rotating Cube + Mt Cook Terrain) - <span id="renderStatus" style="color:#f59e0b;">Initializing...</span></h2>
     <canvas id="pivotCanvas" class="gl"></canvas>
     <canvas id="fpsCanvas" class="fps"></canvas>
 
-    <h2 class="section-title" style="margin-top:12px;">Worker Demo (Animated Triangle)</h2>
-    <canvas id="workerCanvas"></canvas>
+    <div id="workerSection">
+      <h2 class="section-title">Worker Demo (Animated Triangle)</h2>
+      <canvas id="workerCanvas"></canvas>
+    </div>
   </div>
 </div>
 
@@ -575,6 +583,14 @@ pivotCanvas.addEventListener('pointermove', e=>{
   yaw += dx*0.01; pitch += dy*0.01;
 });
 
+/* Panel toggle */
+document.getElementById('togglePanel').onclick = ()=>{
+  const panel = document.getElementById('panel');
+  const btn = document.getElementById('togglePanel');
+  panel.classList.toggle('collapsed');
+  btn.textContent = panel.classList.contains('collapsed') ? '▶ Show Panel' : '◀ Hide Panel';
+};
+
 /* Test buttons for diagnostics */
 let flashTestRunning = false;
 document.getElementById('testCanvasVisible').onclick = ()=>{
@@ -754,10 +770,11 @@ function drawPivot(){
   // FIXED: Reverse order for column-major WebGL matrices (matMul uses row-major convention)
   const mvp = matMul(rot, matMul(view, proj));
 
-  // Render Mt Cook terrain (background)
+  // Render Mt Cook terrain (background) - rotates with scene
   if (terrainProgram && terrainVBO) {
     pivotGL.useProgram(terrainProgram);
-    pivotGL.uniformMatrix4fv(terrainMVP, false, matMul(matIdentity(), matMul(view, proj)));
+    // Apply same rotation as cube for terrain
+    pivotGL.uniformMatrix4fv(terrainMVP, false, mvp);
 
     if (terrainVAO) {
       pivotGL.bindVertexArray(terrainVAO);
@@ -956,6 +973,9 @@ function startWorker() {
     return;
   }
 
+  // Show worker section
+  document.getElementById('workerSection').classList.add('visible');
+
   const w = Math.max(1, workerCanvas.clientWidth || 640);
   const h = Math.max(1, workerCanvas.clientHeight || 360);
   const scale = window.devicePixelRatio || 1;
@@ -981,6 +1001,10 @@ function stopWorker() {
   worker.terminate();
   worker = null; workerRunning = false;
   document.getElementById('toggleWorker').textContent = 'Start worker render';
+
+  // Hide worker section
+  document.getElementById('workerSection').classList.remove('visible');
+
   addStatus('Worker stopped.');
 }
 
