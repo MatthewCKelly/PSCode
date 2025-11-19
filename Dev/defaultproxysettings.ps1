@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Decodes and modifies Windows DefaultConnectionSettings registry binary data
 .DESCRIPTION
@@ -107,7 +107,7 @@ Function Read-UInt32FromBytes {
         # Convert the subset to UInt32 (reading from position 0 of the subset)
         $Value = [System.BitConverter]::ToUInt32($SubsetBytes, 0)
 
-        Write-Detail -Message "Read UInt32 at position $Start: 0x$($Data[$Start].ToString('X2')) $($Data[$Start+1].ToString('X2')) $($Data[$Start+2].ToString('X2')) $($Data[$Start+3].ToString('X2')) = $Value" -Level Debug
+        Write-Detail -Message "Read UInt32 at position $($Start): 0x$($Data[$Start].ToString('X2')) $($Data[$Start+1].ToString('X2')) $($Data[$Start+2].ToString('X2')) $($Data[$Start+3].ToString('X2')) = $Value" -Level Debug
         return $Value
     } catch {
         Write-Detail -Message "ERROR: Failed to read UInt32 at position $Start : $($_.Exception.Message)" -Level Error
@@ -174,14 +174,14 @@ Function Decode-ConnectionSettings {
                 # Extract proxy server string only if length > 0
                 $ProxyBytes = $Data[$Offset..($Offset + $ProxyLength - 1)]
                 $Settings.ProxyServer = [System.Text.Encoding]::ASCII.GetString($ProxyBytes).TrimEnd([char]0)
-                Write-Detail -Message "Proxy Server: $($Settings.ProxyServer)" -Level Info
+                Write-Detail -Message "Proxy Server: `"$($Settings.ProxyServer)`"" -Level Info
             } else {
                 $Settings.ProxyServer = ""
                 if ($ProxyLength -eq 0) {
                     Write-Detail -Message "Proxy Server: (none - length is 0)" -Level Info
                 } # end of zero length message
             } # end of proxy string extraction
-            $Offset += $ProxyLength
+           # $Offset += $ProxyLength
             Write-Detail -Message "After proxy section, offset now: $Offset" -Level Debug
         } # end of proxy parsing
         
