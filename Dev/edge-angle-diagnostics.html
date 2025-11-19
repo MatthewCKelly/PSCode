@@ -60,10 +60,14 @@
 
     <h2>Controls</h2>
     <div class="row">
+      <button id="toggleCube">Hide Cube</button>
+      <button id="resetPivot">Reset 3D pivot</button>
+      <label style="margin-left:8px;">Cube Size: <input type="range" id="cubeSize" min="0.5" max="3" step="0.1" value="1.5" style="width:120px;vertical-align:middle;"> <span id="cubeSizeValue">1.5</span></label>
+    </div>
+    <div class="row">
       <button id="testCanvasVisible">Test Canvas Visibility</button>
       <button id="testSimpleTriangle">Test Simple 2D Triangle</button>
       <button id="toggleDepthTest">Disable Depth Test</button>
-      <button id="resetPivot">Reset 3D pivot</button>
     </div>
     <div class="row">
       <button id="simulateLossMain">Simulate loss (main)</button>
@@ -188,6 +192,7 @@ function matPerspective(fovy,aspect,near,far){const f=1/Math.tan(fovy/2),nf=1/(n
 function matTranslate(tx,ty,tz){const m=matIdentity();m[12]=tx;m[13]=ty;m[14]=tz;return m;}
 function matRotateY(a){const c=Math.cos(a),s=Math.sin(a);const m=matIdentity();m[0]=c;m[2]=s;m[8]=-s;m[10]=c;return m;}
 function matRotateX(a){const c=Math.cos(a),s=Math.sin(a);const m=matIdentity();m[5]=c;m[6]=-s;m[9]=s;m[10]=c;return m;}
+function matScale(sx,sy,sz){const m=matIdentity();m[0]=sx;m[5]=sy;m[10]=sz;return m;}
 
 /* -------------------- Bézier curve math -------------------- */
 // Cubic Bézier: B(t) = (1-t)³P0 + 3(1-t)²tP1 + 3(1-t)t²P2 + t³P3
@@ -322,6 +327,8 @@ let testProgram=null, testVAO=null, testVBO=null;
 // Terrain rendering (Mt Cook profile with Bézier curves)
 let terrainProgram=null, terrainVAO=null, terrainVBO=null, terrainCount=0;
 let terrainMVP=null;
+let gridProgram=null, gridVAO=null, gridVBO=null, gridCount=0;
+let gridMVP=null;
 
 if (pivotGL) {
   try {
@@ -531,12 +538,20 @@ if (pivotGL) {
       ]
     ];
 
-    // Generate terrain vertices from Bézier curves
+    // Generate 3D terrain vertices by creating multiple Z slices
     const terrainVerts = [];
-    for (const curve of mtCookProfile) {
-      const points = generateBezierPoints(curve, 30, curve.length === 4);
-      for (const pt of points) {
-        terrainVerts.push(pt.x, pt.y, -12);  // Z = -12 (far behind cube)
+    const zSlices = 15;  // Number of depth slices
+    const zStart = -15;
+    const zEnd = -9;
+    const zStep = (zEnd - zStart) / (zSlices - 1);
+
+    for (let slice = 0; slice < zSlices; slice++) {
+      const z = zStart + slice * zStep;
+      for (const curve of mtCookProfile) {
+        const points = generateBezierPoints(curve, 30, curve.length === 4);
+        for (const pt of points) {
+          terrainVerts.push(pt.x, pt.y, z);
+        }
       }
     }
 
@@ -564,6 +579,58 @@ if (pivotGL) {
     console.error('Terrain setup error:', e);
   }
 
+  // Create ground grid plane at y=0
+  try {
+    console.log('Creating ground grid plane...');
+
+    // Reuse terrain shaders (same structure - position-only, MVP transform)
+    gridProgram = terrainProgram;  // Use same shader program
+    gridMVP = terrainMVP;           // Use same uniform location
+
+    // Generate grid lines at y=0 (ground plane)
+    const gridVerts = [];
+    const gridSize = 20;      // Grid extends from -10 to +10 in X and Z
+    const gridSpacing = 1;    // 1 unit spacing
+    const gridMin = -10;
+    const gridMax = 10;
+    const y = 0;              // Ground level
+
+    // Lines parallel to X-axis (varying Z)
+    for (let z = gridMin; z <= gridMax; z += gridSpacing) {
+      gridVerts.push(gridMin, y, z);
+      gridVerts.push(gridMax, y, z);
+    }
+
+    // Lines parallel to Z-axis (varying X)
+    for (let x = gridMin; x <= gridMax; x += gridSpacing) {
+      gridVerts.push(x, y, gridMin);
+      gridVerts.push(x, y, gridMax);
+    }
+
+    gridCount = gridVerts.length / 3;
+
+    if (pivotAPI === 'WebGL2') {
+      gridVAO = pivotGL.createVertexArray();
+      pivotGL.bindVertexArray(gridVAO);
+    }
+
+    gridVBO = pivotGL.createBuffer();
+    pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, gridVBO);
+    pivotGL.bufferData(pivotGL.ARRAY_BUFFER, new Float32Array(gridVerts), pivotGL.STATIC_DRAW);
+
+    const gridLocPos = pivotAPI === 'WebGL2' ? 0 : pivotGL.getAttribLocation(gridProgram, 'aPos');
+    pivotGL.vertexAttribPointer(gridLocPos, 3, pivotGL.FLOAT, false, 0, 0);
+    pivotGL.enableVertexAttribArray(gridLocPos);
+
+    if (pivotAPI === 'WebGL2') {
+      pivotGL.bindVertexArray(null);
+    }
+
+    console.log(`Ground grid ready (${gridCount} vertices, ${gridCount/2} lines)`);
+  } catch (e) {
+    console.error('Grid setup error:', e);
+  }
+
   // Re-bind main cube VAO to ensure it's active for rendering
   if (vao) {
     pivotGL.bindVertexArray(vao);
@@ -571,10 +638,27 @@ if (pivotGL) {
   }
 }
 
-/* Pivot interactions */
+/* Pivot interactions and cube controls */
 let yaw=0, pitch=0, dragging=false, lastX=0, lastY=0;
+let cubeVisible = true;
+let cubeScale = 1.5;
+
 function resetPivot(){ yaw=0; pitch=0; }
 document.getElementById('resetPivot').onclick = resetPivot;
+
+// Cube visibility toggle
+document.getElementById('toggleCube').onclick = ()=>{
+  cubeVisible = !cubeVisible;
+  document.getElementById('toggleCube').textContent = cubeVisible ? 'Hide Cube' : 'Show Cube';
+  addStatus(cubeVisible ? 'Cube visible' : 'Cube hidden', 'ok');
+};
+
+// Cube size control
+document.getElementById('cubeSize').oninput = (e)=>{
+  cubeScale = parseFloat(e.target.value);
+  document.getElementById('cubeSizeValue').textContent = cubeScale.toFixed(1);
+};
+
 pivotCanvas.addEventListener('pointerdown', e=>{dragging=true; lastX=e.clientX; lastY=e.clientY; pivotCanvas.setPointerCapture(e.pointerId);});
 pivotCanvas.addEventListener('pointerup', e=>{dragging=false; pivotCanvas.releasePointerCapture(e.pointerId);});
 pivotCanvas.addEventListener('pointermove', e=>{
@@ -790,24 +874,49 @@ function drawPivot(){
     pivotGL.drawArrays(pivotGL.LINE_STRIP, 0, terrainCount);
   }
 
-  if (frameCount === 1) {
-    console.log('Matrices computed:', { aspect, time: t });
-    console.log('MVP matrix (first 4 values):', [mvp[0], mvp[1], mvp[2], mvp[3]]);
-    console.log('MVP matrix (full):', Array.from(mvp));
+  // Render ground grid plane at y=0
+  if (gridProgram && gridVBO) {
+    pivotGL.useProgram(gridProgram);
+    pivotGL.uniformMatrix4fv(gridMVP, false, mvp);
 
-    // Log a test vertex transformation
-    const testVert = [0, 0, 0, 1]; // Origin
-    const transformed = [
-      mvp[0]*testVert[0] + mvp[4]*testVert[1] + mvp[8]*testVert[2] + mvp[12]*testVert[3],
-      mvp[1]*testVert[0] + mvp[5]*testVert[1] + mvp[9]*testVert[2] + mvp[13]*testVert[3],
-      mvp[2]*testVert[0] + mvp[6]*testVert[1] + mvp[10]*testVert[2] + mvp[14]*testVert[3],
-      mvp[3]*testVert[0] + mvp[7]*testVert[1] + mvp[11]*testVert[2] + mvp[15]*testVert[3]
-    ];
-    console.log('Test vertex at origin transforms to:', transformed);
-    console.log('After perspective divide:', [transformed[0]/transformed[3], transformed[1]/transformed[3], transformed[2]/transformed[3]]);
+    if (gridVAO) {
+      pivotGL.bindVertexArray(gridVAO);
+    } else {
+      // WebGL1 path
+      pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, gridVBO);
+      const gridLocPos = pivotGL.getAttribLocation(gridProgram, 'aPos');
+      pivotGL.vertexAttribPointer(gridLocPos, 3, pivotGL.FLOAT, false, 0, 0);
+      pivotGL.enableVertexAttribArray(gridLocPos);
+    }
+
+    pivotGL.lineWidth(1.0);  // Thin lines for grid
+    pivotGL.drawArrays(pivotGL.LINES, 0, gridCount);
   }
 
-  pivotGL.useProgram(program);
+  // Render cube (if visible)
+  if (cubeVisible) {
+    if (frameCount === 1) {
+      console.log('Matrices computed:', { aspect, time: t });
+      console.log('MVP matrix (first 4 values):', [mvp[0], mvp[1], mvp[2], mvp[3]]);
+      console.log('MVP matrix (full):', Array.from(mvp));
+
+      // Log a test vertex transformation
+      const testVert = [0, 0, 0, 1]; // Origin
+      const transformed = [
+        mvp[0]*testVert[0] + mvp[4]*testVert[1] + mvp[8]*testVert[2] + mvp[12]*testVert[3],
+        mvp[1]*testVert[0] + mvp[5]*testVert[1] + mvp[9]*testVert[2] + mvp[13]*testVert[3],
+        mvp[2]*testVert[0] + mvp[6]*testVert[1] + mvp[10]*testVert[2] + mvp[14]*testVert[3],
+        mvp[3]*testVert[0] + mvp[7]*testVert[1] + mvp[11]*testVert[2] + mvp[15]*testVert[3]
+      ];
+      console.log('Test vertex at origin transforms to:', transformed);
+      console.log('After perspective divide:', [transformed[0]/transformed[3], transformed[1]/transformed[3], transformed[2]/transformed[3]]);
+    }
+
+    // Apply cube scale
+    const scaleMat = matScale(cubeScale, cubeScale, cubeScale);
+    const cubeMVP = matMul(scaleMat, mvp);
+
+    pivotGL.useProgram(program);
 
   if (vao) {
     // WebGL2: VAO stores all vertex attribute state
@@ -835,35 +944,36 @@ function drawPivot(){
     pivotGL.enableVertexAttribArray(locCol);
   }
 
-  pivotGL.uniformMatrix4fv(uMVP,false,mvp);
-  pivotGL.uniform1f(uTime, t);
+    pivotGL.uniformMatrix4fv(uMVP,false,cubeMVP);
+    pivotGL.uniform1f(uTime, t);
 
-  if (frameCount === 1) {
-    console.log('Uniforms set:', { uMVP, uTime, time: t });
-    console.log('About to draw 36 triangles...');
-    console.log('Current ARRAY_BUFFER binding:', pivotGL.getParameter(pivotGL.ARRAY_BUFFER_BINDING));
-    console.log('Current ELEMENT_ARRAY_BUFFER binding:', pivotGL.getParameter(pivotGL.ELEMENT_ARRAY_BUFFER_BINDING));
-    console.log('Vertex attrib 0 (pos) enabled:', pivotGL.getVertexAttrib(locPos, pivotGL.VERTEX_ATTRIB_ARRAY_ENABLED));
-    console.log('Vertex attrib 0 (pos) buffer:', pivotGL.getVertexAttrib(locPos, pivotGL.VERTEX_ATTRIB_ARRAY_BUFFER_BINDING));
-    console.log('Vertex attrib 0 (pos) size:', pivotGL.getVertexAttrib(locPos, pivotGL.VERTEX_ATTRIB_ARRAY_SIZE));
-    console.log('Vertex attrib 1 (col) enabled:', pivotGL.getVertexAttrib(locCol, pivotGL.VERTEX_ATTRIB_ARRAY_ENABLED));
-    console.log('Vertex attrib 1 (col) buffer:', pivotGL.getVertexAttrib(locCol, pivotGL.VERTEX_ATTRIB_ARRAY_BUFFER_BINDING));
-    console.log('Vertex attrib 1 (col) size:', pivotGL.getVertexAttrib(locCol, pivotGL.VERTEX_ATTRIB_ARRAY_SIZE));
-    console.log('Expected VBO:', vbo);
-    console.log('Expected IBO:', ibo);
-  }
+    if (frameCount === 1) {
+      console.log('Uniforms set:', { uMVP, uTime, time: t, cubeScale });
+      console.log('About to draw 36 triangles...');
+      console.log('Current ARRAY_BUFFER binding:', pivotGL.getParameter(pivotGL.ARRAY_BUFFER_BINDING));
+      console.log('Current ELEMENT_ARRAY_BUFFER binding:', pivotGL.getParameter(pivotGL.ELEMENT_ARRAY_BUFFER_BINDING));
+      console.log('Vertex attrib 0 (pos) enabled:', pivotGL.getVertexAttrib(locPos, pivotGL.VERTEX_ATTRIB_ARRAY_ENABLED));
+      console.log('Vertex attrib 0 (pos) buffer:', pivotGL.getVertexAttrib(locPos, pivotGL.VERTEX_ATTRIB_ARRAY_BUFFER_BINDING));
+      console.log('Vertex attrib 0 (pos) size:', pivotGL.getVertexAttrib(locPos, pivotGL.VERTEX_ATTRIB_ARRAY_SIZE));
+      console.log('Vertex attrib 1 (col) enabled:', pivotGL.getVertexAttrib(locCol, pivotGL.VERTEX_ATTRIB_ARRAY_ENABLED));
+      console.log('Vertex attrib 1 (col) buffer:', pivotGL.getVertexAttrib(locCol, pivotGL.VERTEX_ATTRIB_ARRAY_BUFFER_BINDING));
+      console.log('Vertex attrib 1 (col) size:', pivotGL.getVertexAttrib(locCol, pivotGL.VERTEX_ATTRIB_ARRAY_SIZE));
+      console.log('Expected VBO:', vbo);
+      console.log('Expected IBO:', ibo);
+    }
 
-  pivotGL.drawElements(pivotGL.TRIANGLES, 36, pivotGL.UNSIGNED_SHORT, 0);
+    pivotGL.drawElements(pivotGL.TRIANGLES, 36, pivotGL.UNSIGNED_SHORT, 0);
 
-  if (frameCount === 1) {
-    checkGLError(pivotGL, 'after drawElements');
-    console.log('First frame complete!');
+    if (frameCount === 1) {
+      checkGLError(pivotGL, 'after drawElements');
+      console.log('First frame complete!');
 
-    // Try reading a pixel to see what was drawn
-    const pixels = new Uint8Array(4);
-    pivotGL.readPixels(pivotCanvas.width/2, pivotCanvas.height/2, 1, 1, pivotGL.RGBA, pivotGL.UNSIGNED_BYTE, pixels);
-    console.log('Center pixel color (RGBA):', Array.from(pixels));
-  }
+      // Try reading a pixel to see what was drawn
+      const pixels = new Uint8Array(4);
+      pivotGL.readPixels(pivotCanvas.width/2, pivotCanvas.height/2, 1, 1, pivotGL.RGBA, pivotGL.UNSIGNED_BYTE, pixels);
+      console.log('Center pixel color (RGBA):', Array.from(pixels));
+    }
+  } // End of cube rendering
 
   fps.tick();
   requestAnimationFrame(drawPivot);
