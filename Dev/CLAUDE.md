@@ -232,11 +232,18 @@ Function Read-UInt32FromBytes {
 - `[uint32]` - Decoded value on success
 - `$null` - On error (insufficient bytes, conversion failure)
 
-**Calculation:**
+**Implementation:**
 ```powershell
 $Position = $Start + $Offset
-# Reads bytes at positions: $Position, $Position+1, $Position+2, $Position+3
+
+# Extract 4-byte subset from the data array
+$SubsetBytes = $Data[$Position..($Position + 3)]
+
+# Convert the subset to UInt32 (reading from position 0 of the subset)
+$Value = [System.BitConverter]::ToUInt32($SubsetBytes, 0)
 ```
+
+**Key Principle:** This function extracts a **subset** of the data (4 bytes) and converts that subset, rather than passing the entire data array to BitConverter. This makes the operation more explicit and safer.
 
 **Error Handling:**
 - Validates sufficient bytes available (needs 4 bytes)
@@ -267,6 +274,7 @@ $ProxyLength = Read-UInt32FromBytes -Data $Bytes -Start 0 -Offset 8
 - **NEVER use `[System.BitConverter]::ToUInt32()` outside of this wrapper function**
 - Even with validation, always use this wrapper instead of calling BitConverter directly
 - The only place BitConverter should be called is inside the Read-UInt32FromBytes function itself
+- **Implementation detail:** The function extracts a 4-byte subset first (`$Data[$Position..($Position+3)]`), then converts that subset at position 0, rather than passing the entire array to BitConverter
 
 ---
 
