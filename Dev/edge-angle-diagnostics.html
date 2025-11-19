@@ -420,13 +420,20 @@ pivotCanvas.addEventListener('pointermove', e=>{
 });
 
 /* Test buttons for diagnostics */
+let flashTestRunning = false;
 document.getElementById('testCanvasVisible').onclick = ()=>{
   if (!pivotGL) {
     addStatus('Cannot test - no GL context', 'bad');
     return;
   }
+  if (flashTestRunning) {
+    addStatus('Flash test already running', 'warn');
+    return;
+  }
+
+  flashTestRunning = true;
   addStatus('Testing canvas visibility - flashing bright colors...', 'ok');
-  console.log('Canvas visibility test: Flashing colors');
+  console.log('Canvas visibility test: Flashing colors (render loop paused)');
 
   let count = 0;
   const colors = [
@@ -436,18 +443,24 @@ document.getElementById('testCanvasVisible').onclick = ()=>{
     [0, 1, 0, 1],    // Green
   ];
 
-  const flashInterval = setInterval(()=>{
+  function flashNext() {
+    if (count >= 8) {
+      flashTestRunning = false;
+      addStatus('Visibility test complete. Did you see flashing colors?', 'ok');
+      console.log('Visibility test complete - resuming render loop');
+      requestAnimationFrame(drawPivot);
+      return;
+    }
+
     const color = colors[count % colors.length];
     pivotGL.clearColor(...color);
     pivotGL.clear(pivotGL.COLOR_BUFFER_BIT);
     console.log(`Flashing color ${count}: rgba(${color.join(', ')})`);
     count++;
-    if (count >= 8) {
-      clearInterval(flashInterval);
-      addStatus('Visibility test complete. Did you see flashing colors?', 'ok');
-      console.log('Visibility test complete');
-    }
-  }, 300);
+    setTimeout(flashNext, 300);
+  }
+
+  flashNext();
 };
 
 let testTriangleActive = false;
@@ -504,6 +517,11 @@ function drawPivot(){
     return;
   }
 
+  // Pause rendering during flash test
+  if (flashTestRunning) {
+    return;
+  }
+
   frameCount++;
   if (frameCount === 1) {
     console.log('First frame drawing...');
@@ -522,6 +540,10 @@ function drawPivot(){
   if (frameCount === 1) {
     console.log('Canvas dimensions:', { width: pivotCanvas.width, height: pivotCanvas.height });
     console.log('Viewport:', pivotGL.getParameter(pivotGL.VIEWPORT));
+    console.log('Depth test enabled:', pivotGL.getParameter(pivotGL.DEPTH_TEST));
+    console.log('Culling enabled:', pivotGL.getParameter(pivotGL.CULL_FACE));
+    console.log('Blend enabled:', pivotGL.getParameter(pivotGL.BLEND));
+    console.log('Current program:', pivotGL.getParameter(pivotGL.CURRENT_PROGRAM));
   }
 
   // Simple 2D triangle test mode
@@ -601,6 +623,10 @@ function drawPivot(){
 
   if (frameCount === 1) {
     console.log('About to draw 36 triangles...');
+    console.log('Current ARRAY_BUFFER binding:', pivotGL.getParameter(pivotGL.ARRAY_BUFFER_BINDING));
+    console.log('Current ELEMENT_ARRAY_BUFFER binding:', pivotGL.getParameter(pivotGL.ELEMENT_ARRAY_BUFFER_BINDING));
+    console.log('Vertex attrib 0 (pos) enabled:', pivotGL.getVertexAttrib(locPos, pivotGL.VERTEX_ATTRIB_ARRAY_ENABLED));
+    console.log('Vertex attrib 1 (col) enabled:', pivotGL.getVertexAttrib(locCol, pivotGL.VERTEX_ATTRIB_ARRAY_ENABLED));
   }
 
   pivotGL.drawElements(pivotGL.TRIANGLES, 36, pivotGL.UNSIGNED_SHORT, 0);
@@ -608,6 +634,11 @@ function drawPivot(){
   if (frameCount === 1) {
     checkGLError(pivotGL, 'after drawElements');
     console.log('First frame complete!');
+
+    // Try reading a pixel to see what was drawn
+    const pixels = new Uint8Array(4);
+    pivotGL.readPixels(pivotCanvas.width/2, pivotCanvas.height/2, 1, 1, pivotGL.RGBA, pivotGL.UNSIGNED_BYTE, pixels);
+    console.log('Center pixel color (RGBA):', Array.from(pixels));
   }
 
   fps.tick();
