@@ -99,6 +99,20 @@
     </div>
     <p>Edge GPU page: <span class="mono">edge://gpu</span> &nbsp; | &nbsp; Chrome GPU page: <span class="mono">chrome://gpu</span></p>
 
+    <h2>ANGLE Backend Testing</h2>
+    <p style="font-size:0.9em;">Current backend: <strong id="angleBackend" class="mono">Detecting...</strong></p>
+    <p style="font-size:0.9em;margin-top:4px;">Chrome supports 4 ANGLE backends (chrome://flags/#use-angle):</p>
+    <ul style="font-size:0.85em;line-height:1.5;">
+      <li><strong>D3D11</strong> - Default. Direct3D 11 (best performance, may have line rendering issues)</li>
+      <li><strong>D3D11on12</strong> - D3D11 via D3D12 (newer, testing)</li>
+      <li><strong>D3D9</strong> - Legacy Direct3D 9 (compatibility)</li>
+      <li><strong>D3D11 WARP</strong> - Software rasterizer (fixes line rendering, slower performance)</li>
+    </ul>
+    <p style="font-size:0.85em;color:#94a3b8;margin-top:8px;">
+      <strong>Known issue:</strong> D3D11 may render curved lines instead of straight lines.
+      D3D11 WARP fixes this but may impact performance on some devices.
+    </p>
+
     <h2>Notes for SOE</h2>
     <ul>
       <li>If <span class="mono">WEBGL_debug_renderer_info</span> is blocked by policy, vendor/renderer may be masked.</li>
@@ -271,6 +285,29 @@ if (ri) {
     `Debug ext      : ${ri.debugExt ? 'WEBGL_debug_renderer_info available' : 'not available'}`,
     `Caps           : ${JSON.stringify(ri.caps)}`
   ]);
+
+  // Detect ANGLE backend from renderer string
+  const angleBackendEl = document.getElementById('angleBackend');
+  if (angleBackendEl) {
+    const renderer = ri.renderer.toLowerCase();
+    let backend = 'Unknown';
+    if (renderer.includes('warp')) {
+      backend = 'D3D11 WARP (Software)';
+    } else if (renderer.includes('d3d11on12') || renderer.includes('direct3d11on12')) {
+      backend = 'D3D11on12';
+    } else if (renderer.includes('d3d11') || renderer.includes('direct3d11')) {
+      backend = 'D3D11 (Hardware)';
+    } else if (renderer.includes('d3d9') || renderer.includes('direct3d9')) {
+      backend = 'D3D9 (Legacy)';
+    } else if (renderer.includes('opengl')) {
+      backend = 'OpenGL (Deprecated)';
+    } else if (renderer.includes('metal')) {
+      backend = 'Metal (macOS/iOS)';
+    }
+    angleBackendEl.textContent = backend;
+    angleBackendEl.style.color = backend.includes('WARP') ? '#f59e0b' : '#22c55e';
+    console.log('ANGLE backend detected:', backend, '| Full renderer:', ri.renderer);
+  }
 }
 
 const fps = new FpsGraph(fpsCanvas);
@@ -524,89 +561,72 @@ if (pivotGL) {
     terrainProgram = link(pivotGL, vs, fs);
     terrainMVP = pivotGL.getUniformLocation(terrainProgram, 'uMVP');
 
-    // Mt Cook terrain profile using Bézier curves
-    // Simplified profile: left slope, main peak, right slope
-    const mtCookProfile = [
-      // Left approach (gentle rise) - base at ground level (y=0)
-      [
-        {x: -10, y: 0}, {x: -8, y: 0.5}, {x: -6, y: 1.5}, {x: -4, y: 2.5}
-      ],
-      // Steep ascent to summit
-      [
-        {x: -4, y: 2.5}, {x: -3, y: 4}, {x: -1, y: 5.5}, {x: 0, y: 6.2}
-      ],
-      // Summit ridge
-      [
-        {x: 0, y: 6.2}, {x: 0.5, y: 6.1}, {x: 1, y: 5.8}
-      ],
-      // Right descent
-      [
-        {x: 1, y: 5.8}, {x: 3, y: 4}, {x: 5, y: 2.5}, {x: 8, y: 1}
-      ],
-      // Far right - back to ground level
-      [
-        {x: 8, y: 1}, {x: 9, y: 0.5}, {x: 10, y: 0}
-      ]
-    ];
-
-    // Generate true 3D terrain with varying heights along Z axis
-    // Creates ridges, valleys, and secondary peaks for realistic mountain appearance
+    // Generate 3D cone terrain (Mt Cook) - proper 3D shape centered on plane
+    // Cone centered at (0, 0, -12) with radial symmetry
     const terrainVerts = [];
-    const zSlices = 20;  // Number of depth slices
-    const zStart = -15;
-    const zEnd = -9;
-    const zStep = (zEnd - zStart) / (zSlices - 1);
+    const heightLevels = 25;  // Number of height rings (base to peak)
+    const angularSegments = 32;  // Number of segments around the cone
+    const baseRadius = 5;     // Radius at base (y=0)
+    const peakHeight = 6;     // Height of peak above ground
+    const centerZ = -12;      // Z position (centered in view)
 
-    for (let slice = 0; slice < zSlices; slice++) {
-      const z = zStart + slice * zStep;
-      const zNorm = (z - zStart) / (zEnd - zStart); // 0 to 1
+    // Generate vertices for each height level
+    for (let level = 0; level <= heightLevels; level++) {
+      const t = level / heightLevels;  // 0 (base) to 1 (peak)
+      const y = t * peakHeight;        // Linear height
+      const radius = baseRadius * (1 - t);  // Linear taper to point
 
-      // Height modulation creates 3D mountain features:
-      // - Main ridge along centerline (zNorm ~0.5)
-      // - Secondary ridges at zNorm ~0.2 and ~0.8
-      // - Valleys in between
-      const ridgeFactor = Math.sin(zNorm * Math.PI * 3) * 0.3 +
-                         Math.sin(zNorm * Math.PI) * 0.5 + 0.5;
+      // Add variation to make it more mountain-like (roughness)
+      const roughness = Math.sin(t * Math.PI * 5) * 0.15 * radius;
 
-      // Add some variation to create realistic terrain
-      const detailNoise = Math.sin(zNorm * Math.PI * 7) * 0.1;
-      const heightScale = ridgeFactor + detailNoise;
+      // Create ring of vertices at this height
+      for (let seg = 0; seg < angularSegments; seg++) {
+        const angle = (seg / angularSegments) * Math.PI * 2;
 
-      for (const curve of mtCookProfile) {
-        const points = generateBezierPoints(curve, 30, curve.length === 4);
-        for (const pt of points) {
-          // Modulate Y by height scale, but keep base elevation intact
-          // Only peaks are affected, valleys remain stable
-          const baseY = pt.y;
-          const peakMultiplier = Math.max(0, baseY) * heightScale;
-          const valleyY = Math.min(0, baseY); // Keep valleys unchanged
-          const modifiedY = valleyY + peakMultiplier;
+        // Add angular variation for mountain ridges
+        const ridgeVariation = Math.sin(angle * 4) * 0.2 * radius;
+        const currentRadius = radius + roughness + ridgeVariation;
 
-          terrainVerts.push(pt.x, modifiedY, z);
-        }
+        const x = Math.cos(angle) * currentRadius;
+        const z = centerZ + Math.sin(angle) * currentRadius;
+
+        terrainVerts.push(x, y, z);
       }
     }
 
+    // Add apex vertex at peak (single point at top)
+    terrainVerts.push(0, peakHeight, centerZ);
+
     terrainCount = terrainVerts.length / 3;
 
-    // Generate indices for 3D mesh surface (triangles connecting Z-slices)
+    // Generate indices for 3D cone mesh
     const terrainIndices = [];
-    const vertsPerSlice = terrainCount / zSlices; // Number of vertices in each Z-slice
+    const apexIndex = terrainCount - 1;  // Last vertex is apex
 
-    for (let slice = 0; slice < zSlices - 1; slice++) {
-      const sliceStart = slice * vertsPerSlice;
-      const nextSliceStart = (slice + 1) * vertsPerSlice;
+    // Connect height levels with quads (2 triangles each)
+    for (let level = 0; level < heightLevels; level++) {
+      const levelStart = level * angularSegments;
+      const nextLevelStart = (level + 1) * angularSegments;
 
-      for (let i = 0; i < vertsPerSlice - 1; i++) {
-        const v0 = sliceStart + i;
-        const v1 = sliceStart + i + 1;
-        const v2 = nextSliceStart + i;
-        const v3 = nextSliceStart + i + 1;
+      for (let seg = 0; seg < angularSegments; seg++) {
+        const nextSeg = (seg + 1) % angularSegments;
+
+        const v0 = levelStart + seg;
+        const v1 = levelStart + nextSeg;
+        const v2 = nextLevelStart + seg;
+        const v3 = nextLevelStart + nextSeg;
 
         // Create two triangles for each quad
-        terrainIndices.push(v0, v2, v1); // Triangle 1
-        terrainIndices.push(v1, v2, v3); // Triangle 2
+        terrainIndices.push(v0, v2, v1);
+        terrainIndices.push(v1, v2, v3);
       }
+    }
+
+    // Connect top level to apex
+    const topLevelStart = heightLevels * angularSegments;
+    for (let seg = 0; seg < angularSegments; seg++) {
+      const nextSeg = (seg + 1) % angularSegments;
+      terrainIndices.push(topLevelStart + seg, apexIndex, topLevelStart + nextSeg);
     }
 
     terrainIndexCount = terrainIndices.length;
