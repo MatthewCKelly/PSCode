@@ -268,6 +268,8 @@ $Value = [System.BitConverter]::ToUInt32($SubsetBytes, 0)
 [2025-11-18 10:30:45] Debug    110 Read UInt32 at position 8: 0x01 00 00 00 = 1
 ```
 
+**Note:** The variable `$Start` is delimited as `${Start}:` in the logging to prevent PowerShell from misinterpreting the colon.
+
 **Usage Example:**
 ```powershell
 # Reading from a specific offset (Length defaults to 4)
