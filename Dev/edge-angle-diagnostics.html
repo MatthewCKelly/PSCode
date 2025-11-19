@@ -72,7 +72,7 @@
   </div>
 
   <div id="canvases">
-    <h2 class="section-title">Pivot Scene (Rotating Cube)</h2>
+    <h2 class="section-title">Pivot Scene (Rotating Cube) - <span id="renderStatus" style="color:#f59e0b;">Initializing...</span></h2>
     <canvas id="pivotCanvas" class="gl"></canvas>
     <canvas id="fpsCanvas" class="fps"></canvas>
 
@@ -86,9 +86,22 @@
 const statusUl = document.getElementById('status');
 function addStatus(text, cls='ok') {
   const li = document.createElement('li'); li.textContent = text; li.className = cls; statusUl.appendChild(li);
+  console.log(`[STATUS:${cls}] ${text}`);
 }
 const infoPre = document.getElementById('info');
 function setInfo(lines) { infoPre.textContent = lines.join('\n'); }
+
+/* WebGL error checking */
+function checkGLError(gl, context) {
+  const err = gl.getError();
+  if (err !== gl.NO_ERROR) {
+    const errStr = `GL_ERROR in ${context}: ${err} (0x${err.toString(16)})`;
+    console.error(errStr);
+    addStatus(errStr, 'bad');
+    return true;
+  }
+  return false;
+}
 
 /* -------------------- Create GL context -------------------- */
 function createGL(canvas, preferWebGL2=true) {
@@ -166,11 +179,14 @@ function matRotateX(a){const c=Math.cos(a),s=Math.sin(a);const m=matIdentity();m
 /* -------------------- Build 3D pivot scene -------------------- */
 const pivotCanvas = document.getElementById('pivotCanvas');
 const fpsCanvas = document.getElementById('fpsCanvas');
+console.log('Initializing pivot canvas...', { width: pivotCanvas.width, height: pivotCanvas.height, clientWidth: pivotCanvas.clientWidth, clientHeight: pivotCanvas.clientHeight });
 const { gl: pivotGL, api: pivotAPI } = createGL(pivotCanvas, true);
 if (!pivotGL) {
   addStatus('Failed to create WebGL context (pivot). WebGL may be blocked by policy or GPU.', 'bad');
+  console.error('pivotGL is null - WebGL context creation failed');
 } else {
   addStatus(`Created ${pivotAPI} context (pivot).`);
+  console.log('pivotGL context created:', { api: pivotAPI, canvas: pivotCanvas });
 }
 
 const ri = pivotGL ? getRendererInfo(pivotGL) : null;
@@ -246,18 +262,28 @@ let locPos=-1, locCol=-1;
 
 if (pivotGL) {
   try {
+    console.log(`Compiling shaders for ${pivotAPI}...`);
     if (pivotAPI === 'WebGL2') {
       const vs = compile(pivotGL, pivotGL.VERTEX_SHADER, v300);
+      console.log('WebGL2 vertex shader compiled');
       const fs = compile(pivotGL, pivotGL.FRAGMENT_SHADER, f300);
+      console.log('WebGL2 fragment shader compiled');
       program = link(pivotGL, vs, fs);
-      vao = pivotGL.createVertexArray(); pivotGL.bindVertexArray(vao);
+      console.log('WebGL2 program linked');
+      vao = pivotGL.createVertexArray();
+      pivotGL.bindVertexArray(vao);
+      console.log('WebGL2 VAO created and bound');
       locPos = 0; locCol = 1;
     } else {
       const vs = compile(pivotGL, pivotGL.VERTEX_SHADER, vES2);
+      console.log('WebGL1 vertex shader compiled');
       const fs = compile(pivotGL, pivotGL.FRAGMENT_SHADER, fES2);
+      console.log('WebGL1 fragment shader compiled');
       program = link(pivotGL, vs, fs);
+      console.log('WebGL1 program linked');
       locPos = pivotGL.getAttribLocation(program, 'aPos');
       locCol = pivotGL.getAttribLocation(program, 'aCol');
+      console.log('WebGL1 attribute locations:', { locPos, locCol });
     }
 
     // Cube geometry (scaled ×1.5 for visibility), pos+color interleaved
@@ -304,10 +330,25 @@ if (pivotGL) {
     pivotGL.useProgram(program);
     uMVP = pivotGL.getUniformLocation(program,'uMVP');
     uTime = pivotGL.getUniformLocation(program,'uTime');
+    console.log('Uniform locations:', { uMVP, uTime });
+
+    checkGLError(pivotGL, 'after pivot setup');
+
     addStatus('3D pivot program compiled/linked.');
-    console.log('Pivot setup OK', { api: pivotAPI, vao: !!vao, vbo: !!vbo, ibo: !!ibo, locPos, locCol });
+    console.log('Pivot setup OK', {
+      api: pivotAPI,
+      vao: !!vao,
+      vbo: !!vbo,
+      ibo: !!ibo,
+      locPos,
+      locCol,
+      uMVP,
+      uTime,
+      program: !!program
+    });
   } catch (e) {
     addStatus('Pivot shader/program error: '+e.message, 'bad');
+    console.error('Pivot setup error:', e);
   }
 }
 
@@ -326,17 +367,57 @@ pivotCanvas.addEventListener('pointermove', e=>{
 /* Resize + draw loop (with robust size guards) */
 function resizeCanvas(gl,canvas){
   const w = canvas.clientWidth || 640, h = canvas.clientHeight || 360;
-  if (canvas.width!==w || canvas.height!==h) { canvas.width=w; canvas.height=h; }
+  if (canvas.width!==w || canvas.height!==h) {
+    console.log(`Resizing canvas from ${canvas.width}x${canvas.height} to ${w}x${h}`);
+    canvas.width=w; canvas.height=h;
+  }
   gl.viewport(0,0,w,h);
 }
 let startTime = performance.now();
+let frameCount = 0;
+const renderStatus = document.getElementById('renderStatus');
+
+function updateRenderStatus() {
+  if (frameCount === 0) {
+    renderStatus.textContent = 'Initializing...';
+    renderStatus.style.color = '#f59e0b';
+  } else if (frameCount < 60) {
+    renderStatus.textContent = `Rendering (${frameCount} frames)`;
+    renderStatus.style.color = '#22c55e';
+  } else if (frameCount === 60) {
+    renderStatus.textContent = `Active (${frameCount}+ frames)`;
+    renderStatus.style.color = '#22c55e';
+  }
+}
+
 function drawPivot(){
-  if (!pivotGL || !program) return;
+  if (!pivotGL || !program) {
+    console.error('drawPivot called but missing pivotGL or program', { pivotGL: !!pivotGL, program: !!program });
+    renderStatus.textContent = 'ERROR: Missing GL context or program';
+    renderStatus.style.color = '#ef4444';
+    return;
+  }
+
+  frameCount++;
+  if (frameCount === 1) {
+    console.log('First frame drawing...');
+    updateRenderStatus();
+  } else if (frameCount === 60) {
+    console.log('60 frames rendered successfully');
+    updateRenderStatus();
+  } else if (frameCount % 60 === 0) {
+    updateRenderStatus();
+  }
   resizeCanvas(pivotGL, pivotCanvas);
 
   pivotGL.enable(pivotGL.DEPTH_TEST);
   pivotGL.clearColor(0.07,0.09,0.16,1);
   pivotGL.clear(pivotGL.COLOR_BUFFER_BIT|pivotGL.DEPTH_BUFFER_BIT);
+
+  if (frameCount === 1) {
+    console.log('Canvas dimensions:', { width: pivotCanvas.width, height: pivotCanvas.height });
+    console.log('Viewport:', pivotGL.getParameter(pivotGL.VIEWPORT));
+  }
 
   const t = (performance.now()-startTime)/1000.0;
   const aspect = pivotCanvas.width/pivotCanvas.height;
@@ -345,13 +426,23 @@ function drawPivot(){
   const rot = matMul(matRotateY(yaw + t * 1.5), matRotateX(pitch)); // faster rotation
   const mvp = matMul(matMul(proj, view), rot);
 
+  if (frameCount === 1) {
+    console.log('Matrices computed:', { aspect, time: t });
+  }
+
   pivotGL.useProgram(program);
 
   if (vao) {
     // WebGL2: VAO stores all vertex attribute state
     pivotGL.bindVertexArray(vao);
+    if (frameCount === 1) {
+      console.log('Using VAO (WebGL2 path)');
+    }
   } else {
     // WebGL1: Manually bind buffers and set up vertex attributes
+    if (frameCount === 1) {
+      console.log('Using manual buffer binding (WebGL1 path)', { vbo: !!vbo, ibo: !!ibo, locPos, locCol });
+    }
     pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, vbo);
     pivotGL.bindBuffer(pivotGL.ELEMENT_ARRAY_BUFFER, ibo);
 
@@ -368,11 +459,21 @@ function drawPivot(){
   pivotGL.uniformMatrix4fv(uMVP,false,mvp);
   pivotGL.uniform1f(uTime, t);
 
+  if (frameCount === 1) {
+    console.log('About to draw 36 triangles...');
+  }
+
   pivotGL.drawElements(pivotGL.TRIANGLES, 36, pivotGL.UNSIGNED_SHORT, 0);
+
+  if (frameCount === 1) {
+    checkGLError(pivotGL, 'after drawElements');
+    console.log('First frame complete!');
+  }
 
   fps.tick();
   requestAnimationFrame(drawPivot);
 }
+console.log('Setting up requestAnimationFrame for drawPivot...');
 requestAnimationFrame(drawPivot);
 
 /* Context loss simulation (main) */
