@@ -8,11 +8,11 @@
   :root { color-scheme: dark; }
   html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0;
     font-family: system-ui, Segoe UI, Arial, sans-serif; }
-  #wrap { display:grid; grid-template-columns: 380px 1fr; gap:16px; height:100%; }
-  #panel { padding:16px; border-right:1px solid #334155; overflow:auto; transition: margin-left 0.3s ease; }
-  #panel.collapsed { margin-left: -380px; }
-  #togglePanel { position:absolute; left:380px; top:16px; z-index:10; transition: left 0.3s ease; }
-  #panel.collapsed + #canvases #togglePanel { left:0; }
+  #wrap { display:grid; grid-template-columns: 1fr 400px; gap:16px; height:100%; }
+  #panel { padding:16px; border-left:1px solid #334155; overflow:auto; transition: margin-right 0.3s ease; }
+  #panel.collapsed { margin-right: -400px; }
+  #togglePanel { position:absolute; right:16px; top:16px; z-index:10; transition: right 0.3s ease; }
+  #panel.collapsed ~ #canvases #togglePanel { right:0; }
   #workerSection { display:none; margin-top:12px; }
   #workerSection.visible { display:block; }
   h1,h2 { margin:0 0 8px; }
@@ -31,7 +31,13 @@
     border: 2px solid #334155;
     background: #0b1220;
     margin-bottom: 12px;
-    width:100%; height:55vh; display:block;
+    width:100%; display:block;
+  }
+  .worker-hidden #pivotCanvas {
+    height: calc(100vh - 140px);
+  }
+  .worker-visible #pivotCanvas {
+    height: 55vh;
   }
   #fpsCanvas {
     position:absolute; right:20px; top:46px;
@@ -49,6 +55,18 @@
 </head>
 <body>
 <div id="wrap">
+  <div id="canvases" class="worker-hidden">
+    <button id="togglePanel">Hide Panel ▶</button>
+    <h2 class="section-title">Pivot Scene (Rotating Cube + Mt Cook Terrain) - <span id="renderStatus" style="color:#f59e0b;">Initializing...</span></h2>
+    <canvas id="pivotCanvas" class="gl"></canvas>
+    <canvas id="fpsCanvas" class="fps"></canvas>
+
+    <div id="workerSection">
+      <h2 class="section-title">Worker Demo (Animated Triangle)</h2>
+      <canvas id="workerCanvas"></canvas>
+    </div>
+  </div>
+
   <div id="panel">
     <h1>ANGLE / WebGL diagnostics</h1>
     <p>Tests WebGL via ANGLE on Windows (Edge/Chrome). Includes renderer strings, GPU caps,
@@ -60,9 +78,12 @@
 
     <h2>Controls</h2>
     <div class="row">
+      <button id="toggleRotation">Stop Rotation</button>
       <button id="toggleCube">Hide Cube</button>
       <button id="resetPivot">Reset 3D pivot</button>
-      <label style="margin-left:8px;">Cube Size: <input type="range" id="cubeSize" min="0.5" max="3" step="0.1" value="1.5" style="width:120px;vertical-align:middle;"> <span id="cubeSizeValue">1.5</span></label>
+    </div>
+    <div class="row">
+      <label>Cube Size: <input type="range" id="cubeSize" min="0.5" max="3" step="0.1" value="1.5" style="width:120px;vertical-align:middle;"> <span id="cubeSizeValue">1.5</span></label>
     </div>
     <div class="row">
       <button id="testCanvasVisible">Test Canvas Visibility</button>
@@ -83,18 +104,6 @@
       <li>On Windows + Edge Stable, renderer should include <span class="mono">ANGLE</span> and <span class="mono">Direct3D11</span>.</li>
       <li>Use <span class="mono">edge://gpu</span> for final confirmation and driver details.</li>
     </ul>
-  </div>
-
-  <div id="canvases">
-    <button id="togglePanel">◀ Hide Panel</button>
-    <h2 class="section-title">Pivot Scene (Rotating Cube + Mt Cook Terrain) - <span id="renderStatus" style="color:#f59e0b;">Initializing...</span></h2>
-    <canvas id="pivotCanvas" class="gl"></canvas>
-    <canvas id="fpsCanvas" class="fps"></canvas>
-
-    <div id="workerSection">
-      <h2 class="section-title">Worker Demo (Animated Triangle)</h2>
-      <canvas id="workerCanvas"></canvas>
-    </div>
   </div>
 </div>
 
@@ -538,19 +547,40 @@ if (pivotGL) {
       ]
     ];
 
-    // Generate 3D terrain vertices by creating multiple Z slices
+    // Generate true 3D terrain with varying heights along Z axis
+    // Creates ridges, valleys, and secondary peaks for realistic mountain appearance
     const terrainVerts = [];
-    const zSlices = 15;  // Number of depth slices
+    const zSlices = 20;  // Number of depth slices
     const zStart = -15;
     const zEnd = -9;
     const zStep = (zEnd - zStart) / (zSlices - 1);
 
     for (let slice = 0; slice < zSlices; slice++) {
       const z = zStart + slice * zStep;
+      const zNorm = (z - zStart) / (zEnd - zStart); // 0 to 1
+
+      // Height modulation creates 3D mountain features:
+      // - Main ridge along centerline (zNorm ~0.5)
+      // - Secondary ridges at zNorm ~0.2 and ~0.8
+      // - Valleys in between
+      const ridgeFactor = Math.sin(zNorm * Math.PI * 3) * 0.3 +
+                         Math.sin(zNorm * Math.PI) * 0.5 + 0.5;
+
+      // Add some variation to create realistic terrain
+      const detailNoise = Math.sin(zNorm * Math.PI * 7) * 0.1;
+      const heightScale = ridgeFactor + detailNoise;
+
       for (const curve of mtCookProfile) {
         const points = generateBezierPoints(curve, 30, curve.length === 4);
         for (const pt of points) {
-          terrainVerts.push(pt.x, pt.y, z);
+          // Modulate Y by height scale, but keep base elevation intact
+          // Only peaks are affected, valleys remain stable
+          const baseY = pt.y;
+          const peakMultiplier = Math.max(0, baseY) * heightScale;
+          const valleyY = Math.min(0, baseY); // Keep valleys unchanged
+          const modifiedY = valleyY + peakMultiplier;
+
+          terrainVerts.push(pt.x, modifiedY, z);
         }
       }
     }
@@ -642,9 +672,17 @@ if (pivotGL) {
 let yaw=0, pitch=0, dragging=false, lastX=0, lastY=0;
 let cubeVisible = true;
 let cubeScale = 1.5;
+let rotationEnabled = true;
 
 function resetPivot(){ yaw=0; pitch=0; }
 document.getElementById('resetPivot').onclick = resetPivot;
+
+// Rotation toggle
+document.getElementById('toggleRotation').onclick = ()=>{
+  rotationEnabled = !rotationEnabled;
+  document.getElementById('toggleRotation').textContent = rotationEnabled ? 'Stop Rotation' : 'Start Rotation';
+  addStatus(rotationEnabled ? 'Rotation started' : 'Rotation stopped', 'ok');
+};
 
 // Cube visibility toggle
 document.getElementById('toggleCube').onclick = ()=>{
@@ -672,7 +710,7 @@ document.getElementById('togglePanel').onclick = ()=>{
   const panel = document.getElementById('panel');
   const btn = document.getElementById('togglePanel');
   panel.classList.toggle('collapsed');
-  btn.textContent = panel.classList.contains('collapsed') ? '▶ Show Panel' : '◀ Hide Panel';
+  btn.textContent = panel.classList.contains('collapsed') ? '◀ Show Panel' : 'Hide Panel ▶';
 };
 
 /* Test buttons for diagnostics */
@@ -850,7 +888,8 @@ function drawPivot(){
   const aspect = pivotCanvas.width/pivotCanvas.height;
   const proj = matPerspective(60*Math.PI/180, aspect, 0.1, 100); // slightly wider FOV
   const view = matTranslate(0,0,-6);
-  const rot = matMul(matRotateY(yaw + t * 1.5), matRotateX(pitch)); // faster rotation
+  const autoRotation = rotationEnabled ? t * 1.5 : 0;
+  const rot = matMul(matRotateY(yaw + autoRotation), matRotateX(pitch));
   // FIXED: Reverse order for column-major WebGL matrices (matMul uses row-major convention)
   const mvp = matMul(rot, matMul(view, proj));
 
@@ -1085,6 +1124,8 @@ function startWorker() {
 
   // Show worker section
   document.getElementById('workerSection').classList.add('visible');
+  document.getElementById('canvases').classList.remove('worker-hidden');
+  document.getElementById('canvases').classList.add('worker-visible');
 
   const w = Math.max(1, workerCanvas.clientWidth || 640);
   const h = Math.max(1, workerCanvas.clientHeight || 360);
@@ -1114,6 +1155,8 @@ function stopWorker() {
 
   // Hide worker section
   document.getElementById('workerSection').classList.remove('visible');
+  document.getElementById('canvases').classList.remove('worker-visible');
+  document.getElementById('canvases').classList.add('worker-hidden');
 
   addStatus('Worker stopped.');
 }
