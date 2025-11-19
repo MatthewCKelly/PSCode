@@ -181,6 +181,49 @@ function matTranslate(tx,ty,tz){const m=matIdentity();m[12]=tx;m[13]=ty;m[14]=tz
 function matRotateY(a){const c=Math.cos(a),s=Math.sin(a);const m=matIdentity();m[0]=c;m[2]=s;m[8]=-s;m[10]=c;return m;}
 function matRotateX(a){const c=Math.cos(a),s=Math.sin(a);const m=matIdentity();m[5]=c;m[6]=-s;m[9]=s;m[10]=c;return m;}
 
+/* -------------------- Bézier curve math -------------------- */
+// Cubic Bézier: B(t) = (1-t)³P0 + 3(1-t)²tP1 + 3(1-t)t²P2 + t³P3
+function cubicBezier(p0, p1, p2, p3, t) {
+  const mt = 1 - t;
+  const mt2 = mt * mt;
+  const mt3 = mt2 * mt;
+  const t2 = t * t;
+  const t3 = t2 * t;
+
+  return {
+    x: mt3 * p0.x + 3 * mt2 * t * p1.x + 3 * mt * t2 * p2.x + t3 * p3.x,
+    y: mt3 * p0.y + 3 * mt2 * t * p1.y + 3 * mt * t2 * p2.y + t3 * p3.y
+  };
+}
+
+// Quadratic Bézier: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
+function quadraticBezier(p0, p1, p2, t) {
+  const mt = 1 - t;
+  const mt2 = mt * mt;
+  const t2 = t * t;
+
+  return {
+    x: mt2 * p0.x + 2 * mt * t * p1.x + t2 * p2.x,
+    y: mt2 * p0.y + 2 * mt * t * p1.y + t2 * p2.y
+  };
+}
+
+// Generate points along a Bézier curve
+function generateBezierPoints(controlPoints, segments = 50, cubic = true) {
+  const points = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    let pt;
+    if (cubic && controlPoints.length === 4) {
+      pt = cubicBezier(controlPoints[0], controlPoints[1], controlPoints[2], controlPoints[3], t);
+    } else if (!cubic && controlPoints.length === 3) {
+      pt = quadraticBezier(controlPoints[0], controlPoints[1], controlPoints[2], t);
+    }
+    if (pt) points.push(pt);
+  }
+  return points;
+}
+
 /* -------------------- Build 3D pivot scene -------------------- */
 const pivotCanvas = document.getElementById('pivotCanvas');
 const fpsCanvas = document.getElementById('fpsCanvas');
@@ -267,6 +310,10 @@ let locPos=-1, locCol=-1;
 
 // Simple 2D test program (no transformations)
 let testProgram=null, testVAO=null, testVBO=null;
+
+// Terrain rendering (Mt Cook profile with Bézier curves)
+let terrainProgram=null, terrainVAO=null, terrainVBO=null, terrainCount=0;
+let terrainMVP=null;
 
 if (pivotGL) {
   try {
@@ -420,6 +467,93 @@ if (pivotGL) {
     console.log('Simple 2D test program ready');
   } catch (e) {
     console.error('2D test program setup error:', e);
+  }
+
+  // Create terrain renderer (Mt Cook profile with Bézier curves)
+  try {
+    console.log('Creating Mt Cook terrain renderer...');
+
+    // Shaders for line rendering
+    const terrainVS = pivotAPI === 'WebGL2' ? `#version 300 es
+      uniform highp mat4 uMVP;
+      layout(location=0) in vec3 aPos;
+      void main() { gl_Position = uMVP * vec4(aPos, 1.0); }
+    ` : `
+      uniform highp mat4 uMVP;
+      attribute vec3 aPos;
+      void main() { gl_Position = uMVP * vec4(aPos, 1.0); }
+    `;
+
+    const terrainFS = pivotAPI === 'WebGL2' ? `#version 300 es
+      precision highp float;
+      out vec4 outColor;
+      void main() { outColor = vec4(0.9, 0.95, 1.0, 1.0); }
+    ` : `
+      precision highp float;
+      void main() { gl_FragColor = vec4(0.9, 0.95, 1.0, 1.0); }
+    `;
+
+    const vs = compile(pivotGL, pivotGL.VERTEX_SHADER, terrainVS);
+    const fs = compile(pivotGL, pivotGL.FRAGMENT_SHADER, terrainFS);
+    terrainProgram = link(pivotGL, vs, fs);
+    terrainMVP = pivotGL.getUniformLocation(terrainProgram, 'uMVP');
+
+    // Mt Cook terrain profile using Bézier curves
+    // Simplified profile: left slope, main peak, right slope
+    const mtCookProfile = [
+      // Left approach (gentle rise)
+      [
+        {x: -10, y: -2}, {x: -8, y: -1.5}, {x: -6, y: -0.5}, {x: -4, y: 0.5}
+      ],
+      // Steep ascent to summit
+      [
+        {x: -4, y: 0.5}, {x: -3, y: 2}, {x: -1, y: 3.5}, {x: 0, y: 4.2}
+      ],
+      // Summit ridge
+      [
+        {x: 0, y: 4.2}, {x: 0.5, y: 4.1}, {x: 1, y: 3.8}
+      ],
+      // Right descent
+      [
+        {x: 1, y: 3.8}, {x: 3, y: 2}, {x: 5, y: 0.5}, {x: 8, y: -1}
+      ],
+      // Far right
+      [
+        {x: 8, y: -1}, {x: 9, y: -1.5}, {x: 10, y: -2}
+      ]
+    ];
+
+    // Generate terrain vertices from Bézier curves
+    const terrainVerts = [];
+    for (const curve of mtCookProfile) {
+      const points = generateBezierPoints(curve, 30, curve.length === 4);
+      for (const pt of points) {
+        terrainVerts.push(pt.x, pt.y, -12);  // Z = -12 (far behind cube)
+      }
+    }
+
+    terrainCount = terrainVerts.length / 3;
+
+    if (pivotAPI === 'WebGL2') {
+      terrainVAO = pivotGL.createVertexArray();
+      pivotGL.bindVertexArray(terrainVAO);
+    }
+
+    terrainVBO = pivotGL.createBuffer();
+    pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, terrainVBO);
+    pivotGL.bufferData(pivotGL.ARRAY_BUFFER, new Float32Array(terrainVerts), pivotGL.STATIC_DRAW);
+
+    const terrainLocPos = pivotAPI === 'WebGL2' ? 0 : pivotGL.getAttribLocation(terrainProgram, 'aPos');
+    pivotGL.vertexAttribPointer(terrainLocPos, 3, pivotGL.FLOAT, false, 0, 0);
+    pivotGL.enableVertexAttribArray(terrainLocPos);
+
+    if (pivotAPI === 'WebGL2') {
+      pivotGL.bindVertexArray(null);
+    }
+
+    console.log(`Mt Cook terrain ready (${terrainCount} vertices)`);
+  } catch (e) {
+    console.error('Terrain setup error:', e);
   }
 
   // Re-bind main cube VAO to ensure it's active for rendering
@@ -619,6 +753,25 @@ function drawPivot(){
   const rot = matMul(matRotateY(yaw + t * 1.5), matRotateX(pitch)); // faster rotation
   // FIXED: Reverse order for column-major WebGL matrices (matMul uses row-major convention)
   const mvp = matMul(rot, matMul(view, proj));
+
+  // Render Mt Cook terrain (background)
+  if (terrainProgram && terrainVBO) {
+    pivotGL.useProgram(terrainProgram);
+    pivotGL.uniformMatrix4fv(terrainMVP, false, matMul(matIdentity(), matMul(view, proj)));
+
+    if (terrainVAO) {
+      pivotGL.bindVertexArray(terrainVAO);
+    } else {
+      // WebGL1 path
+      pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, terrainVBO);
+      const terrainLocPos = pivotGL.getAttribLocation(terrainProgram, 'aPos');
+      pivotGL.vertexAttribPointer(terrainLocPos, 3, pivotGL.FLOAT, false, 0, 0);
+      pivotGL.enableVertexAttribArray(terrainLocPos);
+    }
+
+    pivotGL.lineWidth(2.0);  // Thicker lines for visibility
+    pivotGL.drawArrays(pivotGL.LINE_STRIP, 0, terrainCount);
+  }
 
   if (frameCount === 1) {
     console.log('Matrices computed:', { aspect, time: t });
