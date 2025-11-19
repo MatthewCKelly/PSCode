@@ -226,7 +226,32 @@ Function Decode-ConnectionSettings {
             Write-Detail -Message "Not enough bytes remaining to read bypass length" -Level Warning
             $Settings.ProxyBypass = ""
         } # end of bypass parsing
-        
+
+        # Unknown field between bypass and auto config sections
+        # This field exists after bypass section and affects AutoConfig URL offset
+        if ($Data.Length -gt ($Offset + 3)) {
+            Write-Detail -Message "Reading unknown field at offset $Offset" -Level Debug
+            Write-Detail -Message "Unknown field bytes: 0x$($Data[$Offset].ToString('X2')) 0x$($Data[$Offset+1].ToString('X2')) 0x$($Data[$Offset+2].ToString('X2')) 0x$($Data[$Offset+3].ToString('X2'))" -Level Debug
+
+            $UnknownField = Read-UInt32FromBytes -Data $Data -Start $Offset
+            Write-Detail -Message "Unknown field value: $UnknownField" -Level Debug
+            $Settings.UnknownField = $UnknownField
+            $Offset += 4
+
+            # If unknown field is non-zero, skip 1 additional byte
+            # This pattern is seen in Sample 1 vs Sample 2
+            if ($UnknownField -ne 0) {
+                Write-Detail -Message "Unknown field is non-zero ($UnknownField), skipping 1 extra byte at offset $Offset" -Level Debug
+                if ($Offset -lt $Data.Length) {
+                    $ExtraByte = $Data[$Offset]
+                    Write-Detail -Message "Extra byte: 0x$($ExtraByte.ToString('X2'))" -Level Debug
+                    $Settings.UnknownExtraByte = $ExtraByte
+                    $Offset += 1
+                }
+            }
+            Write-Detail -Message "After unknown field section, offset now: $Offset" -Level Debug
+        } # end of unknown field parsing
+
         # Auto config URL section (always read length field)
         if ($Data.Length -gt ($Offset + 3)) {
             Write-Detail -Message "Reading auto config length from offset $Offset, remaining bytes: $($Data.Length - $Offset)" -Level Debug
@@ -313,7 +338,22 @@ Function Encode-ConnectionSettings {
             # Add zero length for proxy bypass
             $ResultBytes += [System.BitConverter]::GetBytes([uint32]0)
         } # end of proxy bypass encoding
-        
+
+        # Add unknown field (appears between bypass and auto config sections)
+        # Default to 0 if not present in settings
+        $UnknownFieldValue = if ($Settings.ContainsKey('UnknownField')) { $Settings.UnknownField } else { 0 }
+        $UnknownFieldBytes = [System.BitConverter]::GetBytes([uint32]$UnknownFieldValue)
+        $ResultBytes += $UnknownFieldBytes
+        Write-Detail -Message "Added unknown field: $UnknownFieldValue" -Level Debug
+
+        # Add extra byte if unknown field is non-zero
+        if ($UnknownFieldValue -ne 0) {
+            # Default to 0x20 (space) if not specified
+            $ExtraByte = if ($Settings.ContainsKey('UnknownExtraByte')) { $Settings.UnknownExtraByte } else { 0x20 }
+            $ResultBytes += $ExtraByte
+            Write-Detail -Message "Added extra byte after unknown field: 0x$($ExtraByte.ToString('X2'))" -Level Debug
+        }
+
         # Add auto config URL if enabled
         if ($Settings.AutoConfigEnabled -and $Settings.AutoConfigURL) {
             $ConfigStringBytes = [System.Text.Encoding]::ASCII.GetBytes($Settings.AutoConfigURL + [char]0)
@@ -420,6 +460,12 @@ Write-Detail -Message "========================================" -Level Info
 # Display current configuration summary
 Write-Detail -Message "CURRENT CONFIGURATION SUMMARY:" -Level Info
 Write-Detail -Message "Version/Counter: $($CurrentSettings.Version)" -Level Info
+if ($CurrentSettings.ContainsKey('UnknownField')) {
+    Write-Detail -Message "Unknown Field (offset 16-19): $($CurrentSettings.UnknownField)" -Level Debug
+    if ($CurrentSettings.ContainsKey('UnknownExtraByte')) {
+        Write-Detail -Message "Unknown Extra Byte: 0x$($CurrentSettings.UnknownExtraByte.ToString('X2'))" -Level Debug
+    }
+}
 Write-Detail -Message "Direct Connection: $($CurrentSettings.DirectConnection)" -Level Info
 Write-Detail -Message "Proxy Enabled: $($CurrentSettings.ProxyEnabled)" -Level Info
 if ($CurrentSettings.ProxyServer) {
