@@ -55,11 +55,15 @@
 
     <h2>Controls</h2>
     <div class="row">
+      <button id="testCanvasVisible">Test Canvas Visibility</button>
+      <button id="testSimpleTriangle">Test Simple 2D Triangle</button>
+      <button id="resetPivot">Reset 3D pivot</button>
+    </div>
+    <div class="row">
       <button id="simulateLossMain">Simulate loss (main)</button>
       <button id="simulateLossWorker">Simulate loss (worker)</button>
       <button id="toggleWorker">Start worker render</button>
       <button id="downloadDiag">Download diagnostics JSON</button>
-      <button id="resetPivot">Reset 3D pivot</button>
     </div>
     <p>Edge GPU page: <span class="mono">edge://gpu</span> &nbsp; | &nbsp; Chrome GPU page: <span class="mono">chrome://gpu</span></p>
 
@@ -260,6 +264,9 @@ function link(gl,vs,fs){const p=gl.createProgram();gl.attachShader(p,vs);gl.atta
 let program=null, vao=null, vbo=null, ibo=null, uMVP=null, uTime=null;
 let locPos=-1, locCol=-1;
 
+// Simple 2D test program (no transformations)
+let testProgram=null, testVAO=null, testVBO=null;
+
 if (pivotGL) {
   try {
     console.log(`Compiling shaders for ${pivotAPI}...`);
@@ -350,6 +357,54 @@ if (pivotGL) {
     addStatus('Pivot shader/program error: '+e.message, 'bad');
     console.error('Pivot setup error:', e);
   }
+
+  // Create simple 2D test program (clip-space coordinates, no transformations)
+  try {
+    console.log('Creating simple 2D test program...');
+    const testVS = pivotAPI === 'WebGL2' ? `#version 300 es
+      layout(location=0) in vec2 aPos;
+      void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+    ` : `
+      attribute vec2 aPos;
+      void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+    `;
+
+    const testFS = pivotAPI === 'WebGL2' ? `#version 300 es
+      precision highp float;
+      out vec4 outColor;
+      void main() { outColor = vec4(1.0, 0.5, 0.0, 1.0); }
+    ` : `
+      precision highp float;
+      void main() { gl_FragColor = vec4(1.0, 0.5, 0.0, 1.0); }
+    `;
+
+    const vs = compile(pivotGL, pivotGL.VERTEX_SHADER, testVS);
+    const fs = compile(pivotGL, pivotGL.FRAGMENT_SHADER, testFS);
+    testProgram = link(pivotGL, vs, fs);
+
+    if (pivotAPI === 'WebGL2') {
+      testVAO = pivotGL.createVertexArray();
+      pivotGL.bindVertexArray(testVAO);
+    }
+
+    testVBO = pivotGL.createBuffer();
+    pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, testVBO);
+    // Large triangle in clip space
+    const triVerts = new Float32Array([
+      -0.8, -0.8,
+       0.8, -0.8,
+       0.0,  0.8
+    ]);
+    pivotGL.bufferData(pivotGL.ARRAY_BUFFER, triVerts, pivotGL.STATIC_DRAW);
+
+    const testLocPos = pivotAPI === 'WebGL2' ? 0 : pivotGL.getAttribLocation(testProgram, 'aPos');
+    pivotGL.vertexAttribPointer(testLocPos, 2, pivotGL.FLOAT, false, 0, 0);
+    pivotGL.enableVertexAttribArray(testLocPos);
+
+    console.log('Simple 2D test program ready');
+  } catch (e) {
+    console.error('2D test program setup error:', e);
+  }
 }
 
 /* Pivot interactions */
@@ -363,6 +418,57 @@ pivotCanvas.addEventListener('pointermove', e=>{
   const dx=e.clientX-lastX, dy=e.clientY-lastY; lastX=e.clientX; lastY=e.clientY;
   yaw += dx*0.01; pitch += dy*0.01;
 });
+
+/* Test buttons for diagnostics */
+document.getElementById('testCanvasVisible').onclick = ()=>{
+  if (!pivotGL) {
+    addStatus('Cannot test - no GL context', 'bad');
+    return;
+  }
+  addStatus('Testing canvas visibility - flashing bright colors...', 'ok');
+  console.log('Canvas visibility test: Flashing colors');
+
+  let count = 0;
+  const colors = [
+    [1, 0, 1, 1],    // Magenta
+    [0, 1, 1, 1],    // Cyan
+    [1, 1, 0, 1],    // Yellow
+    [0, 1, 0, 1],    // Green
+  ];
+
+  const flashInterval = setInterval(()=>{
+    const color = colors[count % colors.length];
+    pivotGL.clearColor(...color);
+    pivotGL.clear(pivotGL.COLOR_BUFFER_BIT);
+    console.log(`Flashing color ${count}: rgba(${color.join(', ')})`);
+    count++;
+    if (count >= 8) {
+      clearInterval(flashInterval);
+      addStatus('Visibility test complete. Did you see flashing colors?', 'ok');
+      console.log('Visibility test complete');
+    }
+  }, 300);
+};
+
+let testTriangleActive = false;
+document.getElementById('testSimpleTriangle').onclick = ()=>{
+  if (!pivotGL) {
+    addStatus('Cannot test - no GL context', 'bad');
+    return;
+  }
+
+  testTriangleActive = !testTriangleActive;
+
+  if (testTriangleActive) {
+    addStatus('Simple 2D triangle test activated', 'ok');
+    console.log('Drawing simple 2D triangle (clip space coordinates)');
+    document.getElementById('testSimpleTriangle').textContent = 'Stop 2D Triangle Test';
+  } else {
+    addStatus('Simple 2D triangle test deactivated', 'ok');
+    console.log('Stopping simple 2D triangle test');
+    document.getElementById('testSimpleTriangle').textContent = 'Test Simple 2D Triangle';
+  }
+};
 
 /* Resize + draw loop (with robust size guards) */
 function resizeCanvas(gl,canvas){
@@ -410,7 +516,6 @@ function drawPivot(){
   }
   resizeCanvas(pivotGL, pivotCanvas);
 
-  pivotGL.enable(pivotGL.DEPTH_TEST);
   pivotGL.clearColor(0.07,0.09,0.16,1);
   pivotGL.clear(pivotGL.COLOR_BUFFER_BIT|pivotGL.DEPTH_BUFFER_BIT);
 
@@ -418,6 +523,28 @@ function drawPivot(){
     console.log('Canvas dimensions:', { width: pivotCanvas.width, height: pivotCanvas.height });
     console.log('Viewport:', pivotGL.getParameter(pivotGL.VIEWPORT));
   }
+
+  // Simple 2D triangle test mode
+  if (testTriangleActive && testProgram) {
+    pivotGL.disable(pivotGL.DEPTH_TEST);
+    pivotGL.useProgram(testProgram);
+    if (testVAO) {
+      pivotGL.bindVertexArray(testVAO);
+    } else {
+      // Rebind for WebGL1
+      pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, testVBO);
+      const testLocPos = pivotGL.getAttribLocation(testProgram, 'aPos');
+      pivotGL.vertexAttribPointer(testLocPos, 2, pivotGL.FLOAT, false, 0, 0);
+      pivotGL.enableVertexAttribArray(testLocPos);
+    }
+    pivotGL.drawArrays(pivotGL.TRIANGLES, 0, 3);
+    fps.tick();
+    requestAnimationFrame(drawPivot);
+    return;
+  }
+
+  // Normal 3D cube rendering
+  pivotGL.enable(pivotGL.DEPTH_TEST);
 
   const t = (performance.now()-startTime)/1000.0;
   const aspect = pivotCanvas.width/pivotCanvas.height;
@@ -428,6 +555,19 @@ function drawPivot(){
 
   if (frameCount === 1) {
     console.log('Matrices computed:', { aspect, time: t });
+    console.log('MVP matrix (first 4 values):', [mvp[0], mvp[1], mvp[2], mvp[3]]);
+    console.log('MVP matrix (full):', Array.from(mvp));
+
+    // Log a test vertex transformation
+    const testVert = [0, 0, 0, 1]; // Origin
+    const transformed = [
+      mvp[0]*testVert[0] + mvp[4]*testVert[1] + mvp[8]*testVert[2] + mvp[12]*testVert[3],
+      mvp[1]*testVert[0] + mvp[5]*testVert[1] + mvp[9]*testVert[2] + mvp[13]*testVert[3],
+      mvp[2]*testVert[0] + mvp[6]*testVert[1] + mvp[10]*testVert[2] + mvp[14]*testVert[3],
+      mvp[3]*testVert[0] + mvp[7]*testVert[1] + mvp[11]*testVert[2] + mvp[15]*testVert[3]
+    ];
+    console.log('Test vertex at origin transforms to:', transformed);
+    console.log('After perspective divide:', [transformed[0]/transformed[3], transformed[1]/transformed[3], transformed[2]/transformed[3]]);
   }
 
   pivotGL.useProgram(program);
