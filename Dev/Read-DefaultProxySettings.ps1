@@ -248,7 +248,7 @@ Function Decode-ConnectionSettings {
                     $ExtraByte = $Data[$Offset]
                     Write-Detail -Message "Extra byte: 0x$($ExtraByte.ToString('X2'))" -Level Debug
                     $Settings.UnknownExtraByte = $ExtraByte
-                    $Offset += 1
+                    # $Offset += 1
                 }
             }
             Write-Detail -Message "After unknown field section, offset now: $Offset" -Level Debug
@@ -405,3 +405,4 @@ Write-Detail -Message "DefaultConnectionSettings reader completed successfully (
 exit 0
 
 #endregion Main Execution
+
