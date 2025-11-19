@@ -103,12 +103,16 @@ Offset  Length  Type    Description
 0x00    4       DWORD   Version/Counter (increments on each change)
 0x04    4       DWORD   Connection Flags (bit field)
 0x08    4       DWORD   Proxy Server String Length (bytes)
-0x0C    N       ASCII   Proxy Server String (null-terminated)
+0x0C    N       ASCII   Proxy Server String (null-terminated, if length > 0)
 ---     4       DWORD   Proxy Bypass String Length (bytes)
----     N       ASCII   Proxy Bypass String (null-terminated)
+---     N       ASCII   Proxy Bypass String (null-terminated, if length > 0)
+---     4       DWORD   Unknown Field (purpose unknown)
+---     1       BYTE    Extra byte (only if Unknown Field ≠ 0, typically 0x20)
 ---     4       DWORD   Auto Config URL String Length (bytes)
 ---     N       ASCII   Auto Config URL String (null-terminated)
 ```
+
+**Important Discovery:** There is an unknown 4-byte field between the Proxy Bypass section and the AutoConfig URL section. If this field is non-zero, an additional byte follows before the AutoConfig URL length field. This explains the variable offset for the AutoConfig URL in different configurations.
 
 ### Connection Flags Bit Field (Offset 0x04)
 
@@ -129,30 +133,33 @@ Bit     Hex     Description
 
 ### Example Binary Structures
 
-**Sample 1: Auto Config Enabled**
+**Sample 1: With AutoConfig URL (Unknown Field = 1)**
 ```
 Offset  Hex Data                            Decoded Value
 ------  ----------------------------------  -------------
 0x00    46 00 00 00                        Version: 70
-0x04    1E 01 00 00                        Flags: 0x011E (286)
+0x04    1E 01 00 00 (or 4A 01 00 00)      Flags: varies
 0x08    01 00 00 00                        Proxy Length: 1
-0x0C    00                                 Proxy: (empty)
+0x0C    00                                 Proxy: (null terminator only)
 0x0D    00 00 00 00                        Bypass Length: 0
-0x11    01 00 00 00                        Config Length: 1 (or next field)
-0x15    20 42 00 00 00                     Likely start of URL length
+0x11    01 00 00 00                        Unknown Field: 1 ⭐
+0x15    20                                 Extra Byte: 0x20 (space) ⭐
+0x16    42 00 00 00                        AutoConfig URL Length: 66
+0x1A    68 74 74 70 3A 2F 2F ...           "http://webdefence..."
 ```
 
-**Sample 2: No Auto Config**
+**Sample 2: With AutoConfig URL (Unknown Field = 0)**
 ```
 Offset  Hex Data                            Decoded Value
 ------  ----------------------------------  -------------
 0x00    46 00 00 00                        Version: 70
 0x04    62 1F 00 00                        Flags: 0x1F62 (8034)
 0x08    01 00 00 00                        Proxy Length: 1
-0x0C    00                                 Proxy: (empty)
+0x0C    00                                 Proxy: (null terminator only)
 0x0D    00 00 00 00                        Bypass Length: 0
-0x11    00 00 00 00                        Config Length: 0
-0x15    42 00 00 00                        Next field length: 66
+0x11    00 00 00 00                        Unknown Field: 0 ⭐
+0x15    42 00 00 00                        AutoConfig URL Length: 66 (no extra byte!)
+0x19    68 74 74 70 3A 2F 2F ...           "http://..."
 ```
 
 **Key Observations:**
@@ -160,6 +167,9 @@ Offset  Hex Data                            Decoded Value
 - Flags field varies significantly between configurations
 - String lengths are always stored as little-endian DWORDs
 - Zero-length strings still have length field (0x00000000)
+- **Unknown field at offset 0x11** controls whether an extra byte appears
+- **When Unknown Field = 1**: Extra byte 0x20, AutoConfig URL starts at offset 0x16
+- **When Unknown Field = 0**: No extra byte, AutoConfig URL starts at offset 0x15
 
 ---
 
@@ -308,6 +318,8 @@ Function Decode-ConnectionSettings {
     AutoDetectEnabled    = [bool]        # Flag bit 3
     ProxyServer          = [string]      # e.g., "proxy.example.com:8080"
     ProxyBypass          = [string]      # e.g., "localhost;127.0.0.1"
+    UnknownField         = [uint32]      # Unknown 4-byte field (0 or 1 typically)
+    UnknownExtraByte     = [byte]        # Extra byte if UnknownField ≠ 0 (typically 0x20)
     AutoConfigURL        = [string]      # e.g., "http://proxy.example.com/proxy.pac"
 }
 ```
@@ -318,7 +330,9 @@ Function Decode-ConnectionSettings {
 3. Decode flag bits into boolean properties
 4. Parse proxy server section (length + string)
 5. Parse proxy bypass section (length + string)
-6. Parse auto config URL section (length + string)
+6. **Parse unknown field (4 bytes)**
+7. **If unknown field ≠ 0, skip 1 extra byte**
+8. Parse auto config URL section (length + string)
 
 **String Extraction:**
 - Reads length field first (4-byte DWORD)
