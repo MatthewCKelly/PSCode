@@ -198,16 +198,14 @@ Function Decode-ConnectionSettings {
 
             $BypassLength  = Read-UInt32FromBytes -Data $Data -Start $Offset -Offset 0
             Write-Detail -Message "Proxy bypass section: $BypassLength bytes at offset $Offset" -Level Debug
-            
+            $Offset += 4
+
             # Sanity check on bypass length
             if ($BypassLength -gt 1000) {
                 Write-Detail -Message "WARNING: Bypass length $BypassLength seems unreasonable - possible parsing error at offset $Offset" -Level Warning
                 Write-Detail -Message "This suggests our offset tracking is incorrect" -Level Warning
                 $Settings.ProxyBypass = ""
-                $Offset += 4
             } else {
-                $Offset += 4
-                
                 if ($BypassLength -gt 0 -and ($Offset + $BypassLength) -le $Data.Length) {
                     # Extract proxy bypass string only if length > 0
                     $BypassBytes = $Data[$Offset..($Offset + $BypassLength - 1)]
