@@ -401,9 +401,21 @@ if (pivotGL) {
     pivotGL.vertexAttribPointer(testLocPos, 2, pivotGL.FLOAT, false, 0, 0);
     pivotGL.enableVertexAttribArray(testLocPos);
 
+    // IMPORTANT: Unbind test VAO to restore previous state
+    if (pivotAPI === 'WebGL2') {
+      pivotGL.bindVertexArray(null);
+      console.log('Test VAO unbound');
+    }
+
     console.log('Simple 2D test program ready');
   } catch (e) {
     console.error('2D test program setup error:', e);
+  }
+
+  // Re-bind main cube VAO to ensure it's active for rendering
+  if (vao) {
+    pivotGL.bindVertexArray(vao);
+    console.log('Main cube VAO re-bound after test setup');
   }
 }
 
@@ -544,6 +556,10 @@ function drawPivot(){
     console.log('Culling enabled:', pivotGL.getParameter(pivotGL.CULL_FACE));
     console.log('Blend enabled:', pivotGL.getParameter(pivotGL.BLEND));
     console.log('Current program:', pivotGL.getParameter(pivotGL.CURRENT_PROGRAM));
+    if (pivotAPI === 'WebGL2') {
+      console.log('Current VAO binding:', pivotGL.getParameter(pivotGL.VERTEX_ARRAY_BINDING));
+      console.log('Expected VAO:', vao);
+    }
   }
 
   // Simple 2D triangle test mode
@@ -599,6 +615,8 @@ function drawPivot(){
     pivotGL.bindVertexArray(vao);
     if (frameCount === 1) {
       console.log('Using VAO (WebGL2 path)');
+      console.log('VAO binding after bind:', pivotGL.getParameter(pivotGL.VERTEX_ARRAY_BINDING));
+      console.log('VAO matches expected:', pivotGL.getParameter(pivotGL.VERTEX_ARRAY_BINDING) === vao);
     }
   } else {
     // WebGL1: Manually bind buffers and set up vertex attributes
