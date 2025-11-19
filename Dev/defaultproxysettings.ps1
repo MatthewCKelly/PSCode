@@ -102,9 +102,14 @@ Function Read-UInt32FromBytes {
         return $null
     } # end of bounds check
     
-    # Read and return the value
+    # Extract 4-byte subset and convert
     try {
-        $Value = [System.BitConverter]::ToUInt32($Data, $Position)
+        # Extract only the 4 bytes we need
+        $SubsetBytes = $Data[$Position..($Position + 3)]
+
+        # Convert the subset to UInt32 (reading from position 0 of the subset)
+        $Value = [System.BitConverter]::ToUInt32($SubsetBytes, 0)
+
         Write-Detail -Message "Read UInt32 at position $Position (start $Start + offset $Offset): 0x$($Data[$Position].ToString('X2')) $($Data[$Position+1].ToString('X2')) $($Data[$Position+2].ToString('X2')) $($Data[$Position+3].ToString('X2')) = $Value" -Level Debug
         return $Value
     } catch {
@@ -198,16 +203,14 @@ Function Decode-ConnectionSettings {
 
             $BypassLength  = Read-UInt32FromBytes -Data $Data -Start $Offset -Offset 0
             Write-Detail -Message "Proxy bypass section: $BypassLength bytes at offset $Offset" -Level Debug
-            
+            $Offset += 4
+
             # Sanity check on bypass length
             if ($BypassLength -gt 1000) {
                 Write-Detail -Message "WARNING: Bypass length $BypassLength seems unreasonable - possible parsing error at offset $Offset" -Level Warning
                 Write-Detail -Message "This suggests our offset tracking is incorrect" -Level Warning
                 $Settings.ProxyBypass = ""
-                $Offset += 4
             } else {
-                $Offset += 4
-                
                 if ($BypassLength -gt 0 -and ($Offset + $BypassLength) -le $Data.Length) {
                     # Extract proxy bypass string only if length > 0
                     $BypassBytes = $Data[$Offset..($Offset + $BypassLength - 1)]
