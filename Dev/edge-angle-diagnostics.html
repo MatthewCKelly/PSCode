@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SOE Edge – ANGLE/WebGL diagnostics (final corrected)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0;
+    font-family: system-ui, Segoe UI, Arial, sans-serif; }
+  #wrap { display:grid; grid-template-columns: 380px 1fr; gap:16px; height:100%; }
+  #panel { padding:16px; border-right:1px solid #334155; overflow:auto; }
+  h1,h2 { margin:0 0 8px; }
+  p,li { line-height:1.35; }
+  button { padding:8px 12px; margin:4px 4px 8px 0; border:1px solid #334155;
+    background:#1f2937; color:#e2e8f0; cursor:pointer; border-radius:6px; }
+  button:disabled { opacity:.6; cursor:not-allowed; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; margin:4px 0 8px; }
+  .ok { color:#22c55e; } .warn { color:#f59e0b; } .bad { color:#ef4444; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  #canvases { position:relative; padding:12px; }
+  /* Clear visual separation */
+  .section-title { color:#93c5fd; margin:4px 0; }
+  #pivotCanvas {
+    border: 2px solid #334155;
+    background: #0b1220;
+    margin-bottom: 12px;
+    width:100%; height:55vh; display:block;
+  }
+  #fpsCanvas {
+    position:absolute; right:20px; top:46px;
+    width:240px; height:80px;
+    border:1px solid #334155; background:rgba(8,12,20,.7);
+  }
+  #workerCanvas {
+    border: 2px dashed #475569;
+    background: #111827;
+    width:100%; height:35vh; display:block;
+    margin-top: 8px;
+  }
+  pre { white-space:pre-wrap; word-break:break-word; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="panel">
+    <h1>ANGLE / WebGL diagnostics</h1>
+    <p>Tests WebGL via ANGLE on Windows (Edge/Chrome). Includes renderer strings, GPU caps,
+       FPS graph, 3D pivot cube, OffscreenCanvas worker triangle, context-loss tests, and diagnostics export.</p>
+
+    <h2>Renderer info</h2>
+    <ul id="status"></ul>
+    <pre id="info" class="mono">Collecting…</pre>
+
+    <h2>Controls</h2>
+    <div class="row">
+      <button id="simulateLossMain">Simulate loss (main)</button>
+      <button id="simulateLossWorker">Simulate loss (worker)</button>
+      <button id="toggleWorker">Start worker render</button>
+      <button id="downloadDiag">Download diagnostics JSON</button>
+      <button id="resetPivot">Reset 3D pivot</button>
+    </div>
+    <p>Edge GPU page: <span class="mono">edge://gpu</span> &nbsp; | &nbsp; Chrome GPU page: <span class="mono">chrome://gpu</span></p>
+
+    <h2>Notes for SOE</h2>
+    <ul>
+      <li>If <span class="mono">WEBGL_debug_renderer_info</span> is blocked by policy, vendor/renderer may be masked.</li>
+      <li>On Windows + Edge Stable, renderer should include <span class="mono">ANGLE</span> and <span class="mono">Direct3D11</span>.</li>
+      <li>Use <span class="mono">edge://gpu</span> for final confirmation and driver details.</li>
+    </ul>
+  </div>
+
+  <div id="canvases">
+    <h2 class="section-title">Pivot Scene (Rotating Cube)</h2>
+    <canvas id="pivotCanvas" class="gl"></canvas>
+    <canvas id="fpsCanvas" class="fps"></canvas>
+
+    <h2 class="section-title" style="margin-top:12px;">Worker Demo (Animated Triangle)</h2>
+    <canvas id="workerCanvas"></canvas>
+  </div>
+</div>
+
+<script>
+/* -------------------- Utility & UI -------------------- */
+const statusUl = document.getElementById('status');
+function addStatus(text, cls='ok') {
+  const li = document.createElement('li'); li.textContent = text; li.className = cls; statusUl.appendChild(li);
+}
+const infoPre = document.getElementById('info');
+function setInfo(lines) { infoPre.textContent = lines.join('\n'); }
+
+/* -------------------- Create GL context -------------------- */
+function createGL(canvas, preferWebGL2=true) {
+  const opts = { alpha:false, antialias:true, preserveDrawingBuffer:false, powerPreference:'high-performance' };
+  let gl = preferWebGL2 ? canvas.getContext('webgl2', opts) : null;
+  let api = gl ? 'WebGL2' : 'WebGL1';
+  if (!gl) { gl = canvas.getContext('webgl', opts) || canvas.getContext('experimental-webgl', opts); api = gl ? 'WebGL1' : 'None'; }
+  return { gl, api };
+}
+
+/* -------------------- Renderer info -------------------- */
+function getRendererInfo(gl) {
+  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  const vendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR);
+  const renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+  const shading = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
+  const version = gl.getParameter(gl.VERSION);
+  const caps = {
+    MAX_TEXTURE_SIZE: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+    MAX_CUBE_MAP_TEXTURE_SIZE: gl.getParameter(gl.MAX_CUBE_MAP_TEXTURE_SIZE),
+    MAX_VERTEX_ATTRIBS: gl.getParameter(gl.MAX_VERTEX_ATTRIBS),
+    MAX_VERTEX_UNIFORM_VECTORS: gl.getParameter(gl.MAX_VERTEX_UNIFORM_VECTORS),
+    MAX_FRAGMENT_UNIFORM_VECTORS: gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS),
+    MAX_VARYING_VECTORS: gl.getParameter(gl.MAX_VARYING_VECTORS),
+  };
+  return { vendor, renderer, shading, version, debugExt: !!dbg, caps };
+}
+
+/* -------------------- FPS graph -------------------- */
+class FpsGraph {
+  constructor(canvas, maxSamples=240) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.samples = new Array(maxSamples).fill(0);
+    this.ptr = 0;
+    this.frameCount = 0; this.lastSecond = performance.now(); this.fps = 0;
+    const w = canvas.clientWidth || 240, h = canvas.clientHeight || 80;
+    canvas.width = w; canvas.height = h;
+  }
+  tick() {
+    const now = performance.now();
+    this.frameCount++;
+    if (now - this.lastSecond >= 1000) {
+      this.fps = this.frameCount; this.frameCount = 0; this.lastSecond = now;
+      this.samples[this.ptr] = this.fps; this.ptr = (this.ptr + 1) % this.samples.length;
+      this.draw();
+    }
+  }
+  draw() {
+    const {ctx, canvas} = this;
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0,0,w,h);
+    ctx.fillStyle = '#93c5fd'; ctx.font = '12px system-ui'; ctx.fillText(`FPS: ${this.fps}`, 8, 14);
+    const maxFps = 120, barW = w/this.samples.length;
+    for (let i=0; i<this.samples.length; i++) {
+      const idx = (this.ptr + i) % this.samples.length;
+      const v = this.samples[idx];
+      const barH = Math.min(h-24, Math.floor((v/maxFps) * (h-24)));
+      ctx.fillStyle = v >= 55 ? '#22c55e' : (v >= 40 ? '#f59e0b' : '#ef4444');
+      ctx.fillRect(i*barW, h - barH - 4, barW-1, barH);
+    }
+  }
+  snapshot() { return { fps: this.fps, samples: [...this.samples] }; }
+}
+
+/* -------------------- Minimal matrix math -------------------- */
+function matMul(a,b){const r=new Float32Array(16);for(let i=0;i<4;i++){for(let j=0;j<4;j++){let s=0;for(let k=0;k<4;k++)s+=a[i*4+k]*b[k*4+j];r[i*4+j]=s;}}return r;}
+function matIdentity(){const m=new Float32Array(16);m[0]=m[5]=m[10]=m[15]=1;return m;}
+function matPerspective(fovy,aspect,near,far){const f=1/Math.tan(fovy/2),nf=1/(near-far);const m=new Float32Array(16);
+  m[0]=f/aspect;m[5]=f;m[10]=(far+near)*nf;m[11]=-1;m[14]=(2*far*near)*nf;return m;}
+function matTranslate(tx,ty,tz){const m=matIdentity();m[12]=tx;m[13]=ty;m[14]=tz;return m;}
+function matRotateY(a){const c=Math.cos(a),s=Math.sin(a);const m=matIdentity();m[0]=c;m[2]=s;m[8]=-s;m[10]=c;return m;}
+function matRotateX(a){const c=Math.cos(a),s=Math.sin(a);const m=matIdentity();m[5]=c;m[6]=-s;m[9]=s;m[10]=c;return m;}
+
+/* -------------------- Build 3D pivot scene -------------------- */
+const pivotCanvas = document.getElementById('pivotCanvas');
+const fpsCanvas = document.getElementById('fpsCanvas');
+const { gl: pivotGL, api: pivotAPI } = createGL(pivotCanvas, true);
+if (!pivotGL) {
+  addStatus('Failed to create WebGL context (pivot). WebGL may be blocked by policy or GPU.', 'bad');
+} else {
+  addStatus(`Created ${pivotAPI} context (pivot).`);
+}
+
+const ri = pivotGL ? getRendererInfo(pivotGL) : null;
+if (ri) {
+  setInfo([
+    `API            : ${pivotAPI}`,
+    `GL_VERSION     : ${ri.version}`,
+    `GLSL_VERSION   : ${ri.shading}`,
+    `Vendor         : ${ri.vendor}`,
+    `Renderer       : ${ri.renderer}`,
+    `Debug ext      : ${ri.debugExt ? 'WEBGL_debug_renderer_info available' : 'not available'}`,
+    `Caps           : ${JSON.stringify(ri.caps)}`
+  ]);
+}
+
+const fps = new FpsGraph(fpsCanvas);
+
+/* Shaders: WebGL2 (ES 3.0) + WebGL1 (ES 2.0) with precision aligned */
+const v300 = `#version 300 es
+uniform highp mat4 uMVP;
+uniform highp float uTime;
+
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aCol;
+
+out vec3 vCol;
+
+void main() {
+  float wobble = 0.02 * sin(uTime * 0.6);
+  gl_Position = uMVP * vec4(aPos + vec3(0.0, wobble, 0.0), 1.0);
+  vCol = aCol;
+}`;
+const f300 = `#version 300 es
+precision highp float;
+
+in vec3 vCol;
+out vec4 outColor;
+
+void main() {
+  outColor = vec4(vCol, 1.0);
+}`;
+
+const vES2 = `
+attribute vec3 aPos;
+attribute vec3 aCol;
+
+uniform highp mat4 uMVP;
+uniform highp float uTime;
+
+varying vec3 vCol;
+
+void main() {
+  float wobble = 0.02 * sin(uTime * 0.6);
+  gl_Position = uMVP * vec4(aPos + vec3(0.0, wobble, 0.0), 1.0);
+  vCol = aCol;
+}`;
+const fES2 = `
+precision highp float;
+
+varying vec3 vCol;
+
+void main() {
+  gl_FragColor = vec4(vCol, 1.0);
+}`;
+
+function compile(gl,type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)||'Shader compile error'); return s;}
+function link(gl,vs,fs){const p=gl.createProgram();gl.attachShader(p,vs);gl.attachShader(p,fs);gl.linkProgram(p);
+  if(!gl.getProgramParameter(p,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)||'Program link error'); return p;}
+
+let program=null, vao=null, vbo=null, ibo=null, uMVP=null, uTime=null;
+let locPos=-1, locCol=-1;
+
+if (pivotGL) {
+  try {
+    if (pivotAPI === 'WebGL2') {
+      const vs = compile(pivotGL, pivotGL.VERTEX_SHADER, v300);
+      const fs = compile(pivotGL, pivotGL.FRAGMENT_SHADER, f300);
+      program = link(pivotGL, vs, fs);
+      vao = pivotGL.createVertexArray(); pivotGL.bindVertexArray(vao);
+      locPos = 0; locCol = 1;
+    } else {
+      const vs = compile(pivotGL, pivotGL.VERTEX_SHADER, vES2);
+      const fs = compile(pivotGL, pivotGL.FRAGMENT_SHADER, fES2);
+      program = link(pivotGL, vs, fs);
+      locPos = pivotGL.getAttribLocation(program, 'aPos');
+      locCol = pivotGL.getAttribLocation(program, 'aCol');
+    }
+
+    // Cube geometry (scaled ×1.5 for visibility), pos+color interleaved
+    const s = 1.5;
+    const verts = new Float32Array([
+      // x, y, z,   r, g, b
+      -s,-s,-s,   1,0,0,   // 0
+       s,-s,-s,   0,1,0,   // 1
+       s, s,-s,   0,0,1,   // 2
+      -s, s,-s,   1,1,0,   // 3
+      -s,-s, s,   1,0,1,   // 4
+       s,-s, s,   0,1,1,   // 5
+       s, s, s,   1,1,1,   // 6
+      -s, s, s,   0.3,0.8,0.5 // 7
+    ]);
+    const idx = new Uint16Array([
+      0,1,2, 0,2,3, // back
+      4,5,6, 4,6,7, // front
+      0,4,7, 0,7,3, // left
+      1,5,6, 1,6,2, // right
+      3,2,6, 3,6,7, // top
+      0,1,5, 0,5,4  // bottom
+    ]);
+
+    if (vao) pivotGL.bindVertexArray(vao);
+
+    vbo = pivotGL.createBuffer();
+    pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, vbo);
+    pivotGL.bufferData(pivotGL.ARRAY_BUFFER, verts, pivotGL.STATIC_DRAW);
+
+    ibo = pivotGL.createBuffer();
+    pivotGL.bindBuffer(pivotGL.ELEMENT_ARRAY_BUFFER, ibo);
+    pivotGL.bufferData(pivotGL.ELEMENT_ARRAY_BUFFER, idx, pivotGL.STATIC_DRAW);
+
+    const stride = 6 * 4;       // 6 floats per vertex = 24 bytes
+    const offsetPos = 0;        // bytes
+    const offsetCol = 3 * 4;    // bytes
+
+    pivotGL.vertexAttribPointer(locPos, 3, pivotGL.FLOAT, false, stride, offsetPos);
+    pivotGL.enableVertexAttribArray(locPos);
+    pivotGL.vertexAttribPointer(locCol, 3, pivotGL.FLOAT, false, stride, offsetCol);
+    pivotGL.enableVertexAttribArray(locCol);
+
+    pivotGL.useProgram(program);
+    uMVP = pivotGL.getUniformLocation(program,'uMVP');
+    uTime = pivotGL.getUniformLocation(program,'uTime');
+    addStatus('3D pivot program compiled/linked.');
+    console.log('Pivot setup OK', { api: pivotAPI, vao: !!vao, vbo: !!vbo, ibo: !!ibo, locPos, locCol });
+  } catch (e) {
+    addStatus('Pivot shader/program error: '+e.message, 'bad');
+  }
+}
+
+/* Pivot interactions */
+let yaw=0, pitch=0, dragging=false, lastX=0, lastY=0;
+function resetPivot(){ yaw=0; pitch=0; }
+document.getElementById('resetPivot').onclick = resetPivot;
+pivotCanvas.addEventListener('pointerdown', e=>{dragging=true; lastX=e.clientX; lastY=e.clientY; pivotCanvas.setPointerCapture(e.pointerId);});
+pivotCanvas.addEventListener('pointerup', e=>{dragging=false; pivotCanvas.releasePointerCapture(e.pointerId);});
+pivotCanvas.addEventListener('pointermove', e=>{
+  if(!dragging) return;
+  const dx=e.clientX-lastX, dy=e.clientY-lastY; lastX=e.clientX; lastY=e.clientY;
+  yaw += dx*0.01; pitch += dy*0.01;
+});
+
+/* Resize + draw loop (with robust size guards) */
+function resizeCanvas(gl,canvas){
+  const w = canvas.clientWidth || 640, h = canvas.clientHeight || 360;
+  if (canvas.width!==w || canvas.height!==h) { canvas.width=w; canvas.height=h; }
+  gl.viewport(0,0,w,h);
+}
+let startTime = performance.now();
+function drawPivot(){
+  if (!pivotGL || !program) return;
+  resizeCanvas(pivotGL, pivotCanvas);
+
+  pivotGL.enable(pivotGL.DEPTH_TEST);
+  pivotGL.clearColor(0.07,0.09,0.16,1);
+  pivotGL.clear(pivotGL.COLOR_BUFFER_BIT|pivotGL.DEPTH_BUFFER_BIT);
+
+  const t = (performance.now()-startTime)/1000.0;
+  const aspect = pivotCanvas.width/pivotCanvas.height;
+  const proj = matPerspective(60*Math.PI/180, aspect, 0.1, 100); // slightly wider FOV
+  const view = matTranslate(0,0,-6);
+  const rot = matMul(matRotateY(yaw + t * 1.5), matRotateX(pitch)); // faster rotation
+  const mvp = matMul(matMul(proj, view), rot);
+
+  pivotGL.useProgram(program);
+  if (vao) pivotGL.bindVertexArray(vao);               // WebGL2
+  pivotGL.bindBuffer(pivotGL.ELEMENT_ARRAY_BUFFER, ibo); // Ensure EBO bound (both WebGL2/1)
+
+  pivotGL.uniformMatrix4fv(uMVP,false,mvp);
+  pivotGL.uniform1f(uTime, t);
+
+  pivotGL.drawElements(pivotGL.TRIANGLES, 36, pivotGL.UNSIGNED_SHORT, 0);
+
+  fps.tick();
+  requestAnimationFrame(drawPivot);
+}
+requestAnimationFrame(drawPivot);
+
+/* Context loss simulation (main) */
+document.getElementById('simulateLossMain').onclick = _=>{
+  if (!pivotGL) return;
+  const lose = pivotGL.getExtension('WEBGL_lose_context');
+  if (lose) { addStatus('Simulating context loss (main)…','warn'); lose.loseContext(); setTimeout(()=>{ lose.restoreContext(); addStatus('Main context restored.'); }, 1500); }
+  else addStatus('WEBGL_lose_context not available.','warn');
+};
+pivotCanvas.addEventListener('webglcontextlost',(ev)=>{ev.preventDefault(); addStatus('Main context lost','warn');});
+pivotCanvas.addEventListener('webglcontextrestored',()=>{ addStatus('Main context restored','ok'); requestAnimationFrame(drawPivot); });
+
+/* -------------------- OffscreenCanvas Worker demo (patched) -------------------- */
+const workerCanvas = document.getElementById('workerCanvas');
+let worker = null, workerRunning = false;
+let workerBlobURL = null;
+
+function makeWorkerBlobURL() {
+  const workerSrc = `
+    let gl=null, program=null, uTime=null, buf=null, running=false, start=0;
+
+    function compile(gl,t,s){const sh=gl.createShader(t);gl.shaderSource(sh,s);gl.compileShader(sh);
+      if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh)); return sh;}
+    function link(gl,vs,fs){const p=gl.createProgram();gl.attachShader(p,vs);gl.attachShader(p,fs);gl.linkProgram(p);
+      if(!gl.getProgramParameter(p,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); return p;}
+
+    const vs300=\`#version 300 es
+      uniform highp float uTime;
+      layout(location=0) in vec2 pos;
+      void main(){
+        float k = 0.3 + 0.2 * sin(uTime * 1.7);
+        gl_Position = vec4(pos * vec2(1.0, k), 0.0, 1.0);
+      }\`;
+    const fs300=\`#version 300 es
+      precision highp float;
+      uniform highp float uTime;
+      out vec4 outColor;
+      void main(){
+        outColor = vec4(
+          0.3 + 0.7 * abs(sin(uTime * 0.9)),
+          0.6,
+          0.4 + 0.6 * abs(cos(uTime * 1.1)),
+          1.0
+        );
+      }\`;
+
+    function init(off, scale) {
+      gl = off.getContext('webgl2', {alpha:false,antialias:true,preserveDrawingBuffer:false,powerPreference:'high-performance'});
+      if (!gl) { postMessage({type:'status', text:'Worker failed to create WebGL2', cls:'bad'}); return; }
+
+      const vs=compile(gl,gl.VERTEX_SHADER,vs300), fs=compile(gl,gl.FRAGMENT_SHADER,fs300);
+      program=link(gl,vs,fs); gl.useProgram(program);
+      uTime = gl.getUniformLocation(program,'uTime');
+
+      buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      const tri = new Float32Array([-0.8,-0.8, 0.8,-0.8, 0.0,0.8]);
+      gl.bufferData(gl.ARRAY_BUFFER, tri, gl.STATIC_DRAW);
+      gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0); gl.enableVertexAttribArray(0);
+
+      start = performance.now(); running=true;
+      postMessage({type:'status', text:'Worker WebGL ready', cls:'ok'});
+      self.requestAnimationFrame(frame);
+    }
+
+    function resize(w,h, scale) {
+      const dw = Math.max(1, Math.floor(w * (scale||1)));
+      const dh = Math.max(1, Math.floor(h * (scale||1)));
+      gl.canvas.width = dw;
+      gl.canvas.height = dh;
+      gl.viewport(0,0,dw,dh);
+    }
+
+    function frame(t){
+      if(!running) return;
+      const time = (t-start)/1000.0;
+      gl.clearColor(0.05,0.08,0.14,1); gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.uniform1f(uTime, time);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      self.requestAnimationFrame(frame);
+    }
+
+    self.onmessage = ev=>{
+      const m = ev.data;
+      if (m.cmd==='init'){ init(m.canvas, m.scale); resize(m.w, m.h, m.scale); }
+      else if (m.cmd==='resize'){ resize(m.w, m.h, m.scale); }
+      else if (m.cmd==='stop'){ running=false; }
+      else if (m.cmd==='lose'){
+        const ext = gl.getExtension('WEBGL_lose_context');
+        if (ext){ ext.loseContext(); setTimeout(()=>ext.restoreContext(),1500); }
+      }
+    };
+  `;
+  const blob = new Blob([workerSrc], {type:'application/javascript'});
+  return URL.createObjectURL(blob);
+}
+
+function startWorker() {
+  if (workerRunning) return;
+
+  if (!('transferControlToOffscreen' in HTMLCanvasElement.prototype)) {
+    addStatus('OffscreenCanvas not supported/allowed on this device. (Policy or build).', 'warn');
+    return;
+  }
+
+  const w = Math.max(1, workerCanvas.clientWidth || 640);
+  const h = Math.max(1, workerCanvas.clientHeight || 360);
+  const scale = window.devicePixelRatio || 1;
+
+  const off = workerCanvas.transferControlToOffscreen();
+
+  if (!workerBlobURL) workerBlobURL = makeWorkerBlobURL();
+  worker = new Worker(workerBlobURL);
+  worker.onmessage = (ev)=>{
+    const {type,text,cls} = ev.data || {};
+    if (type==='status') addStatus(text, cls||'ok');
+  };
+
+  worker.postMessage({cmd:'init', canvas:off, w, h, scale}, [off]);
+  workerRunning = true;
+  document.getElementById('toggleWorker').textContent = 'Stop worker render';
+  addStatus('Worker started.');
+}
+
+function stopWorker() {
+  if (!workerRunning) return;
+  worker.postMessage({cmd:'stop'});
+  worker.terminate();
+  worker = null; workerRunning = false;
+  document.getElementById('toggleWorker').textContent = 'Start worker render';
+  addStatus('Worker stopped.');
+}
+
+function resizeWorker(){
+  if (!workerRunning) return;
+  const w = Math.max(1, workerCanvas.clientWidth || 640);
+  const h = Math.max(1, workerCanvas.clientHeight || 360);
+  const scale = window.devicePixelRatio || 1;
+  worker.postMessage({cmd:'resize', w, h, scale});
+}
+
+window.addEventListener('resize', resizeWorker);
+document.getElementById('toggleWorker').onclick = ()=> workerRunning ? stopWorker() : startWorker();
+document.getElementById('simulateLossWorker').onclick = ()=>{
+  if (!workerRunning) { addStatus('Worker not running.','warn'); return; }
+  addStatus('Simulating context loss (worker)…','warn');
+  worker.postMessage({cmd:'lose'});
+};
+
+/* -------------------- Diagnostics pack (JSON) -------------------- */
+document.getElementById('downloadDiag').onclick = ()=>{
+  const data = {
+    when: new Date().toISOString(),
+    userAgent: navigator.userAgent,
+    uaData: (navigator.userAgentData && navigator.userAgentData.toJSON) ? navigator.userAgentData.toJSON() : null,
+    memory: performance.memory ? {
+      jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
+      totalJSHeapSize: performance.memory.totalJSHeapSize,
+      usedJSHeapSize: performance.memory.usedJSHeapSize
+    } : null,
+    renderer: ri,
+    fps: fps.snapshot()
+  };
+  const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'angle-diagnostics.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  addStatus('Diagnostics JSON downloaded.');
+};
+</script>
+</body>
+</html>
