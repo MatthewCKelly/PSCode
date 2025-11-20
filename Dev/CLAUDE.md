@@ -34,12 +34,20 @@ The **Dev** directory contains development and testing scripts for advanced Wind
 ### Directory Contents
 ```
 Dev/
-└── defaultproxysettings.ps1    # Proxy settings decoder/encoder (537 lines)
+├── defaultproxysettings.ps1         # Proxy settings decoder/encoder (580 lines)
+├── Read-DefaultProxySettings.ps1    # Read-only proxy decoder (407 lines)
+├── Test-ProxySettingsDecoder.ps1    # Test harness for decoder (290 lines)
+├── ProxySettingsKeys/               # Test files directory
+│   ├── README.md                    # Test file documentation
+│   └── *.reg                        # Registry export test files
+└── CLAUDE.md                        # This documentation file
 ```
 
 ### Script Statistics
-- **Total Lines:** 537
-- **Functions:** 5 custom functions
+- **defaultproxysettings.ps1:** 580 lines (full read/write version)
+- **Read-DefaultProxySettings.ps1:** 407 lines (read-only version)
+- **Test-ProxySettingsDecoder.ps1:** 290 lines (test harness)
+- **Functions:** 5 custom functions (shared across scripts)
 - **Registry Path:** `HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections`
 - **Binary Structure:** DefaultConnectionSettings (variable length)
 
@@ -88,6 +96,92 @@ Dev/
 **Exit Codes:**
 - `0` - Success (decode/modification completed)
 - `1` - Error (registry read failure, empty data, encoding error)
+
+### Read-DefaultProxySettings.ps1 (407 lines)
+
+**Purpose:** Read-only version of the proxy settings decoder (no modification capability)
+
+**Key Features:**
+- Binary registry value decoding (little-endian DWORD structures)
+- Hex dump display with ASCII representation
+- Current configuration summary display
+- No administrative privileges required
+- No modification functionality
+
+**Usage:**
+```powershell
+# Simply display current proxy settings
+.\Read-DefaultProxySettings.ps1
+```
+
+**Output Format:**
+- Detailed logging with timestamps and line numbers
+- Hex dump visualization (16 bytes per row with ASCII)
+- Binary structure breakdown
+- Current configuration summary
+
+**Exit Codes:**
+- `0` - Success (settings displayed)
+- `1` - Error (registry read failure, empty data)
+
+**Differences from defaultproxysettings.ps1:**
+- ✅ Removed `Encode-ConnectionSettings` function
+- ✅ Removed all interactive prompts (`Read-Host`)
+- ✅ Removed registry write operations
+- ✅ Removed backup creation logic
+- ✅ No administrative privileges required
+
+### Test-ProxySettingsDecoder.ps1 (290 lines)
+
+**Purpose:** Test harness for validating the decoder against multiple registry export files
+
+**Key Features:**
+- Parses `.reg` files to extract binary data
+- Tests `Decode-ConnectionSettings` function
+- Validates parsing results
+- Color-coded test output
+- Summary report with pass/fail counts
+
+**Usage:**
+```powershell
+# Run all tests in ProxySettingsKeys folder
+.\Test-ProxySettingsDecoder.ps1
+
+# Run with verbose output
+.\Test-ProxySettingsDecoder.ps1 -Verbose
+
+# Specify custom test folder
+.\Test-ProxySettingsDecoder.ps1 -TestFolder "C:\MyTests"
+```
+
+**Test Validation Checks:**
+- ✅ Version and flags field presence
+- ✅ String length reasonableness (max 500-1000 chars)
+- ✅ Null character removal verification
+- ✅ Unknown field detection
+- ✅ Binary data extraction success
+
+**Test File Format:**
+Registry exports (`.reg` files) from:
+```
+HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections
+```
+
+**Creating Test Files:**
+```cmd
+reg export "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections" test.reg
+```
+
+**Output Format:**
+- Per-test detailed results with color coding
+- Hex preview of binary data (first 32 bytes)
+- Decoded settings display
+- Validation issue reporting
+- Summary with total/passed/failed counts
+
+**Exit Codes:**
+- `0` - All tests passed
+- `1` - One or more tests failed
 
 ---
 
