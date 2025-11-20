@@ -377,6 +377,7 @@ let terrainMVP=null;
 let terrainIndexCount=0;
 let gridProgram=null, gridVAO=null, gridVBO=null, gridCount=0;
 let gridMVP=null;
+let lineTestProgram=null, lineTestVAO=null, lineTestVBO=null, lineTestCount=0;
 
 if (pivotGL) {
   try {
@@ -540,20 +541,32 @@ if (pivotGL) {
     const terrainVS = pivotAPI === 'WebGL2' ? `#version 300 es
       uniform highp mat4 uMVP;
       layout(location=0) in vec3 aPos;
-      void main() { gl_Position = uMVP * vec4(aPos, 1.0); }
+      layout(location=1) in vec3 aCol;
+      out vec3 vCol;
+      void main() {
+        gl_Position = uMVP * vec4(aPos, 1.0);
+        vCol = aCol;
+      }
     ` : `
       uniform highp mat4 uMVP;
       attribute vec3 aPos;
-      void main() { gl_Position = uMVP * vec4(aPos, 1.0); }
+      attribute vec3 aCol;
+      varying vec3 vCol;
+      void main() {
+        gl_Position = uMVP * vec4(aPos, 1.0);
+        vCol = aCol;
+      }
     `;
 
     const terrainFS = pivotAPI === 'WebGL2' ? `#version 300 es
       precision highp float;
+      in vec3 vCol;
       out vec4 outColor;
-      void main() { outColor = vec4(0.9, 0.95, 1.0, 1.0); }
+      void main() { outColor = vec4(vCol, 1.0); }
     ` : `
       precision highp float;
-      void main() { gl_FragColor = vec4(0.9, 0.95, 1.0, 1.0); }
+      varying vec3 vCol;
+      void main() { gl_FragColor = vec4(vCol, 1.0); }
     `;
 
     const vs = compile(pivotGL, pivotGL.VERTEX_SHADER, terrainVS);
@@ -570,11 +583,39 @@ if (pivotGL) {
     const peakHeight = 6;     // Height of peak above ground
     const centerZ = -12;      // Z position (centered in view)
 
-    // Generate vertices for each height level
+    // Generate vertices with colors for each height level
     for (let level = 0; level <= heightLevels; level++) {
       const t = level / heightLevels;  // 0 (base) to 1 (peak)
       const y = t * peakHeight;        // Linear height
       const radius = baseRadius * (1 - t);  // Linear taper to point
+
+      // Height-based color gradient: brown -> green -> gray -> white
+      let r, g, b;
+      if (t < 0.2) {
+        // Base: brown/rocky (0.0 - 0.2)
+        const tt = t / 0.2;
+        r = 0.4 + tt * 0.2;
+        g = 0.3 + tt * 0.2;
+        b = 0.2;
+      } else if (t < 0.5) {
+        // Lower slopes: green/vegetation (0.2 - 0.5)
+        const tt = (t - 0.2) / 0.3;
+        r = 0.3 + tt * 0.2;
+        g = 0.5 + tt * 0.2;
+        b = 0.2 + tt * 0.3;
+      } else if (t < 0.75) {
+        // Upper slopes: gray/rock (0.5 - 0.75)
+        const tt = (t - 0.5) / 0.25;
+        r = 0.5 + tt * 0.3;
+        g = 0.6 + tt * 0.2;
+        b = 0.5 + tt * 0.3;
+      } else {
+        // Summit: white/snow (0.75 - 1.0)
+        const tt = (t - 0.75) / 0.25;
+        r = 0.8 + tt * 0.2;
+        g = 0.8 + tt * 0.2;
+        b = 0.8 + tt * 0.2;
+      }
 
       // Add variation to make it more mountain-like (roughness)
       const roughness = Math.sin(t * Math.PI * 5) * 0.15 * radius;
@@ -590,14 +631,17 @@ if (pivotGL) {
         const x = Math.cos(angle) * currentRadius;
         const z = centerZ + Math.sin(angle) * currentRadius;
 
-        terrainVerts.push(x, y, z);
+        // Add angular color variation for ridges (lighter on ridges)
+        const ridgeBrightness = 1.0 + Math.sin(angle * 4) * 0.15;
+
+        terrainVerts.push(x, y, z, r * ridgeBrightness, g * ridgeBrightness, b * ridgeBrightness);
       }
     }
 
-    // Add apex vertex at peak (single point at top)
-    terrainVerts.push(0, peakHeight, centerZ);
+    // Add apex vertex at peak (single point at top) - pure white
+    terrainVerts.push(0, peakHeight, centerZ, 1.0, 1.0, 1.0);
 
-    terrainCount = terrainVerts.length / 3;
+    terrainCount = terrainVerts.length / 6;  // Now 6 floats per vertex (x,y,z,r,g,b)
 
     // Generate indices for 3D cone mesh
     const terrainIndices = [];
@@ -644,9 +688,16 @@ if (pivotGL) {
     pivotGL.bindBuffer(pivotGL.ELEMENT_ARRAY_BUFFER, terrainIBO);
     pivotGL.bufferData(pivotGL.ELEMENT_ARRAY_BUFFER, new Uint16Array(terrainIndices), pivotGL.STATIC_DRAW);
 
+    // Setup interleaved vertex attributes (position + color)
+    const stride = 6 * 4;  // 6 floats per vertex * 4 bytes per float
     const terrainLocPos = pivotAPI === 'WebGL2' ? 0 : pivotGL.getAttribLocation(terrainProgram, 'aPos');
-    pivotGL.vertexAttribPointer(terrainLocPos, 3, pivotGL.FLOAT, false, 0, 0);
+    const terrainLocCol = pivotAPI === 'WebGL2' ? 1 : pivotGL.getAttribLocation(terrainProgram, 'aCol');
+
+    pivotGL.vertexAttribPointer(terrainLocPos, 3, pivotGL.FLOAT, false, stride, 0);
     pivotGL.enableVertexAttribArray(terrainLocPos);
+
+    pivotGL.vertexAttribPointer(terrainLocCol, 3, pivotGL.FLOAT, false, stride, 12);
+    pivotGL.enableVertexAttribArray(terrainLocCol);
 
     if (pivotAPI === 'WebGL2') {
       pivotGL.bindVertexArray(null);
@@ -673,19 +724,21 @@ if (pivotGL) {
     const gridMax = 10;
     const y = 0;              // Ground level
 
-    // Lines parallel to X-axis (varying Z)
+    // Lines parallel to X-axis (varying Z) - darker gray
     for (let z = gridMin; z <= gridMax; z += gridSpacing) {
-      gridVerts.push(gridMin, y, z);
-      gridVerts.push(gridMax, y, z);
+      const brightness = (z === 0) ? 0.6 : 0.3;  // Brighter on axes
+      gridVerts.push(gridMin, y, z, brightness, brightness, brightness);
+      gridVerts.push(gridMax, y, z, brightness, brightness, brightness);
     }
 
-    // Lines parallel to Z-axis (varying X)
+    // Lines parallel to Z-axis (varying X) - darker gray
     for (let x = gridMin; x <= gridMax; x += gridSpacing) {
-      gridVerts.push(x, y, gridMin);
-      gridVerts.push(x, y, gridMax);
+      const brightness = (x === 0) ? 0.6 : 0.3;  // Brighter on axes
+      gridVerts.push(x, y, gridMin, brightness, brightness, brightness);
+      gridVerts.push(x, y, gridMax, brightness, brightness, brightness);
     }
 
-    gridCount = gridVerts.length / 3;
+    gridCount = gridVerts.length / 6;  // Now 6 floats per vertex (x,y,z,r,g,b)
 
     if (pivotAPI === 'WebGL2') {
       gridVAO = pivotGL.createVertexArray();
@@ -696,9 +749,14 @@ if (pivotGL) {
     pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, gridVBO);
     pivotGL.bufferData(pivotGL.ARRAY_BUFFER, new Float32Array(gridVerts), pivotGL.STATIC_DRAW);
 
+    // Setup interleaved attributes (position + color)
+    const gridStride = 6 * 4;
     const gridLocPos = pivotAPI === 'WebGL2' ? 0 : pivotGL.getAttribLocation(gridProgram, 'aPos');
-    pivotGL.vertexAttribPointer(gridLocPos, 3, pivotGL.FLOAT, false, 0, 0);
+    const gridLocCol = pivotAPI === 'WebGL2' ? 1 : pivotGL.getAttribLocation(gridProgram, 'aCol');
+    pivotGL.vertexAttribPointer(gridLocPos, 3, pivotGL.FLOAT, false, gridStride, 0);
     pivotGL.enableVertexAttribArray(gridLocPos);
+    pivotGL.vertexAttribPointer(gridLocCol, 3, pivotGL.FLOAT, false, gridStride, 12);
+    pivotGL.enableVertexAttribArray(gridLocCol);
 
     if (pivotAPI === 'WebGL2') {
       pivotGL.bindVertexArray(null);
@@ -707,6 +765,73 @@ if (pivotGL) {
     console.log(`Ground grid ready (${gridCount} vertices, ${gridCount/2} lines)`);
   } catch (e) {
     console.error('Grid setup error:', e);
+  }
+
+  // Create line test patterns for ANGLE D3D11 curved line issue
+  try {
+    console.log('Creating line test patterns...');
+
+    lineTestProgram = terrainProgram;  // Reuse terrain shader
+
+    const lineTestVerts = [];
+    const testY = 3;  // Height above ground for visibility
+
+    // Radial lines from center (should be straight, may appear curved on D3D11)
+    const radialLines = 16;
+    const radialRadius = 4;
+    for (let i = 0; i < radialLines; i++) {
+      const angle = (i / radialLines) * Math.PI * 2;
+      const x = Math.cos(angle) * radialRadius;
+      const z = -12 + Math.sin(angle) * radialRadius;
+      // Center point (yellow)
+      lineTestVerts.push(0, testY, -12, 1.0, 1.0, 0.0);
+      // Outer point (yellow)
+      lineTestVerts.push(x, testY, z, 1.0, 1.0, 0.0);
+    }
+
+    // Crossing diagonal lines (form an X pattern)
+    const diag = 5;
+    // Line 1: NW to SE (red)
+    lineTestVerts.push(-diag, testY + 0.5, -12 - diag, 1.0, 0.0, 0.0);
+    lineTestVerts.push(diag, testY + 0.5, -12 + diag, 1.0, 0.0, 0.0);
+    // Line 2: NE to SW (cyan)
+    lineTestVerts.push(diag, testY + 0.5, -12 - diag, 0.0, 1.0, 1.0);
+    lineTestVerts.push(-diag, testY + 0.5, -12 + diag, 0.0, 1.0, 1.0);
+
+    // Horizontal and vertical test lines (should be perfectly straight)
+    // Horizontal line (magenta)
+    lineTestVerts.push(-6, testY + 1, -12, 1.0, 0.0, 1.0);
+    lineTestVerts.push(6, testY + 1, -12, 1.0, 0.0, 1.0);
+    // Vertical line (green)
+    lineTestVerts.push(0, testY + 1, -12 - 6, 0.0, 1.0, 0.0);
+    lineTestVerts.push(0, testY + 1, -12 + 6, 0.0, 1.0, 0.0);
+
+    lineTestCount = lineTestVerts.length / 6;
+
+    if (pivotAPI === 'WebGL2') {
+      lineTestVAO = pivotGL.createVertexArray();
+      pivotGL.bindVertexArray(lineTestVAO);
+    }
+
+    lineTestVBO = pivotGL.createBuffer();
+    pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, lineTestVBO);
+    pivotGL.bufferData(pivotGL.ARRAY_BUFFER, new Float32Array(lineTestVerts), pivotGL.STATIC_DRAW);
+
+    const lineTestStride = 6 * 4;
+    const lineTestLocPos = pivotAPI === 'WebGL2' ? 0 : pivotGL.getAttribLocation(lineTestProgram, 'aPos');
+    const lineTestLocCol = pivotAPI === 'WebGL2' ? 1 : pivotGL.getAttribLocation(lineTestProgram, 'aCol');
+    pivotGL.vertexAttribPointer(lineTestLocPos, 3, pivotGL.FLOAT, false, lineTestStride, 0);
+    pivotGL.enableVertexAttribArray(lineTestLocPos);
+    pivotGL.vertexAttribPointer(lineTestLocCol, 3, pivotGL.FLOAT, false, lineTestStride, 12);
+    pivotGL.enableVertexAttribArray(lineTestLocCol);
+
+    if (pivotAPI === 'WebGL2') {
+      pivotGL.bindVertexArray(null);
+    }
+
+    console.log(`Line test patterns ready (${lineTestCount} vertices, ${lineTestCount/2} lines)`);
+  } catch (e) {
+    console.error('Line test setup error:', e);
   }
 
   // Re-bind main cube VAO to ensure it's active for rendering
@@ -960,12 +1085,16 @@ function drawPivot(){
     if (terrainVAO) {
       pivotGL.bindVertexArray(terrainVAO);
     } else {
-      // WebGL1 path
+      // WebGL1 path - setup interleaved attributes
       pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, terrainVBO);
       pivotGL.bindBuffer(pivotGL.ELEMENT_ARRAY_BUFFER, terrainIBO);
+      const stride = 6 * 4;
       const terrainLocPos = pivotGL.getAttribLocation(terrainProgram, 'aPos');
-      pivotGL.vertexAttribPointer(terrainLocPos, 3, pivotGL.FLOAT, false, 0, 0);
+      const terrainLocCol = pivotGL.getAttribLocation(terrainProgram, 'aCol');
+      pivotGL.vertexAttribPointer(terrainLocPos, 3, pivotGL.FLOAT, false, stride, 0);
       pivotGL.enableVertexAttribArray(terrainLocPos);
+      pivotGL.vertexAttribPointer(terrainLocCol, 3, pivotGL.FLOAT, false, stride, 12);
+      pivotGL.enableVertexAttribArray(terrainLocCol);
     }
 
     // Render as 3D mesh surface (triangles)
@@ -980,15 +1109,42 @@ function drawPivot(){
     if (gridVAO) {
       pivotGL.bindVertexArray(gridVAO);
     } else {
-      // WebGL1 path
+      // WebGL1 path - interleaved attributes
       pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, gridVBO);
+      const gridStride = 6 * 4;
       const gridLocPos = pivotGL.getAttribLocation(gridProgram, 'aPos');
-      pivotGL.vertexAttribPointer(gridLocPos, 3, pivotGL.FLOAT, false, 0, 0);
+      const gridLocCol = pivotGL.getAttribLocation(gridProgram, 'aCol');
+      pivotGL.vertexAttribPointer(gridLocPos, 3, pivotGL.FLOAT, false, gridStride, 0);
       pivotGL.enableVertexAttribArray(gridLocPos);
+      pivotGL.vertexAttribPointer(gridLocCol, 3, pivotGL.FLOAT, false, gridStride, 12);
+      pivotGL.enableVertexAttribArray(gridLocCol);
     }
 
     pivotGL.lineWidth(1.0);  // Thin lines for grid
     pivotGL.drawArrays(pivotGL.LINES, 0, gridCount);
+  }
+
+  // Render line test patterns (for ANGLE D3D11 curved line issue)
+  if (lineTestProgram && lineTestVBO) {
+    pivotGL.useProgram(lineTestProgram);
+    pivotGL.uniformMatrix4fv(terrainMVP, false, mvp);
+
+    if (lineTestVAO) {
+      pivotGL.bindVertexArray(lineTestVAO);
+    } else {
+      // WebGL1 path
+      pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, lineTestVBO);
+      const lineTestStride = 6 * 4;
+      const lineTestLocPos = pivotGL.getAttribLocation(lineTestProgram, 'aPos');
+      const lineTestLocCol = pivotGL.getAttribLocation(lineTestProgram, 'aCol');
+      pivotGL.vertexAttribPointer(lineTestLocPos, 3, pivotGL.FLOAT, false, lineTestStride, 0);
+      pivotGL.enableVertexAttribArray(lineTestLocPos);
+      pivotGL.vertexAttribPointer(lineTestLocCol, 3, pivotGL.FLOAT, false, lineTestStride, 12);
+      pivotGL.enableVertexAttribArray(lineTestLocCol);
+    }
+
+    pivotGL.lineWidth(2.0);  // Thicker lines for visibility
+    pivotGL.drawArrays(pivotGL.LINES, 0, lineTestCount);
   }
 
   // Render cube (if visible)
