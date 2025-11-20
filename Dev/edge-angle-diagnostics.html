@@ -79,7 +79,7 @@
 
     <h2>Controls</h2>
     <div class="row">
-      <button id="toggleRotation">Stop Rotation</button>
+      <button id="toggleRotation">Start Rotation</button>
       <button id="toggleCube">Show Cube</button>
       <button id="resetPivot">Reset 3D pivot</button>
     </div>
@@ -575,13 +575,13 @@ if (pivotGL) {
     terrainMVP = pivotGL.getUniformLocation(terrainProgram, 'uMVP');
 
     // Generate 3D cone terrain (Mt Cook) - proper 3D shape centered on plane
-    // Cone centered at (0, 0, -12) with radial symmetry
+    // Cone centered at (0, 0, 0) with radial symmetry
     const terrainVerts = [];
     const heightLevels = 25;  // Number of height rings (base to peak)
     const angularSegments = 32;  // Number of segments around the cone
     const baseRadius = 5;     // Radius at base (y=0)
     const peakHeight = 6;     // Height of peak above ground
-    const centerZ = -12;      // Z position (centered in view)
+    const centerZ = 0;        // Z position (centered on ground plane)
 
     // Generate vertices with colors for each height level
     for (let level = 0; level <= heightLevels; level++) {
@@ -775,6 +775,7 @@ if (pivotGL) {
 
     const lineTestVerts = [];
     const testY = 3;  // Height above ground for visibility
+    const centerZ = 0;  // Match terrain center position
 
     // Radial lines from center (should be straight, may appear curved on D3D11)
     const radialLines = 16;
@@ -782,9 +783,9 @@ if (pivotGL) {
     for (let i = 0; i < radialLines; i++) {
       const angle = (i / radialLines) * Math.PI * 2;
       const x = Math.cos(angle) * radialRadius;
-      const z = -12 + Math.sin(angle) * radialRadius;
+      const z = centerZ + Math.sin(angle) * radialRadius;
       // Center point (yellow)
-      lineTestVerts.push(0, testY, -12, 1.0, 1.0, 0.0);
+      lineTestVerts.push(0, testY, centerZ, 1.0, 1.0, 0.0);
       // Outer point (yellow)
       lineTestVerts.push(x, testY, z, 1.0, 1.0, 0.0);
     }
@@ -792,19 +793,19 @@ if (pivotGL) {
     // Crossing diagonal lines (form an X pattern)
     const diag = 5;
     // Line 1: NW to SE (red)
-    lineTestVerts.push(-diag, testY + 0.5, -12 - diag, 1.0, 0.0, 0.0);
-    lineTestVerts.push(diag, testY + 0.5, -12 + diag, 1.0, 0.0, 0.0);
+    lineTestVerts.push(-diag, testY + 0.5, centerZ - diag, 1.0, 0.0, 0.0);
+    lineTestVerts.push(diag, testY + 0.5, centerZ + diag, 1.0, 0.0, 0.0);
     // Line 2: NE to SW (cyan)
-    lineTestVerts.push(diag, testY + 0.5, -12 - diag, 0.0, 1.0, 1.0);
-    lineTestVerts.push(-diag, testY + 0.5, -12 + diag, 0.0, 1.0, 1.0);
+    lineTestVerts.push(diag, testY + 0.5, centerZ - diag, 0.0, 1.0, 1.0);
+    lineTestVerts.push(-diag, testY + 0.5, centerZ + diag, 0.0, 1.0, 1.0);
 
     // Horizontal and vertical test lines (should be perfectly straight)
     // Horizontal line (magenta)
-    lineTestVerts.push(-6, testY + 1, -12, 1.0, 0.0, 1.0);
-    lineTestVerts.push(6, testY + 1, -12, 1.0, 0.0, 1.0);
+    lineTestVerts.push(-6, testY + 1, centerZ, 1.0, 0.0, 1.0);
+    lineTestVerts.push(6, testY + 1, centerZ, 1.0, 0.0, 1.0);
     // Vertical line (green)
-    lineTestVerts.push(0, testY + 1, -12 - 6, 0.0, 1.0, 0.0);
-    lineTestVerts.push(0, testY + 1, -12 + 6, 0.0, 1.0, 0.0);
+    lineTestVerts.push(0, testY + 1, centerZ - 6, 0.0, 1.0, 0.0);
+    lineTestVerts.push(0, testY + 1, centerZ + 6, 0.0, 1.0, 0.0);
 
     lineTestCount = lineTestVerts.length / 6;
 
@@ -845,7 +846,7 @@ if (pivotGL) {
 let yaw=0, pitch=0, dragging=false, lastX=0, lastY=0;
 let cubeVisible = false;  // Start with cube hidden
 let cubeScale = 1.5;
-let rotationEnabled = true;
+let rotationEnabled = false;  // Start with rotation stopped
 let zoomLevel = -6;  // Camera distance
 
 function resetPivot(){ yaw=0; pitch=0; }
