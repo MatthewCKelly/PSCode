@@ -7,8 +7,6 @@
     proxy configuration scenarios.
 .PARAMETER TestFolder
     Path to folder containing .reg test files (default: ./ProxySettingsKeys)
-.PARAMETER Verbose
-    Show detailed debug output for each test
 .EXAMPLE
     .\Test-ProxySettingsDecoder.ps1
     Runs all tests in the ProxySettingsKeys folder
@@ -21,12 +19,14 @@
 
     Export command:
     reg export "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections" filename.reg
+
+    Common Parameters:
+    -Verbose: Provided by [CmdletBinding()] - enables verbose output from cmdlets
 #>
 
 [CmdletBinding()]
 param(
-    [string]$TestFolder = "$PSScriptRoot\ProxySettingsKeys",
-    [switch]$Verbose
+    [string]$TestFolder = "$PSScriptRoot\ProxySettingsKeys"
 )
 
 #region Import Functions from Main Script
