@@ -86,6 +86,9 @@
     <div class="row">
       <label>Cube Size: <input type="range" id="cubeSize" min="0.5" max="3" step="0.1" value="1.5" style="width:120px;vertical-align:middle;"> <span id="cubeSizeValue">1.5</span></label>
     </div>
+    <div class="row">
+      <label>Bézier Curve Segments: <input type="range" id="bezierSegments" min="10" max="500" step="10" value="100" style="width:120px;vertical-align:middle;"> <span id="bezierSegmentsValue">100</span></label>
+    </div>
 
     <h2>Camera Defaults</h2>
     <p style="font-size:0.85em;color:#94a3b8;margin-top:-8px;">Set initial camera position (applied on page load). Try: yaw=35°, pitch=-35°, zoom=-30</p>
@@ -865,20 +868,27 @@ if (pivotGL) {
     console.error('Line test setup error:', e);
   }
 
-  // Create Bézier curve showing tree profile on z-plane (x=0, side view)
+  // Initialize Bézier curve program
+  bezierProgram = terrainProgram;  // Reuse terrain shader
+}
+
+// Helper function for cubic Bézier curve
+function cubicBezier(t, p0, p1, p2, p3) {
+  const u = 1 - t;
+  return u*u*u*p0 + 3*u*u*t*p1 + 3*u*t*t*p2 + t*t*t*p3;
+}
+
+// Generate Bézier curve showing tree profile (can be called with different segment counts)
+function generateBezierCurve(segments) {
+  if (!pivotGL || !bezierProgram) {
+    console.error('Cannot generate Bézier curve: missing GL context or program');
+    return;
+  }
+
   try {
-    console.log('Creating Bézier curve tree profile...');
-
-    bezierProgram = terrainProgram;  // Reuse terrain shader
-
-    // Helper function for cubic Bézier curve
-    function cubicBezier(t, p0, p1, p2, p3) {
-      const u = 1 - t;
-      return u*u*u*p0 + 3*u*u*t*p1 + 3*u*t*t*p2 + t*t*t*p3;
-    }
+    console.log(`Generating Bézier curve tree profile with ${segments} segments...`);
 
     const bezierVerts = [];
-    const segments = 100;  // Number of points along curve for smoothness
 
     // Tree profile control points (x, y) - right side silhouette
     // Matching the tiered Christmas tree shape
@@ -970,12 +980,11 @@ if (pivotGL) {
   } catch (e) {
     console.error('Bézier curve setup error:', e);
   }
+}
 
-  // Re-bind main cube VAO to ensure it's active for rendering
-  if (vao) {
-    pivotGL.bindVertexArray(vao);
-    console.log('Main cube VAO re-bound after test setup');
-  }
+// Initialize Bézier curve with default segment count
+if (pivotGL && terrainProgram) {
+  generateBezierCurve(100);
 }
 
 /* Pivot interactions and cube controls */
@@ -1008,6 +1017,14 @@ document.getElementById('toggleCube').onclick = ()=>{
 document.getElementById('cubeSize').oninput = (e)=>{
   cubeScale = parseFloat(e.target.value);
   document.getElementById('cubeSizeValue').textContent = cubeScale.toFixed(1);
+};
+
+// Bézier curve segments control
+document.getElementById('bezierSegments').oninput = (e)=>{
+  const segments = parseInt(e.target.value);
+  document.getElementById('bezierSegmentsValue').textContent = segments;
+  generateBezierCurve(segments);
+  addStatus(`Bézier curve regenerated with ${segments} segments`, 'ok');
 };
 
 // Camera defaults
