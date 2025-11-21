@@ -37,6 +37,8 @@
     2.3 - Enabled vertical form resizing, removed scrollbars, repositioned move buttons
           to right of each preview section, fixed text-only view to show clean text
           without HTML entities, dynamic height allocation for preview areas
+    2.3.1 - Fixed text output generation to use plain text directly instead of HTML
+            conversion, properly formats each day on separate line with clean status
 #>
 
 #region Initialization and Global Variables
@@ -1517,10 +1519,30 @@ $tableHTML
     } else {
         $currentTextVersion = "(No signature loaded)"
     }
-    
-    # Generate updated text version from the preview HTML
-    # The previewHTML already contains the table, so just convert it to text
-    $updatedTextVersion = ConvertFrom-HTMLToText -html $previewHTML
+
+    # Generate updated text version directly from status data
+    $tableText = New-StatusTableText -statusData $statusData -isSplitMode $isSplitMode
+
+    # For the updated version, we need to get the base signature text and add the table
+    if ($existingHTML -and $existingHTML -match '(?s)<body[^>]*>(.*)</body>') {
+        $bodyContent = $matches[1]
+
+        # Remove any existing table from body
+        $cleanBodyContent = $bodyContent -replace '(?s)<!-- OutlookSignatureManager:WeeklyStatusTable:Start -->.*?<!-- OutlookSignatureManager:WeeklyStatusTable:End -->', ''
+        $cleanBodyContent = $cleanBodyContent -replace '(?s)<p[^>]*>My Upcoming Week</p>\s*<table[^>]*border="1"[^>]*cellpadding="4".*?</table>', ''
+
+        # Convert cleaned HTML to text
+        $baseText = ConvertFrom-HTMLToText -html "<body>$cleanBodyContent</body>"
+
+        # Combine base text with new table text
+        if ($baseText -and $baseText.Trim().Length -gt 0) {
+            $updatedTextVersion = $baseText.TrimEnd() + "`n`n" + $tableText
+        } else {
+            $updatedTextVersion = $tableText
+        }
+    } else {
+        $updatedTextVersion = $tableText
+    }
 
     # Combine current and updated for display
     $textPreviewContent = "=== CURRENT TEXT VERSION ===`n"
@@ -1820,14 +1842,31 @@ $tableHTML
             # Write HTML file
             Set-Content -Path $htmlFile -Value $finalHTML -Encoding UTF8 -Force
             Write-Detail -Message "HTML signature file updated: $htmlFile" -Level Info
-            
-            # Generate text version from the final HTML
-            $existingText = ConvertFrom-HTMLToText -html $finalHTML
+
+            # Generate text version with plain text table (not HTML entities)
             $tableText = New-StatusTableText -statusData $statusData -isSplitMode $isSplitMode
 
-            # The existingText already includes the table since we converted from finalHTML
-            # which already has the table embedded, so we can use it directly
-            $finalText = $existingText
+            # Get base signature text (without the table)
+            if ($currentHTML -match '(?s)<body[^>]*>(.*)</body>') {
+                $bodyContent = $matches[1]
+
+                # Remove any existing table from body
+                $cleanBodyContent = $bodyContent -replace '(?s)<!-- OutlookSignatureManager:WeeklyStatusTable:Start -->.*?<!-- OutlookSignatureManager:WeeklyStatusTable:End -->', ''
+                $cleanBodyContent = $cleanBodyContent -replace '(?s)<p[^>]*>My Upcoming Week</p>\s*<table[^>]*border="1"[^>]*cellpadding="4".*?</table>', ''
+
+                # Convert cleaned HTML to text
+                $baseText = ConvertFrom-HTMLToText -html "<body>$cleanBodyContent</body>"
+
+                # Combine base text with new plain text table
+                if ($baseText -and $baseText.Trim().Length -gt 0) {
+                    $finalText = $baseText.TrimEnd() + "`n`n" + $tableText
+                } else {
+                    $finalText = $tableText
+                }
+            } else {
+                # No existing content, just use the table
+                $finalText = $tableText
+            }
 
             Set-Content -Path $txtFile -Value $finalText -Encoding UTF8 -Force
             Write-Detail -Message "Text signature file updated: $txtFile" -Level Info
