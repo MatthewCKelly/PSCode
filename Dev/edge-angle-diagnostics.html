@@ -392,6 +392,7 @@ let terrainIndexCount=0;
 let gridProgram=null, gridVAO=null, gridVBO=null, gridCount=0;
 let gridMVP=null;
 let lineTestProgram=null, lineTestVAO=null, lineTestVBO=null, lineTestCount=0;
+let bezierProgram=null, bezierVAO=null, bezierVBO=null, bezierCount=0;
 
 if (pivotGL) {
   try {
@@ -864,6 +865,112 @@ if (pivotGL) {
     console.error('Line test setup error:', e);
   }
 
+  // Create Bézier curve showing tree profile on z-plane (x=0, side view)
+  try {
+    console.log('Creating Bézier curve tree profile...');
+
+    bezierProgram = terrainProgram;  // Reuse terrain shader
+
+    // Helper function for cubic Bézier curve
+    function cubicBezier(t, p0, p1, p2, p3) {
+      const u = 1 - t;
+      return u*u*u*p0 + 3*u*u*t*p1 + 3*u*t*t*p2 + t*t*t*p3;
+    }
+
+    const bezierVerts = [];
+    const segments = 100;  // Number of points along curve for smoothness
+
+    // Tree profile control points (x, y) - right side silhouette
+    // Matching the tiered Christmas tree shape
+    const profile = [
+      // Trunk bottom
+      { x: 0.6, y: 0 },
+      // Trunk top
+      { x: 0.6, y: 0.96 },
+      // Bottom tier start (wide)
+      { x: 3.8, y: 1.2 },
+      // Bottom tier mid
+      { x: 2.5, y: 2.8 },
+      // Middle tier
+      { x: 3.0, y: 3.0 },
+      { x: 2.2, y: 5.2 },
+      // Top tier
+      { x: 2.2, y: 5.4 },
+      { x: 1.5, y: 7.2 },
+      // Star/top
+      { x: 0.3, y: 7.8 },
+      { x: 0, y: 8.0 }
+    ];
+
+    // Create curve segments between control points using cubic Bézier
+    for (let i = 0; i < profile.length - 1; i++) {
+      const p0 = profile[i];
+      const p3 = profile[i + 1];
+
+      // Generate control points for smooth curve
+      const p1 = {
+        x: p0.x + (p3.x - p0.x) * 0.3,
+        y: p0.y + (p3.y - p0.y) * 0.3
+      };
+      const p2 = {
+        x: p0.x + (p3.x - p0.x) * 0.7,
+        y: p0.y + (p3.y - p0.y) * 0.7
+      };
+
+      // Generate points along this segment
+      const segSteps = Math.ceil(segments / (profile.length - 1));
+      for (let j = 0; j <= segSteps; j++) {
+        const t = j / segSteps;
+        const x = cubicBezier(t, p0.x, p1.x, p2.x, p3.x);
+        const y = cubicBezier(t, p0.y, p1.y, p2.y, p3.y);
+        const z = 0;  // On the z-plane (x-y plane, z=0)
+
+        // Bright white color for visibility
+        bezierVerts.push(x, y, z, 1.0, 1.0, 1.0);
+      }
+    }
+
+    // Mirror the curve on the other side (negative x)
+    const rightSideCount = bezierVerts.length / 6;
+    for (let i = rightSideCount - 1; i >= 0; i--) {
+      const baseIdx = i * 6;
+      const x = -bezierVerts[baseIdx];      // Mirror x
+      const y = bezierVerts[baseIdx + 1];
+      const z = bezierVerts[baseIdx + 2];
+      const r = bezierVerts[baseIdx + 3];
+      const g = bezierVerts[baseIdx + 4];
+      const b = bezierVerts[baseIdx + 5];
+      bezierVerts.push(x, y, z, r, g, b);
+    }
+
+    bezierCount = bezierVerts.length / 6;
+
+    if (pivotAPI === 'WebGL2') {
+      bezierVAO = pivotGL.createVertexArray();
+      pivotGL.bindVertexArray(bezierVAO);
+    }
+
+    bezierVBO = pivotGL.createBuffer();
+    pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, bezierVBO);
+    pivotGL.bufferData(pivotGL.ARRAY_BUFFER, new Float32Array(bezierVerts), pivotGL.STATIC_DRAW);
+
+    const bezierStride = 6 * 4;
+    const bezierLocPos = pivotAPI === 'WebGL2' ? 0 : pivotGL.getAttribLocation(bezierProgram, 'aPos');
+    const bezierLocCol = pivotAPI === 'WebGL2' ? 1 : pivotGL.getAttribLocation(bezierProgram, 'aCol');
+    pivotGL.vertexAttribPointer(bezierLocPos, 3, pivotGL.FLOAT, false, bezierStride, 0);
+    pivotGL.enableVertexAttribArray(bezierLocPos);
+    pivotGL.vertexAttribPointer(bezierLocCol, 3, pivotGL.FLOAT, false, bezierStride, 12);
+    pivotGL.enableVertexAttribArray(bezierLocCol);
+
+    if (pivotAPI === 'WebGL2') {
+      pivotGL.bindVertexArray(null);
+    }
+
+    console.log(`Bézier curve profile ready (${bezierCount} vertices, showing tree silhouette)`);
+  } catch (e) {
+    console.error('Bézier curve setup error:', e);
+  }
+
   // Re-bind main cube VAO to ensure it's active for rendering
   if (vao) {
     pivotGL.bindVertexArray(vao);
@@ -1182,6 +1289,29 @@ function drawPivot(){
 
     pivotGL.lineWidth(2.0);  // Thicker lines for visibility
     pivotGL.drawArrays(pivotGL.LINES, 0, lineTestCount);
+  }
+
+  // Render Bézier curve tree profile
+  if (bezierProgram && bezierVBO && bezierCount > 0) {
+    pivotGL.useProgram(bezierProgram);
+    pivotGL.uniformMatrix4fv(terrainMVP, false, mvp);
+
+    if (bezierVAO) {
+      pivotGL.bindVertexArray(bezierVAO);
+    } else {
+      // WebGL1 path
+      pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, bezierVBO);
+      const bezierStride = 6 * 4;
+      const bezierLocPos = pivotGL.getAttribLocation(bezierProgram, 'aPos');
+      const bezierLocCol = pivotGL.getAttribLocation(bezierProgram, 'aCol');
+      pivotGL.vertexAttribPointer(bezierLocPos, 3, pivotGL.FLOAT, false, bezierStride, 0);
+      pivotGL.enableVertexAttribArray(bezierLocPos);
+      pivotGL.vertexAttribPointer(bezierLocCol, 3, pivotGL.FLOAT, false, bezierStride, 12);
+      pivotGL.enableVertexAttribArray(bezierLocCol);
+    }
+
+    pivotGL.lineWidth(3.0);  // Thick white line for clear visibility
+    pivotGL.drawArrays(pivotGL.LINE_STRIP, 0, bezierCount);
   }
 
   // Render cube (if visible)
