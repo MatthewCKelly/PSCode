@@ -1,6 +1,6 @@
 # CLAUDE.md - AI Assistant Guide for PSCode Repository
 
-> **Last Updated:** 2025-11-17
+> **Last Updated:** 2025-11-20
 > **Repository:** PSCode - PowerShell Utility Scripts Collection
 
 ---
@@ -315,6 +315,32 @@ function Write-Detail {
 - `Error` - Critical failures (Red)
 - `Debug` - Verbose debugging (Cyan/DarkGray)
 
+**IMPORTANT - Write-Detail Usage:**
+- ❌ **NEVER** use `Write-Detail ""` with an empty string - this will fail
+- ❌ **NEVER** use `Write-Detail ""` for blank lines in output
+- ❌ **NEVER** use `Write-Detail "=" * 80` - the string multiplication won't evaluate
+- ✅ **ALWAYS** use `Write-Host ""` for blank lines instead
+- ✅ **ALWAYS** use `Write-Detail ("=" * 80)` with parentheses for expression evaluation
+- The `$Message` parameter in `Write-Detail` is marked as `[Parameter(Mandatory = $true)]`
+- Empty strings will cause parameter validation errors
+- String expressions must be evaluated before being passed to the function
+
+**Example - Correct Usage:**
+```powershell
+Write-Detail "Processing started" -Level Info
+Write-Host ""  # Blank line for readability
+Write-Detail ("=" * 80) -Level Info  # String separator line (parentheses evaluate expression)
+Write-Detail "Next step" -Level Info
+```
+
+**Example - INCORRECT Usage:**
+```powershell
+Write-Detail "Processing started" -Level Info
+Write-Detail ""  # ❌ THIS WILL FAIL - Mandatory parameter cannot be empty
+Write-Detail "=" * 80  # ❌ THIS WILL FAIL - Outputs literal '= * 80' text, not 80 equals signs
+Write-Detail "Next step" -Level Info
+```
+
 ### Error Handling Pattern
 ```powershell
 try {
@@ -591,6 +617,8 @@ Scripts include version numbers in comments:
 - ❌ Don't remove error handling to "simplify" code
 - ❌ Don't commit actual configuration files
 - ❌ Don't use `Write-Host` for logging (use `Write-Detail`)
+- ❌ **Don't use `Write-Detail ""` with empty strings** (use `Write-Host ""` for blank lines)
+- ❌ **Don't use `Write-Detail "=" * 80`** (use `Write-Detail ("=" * 80)` with parentheses)
 - ❌ Don't leave resources (ports, files) unclosed
 - ❌ Don't ignore existing code style/patterns
 
@@ -717,6 +745,14 @@ When reporting issues, include:
 ---
 
 ## Changelog
+
+### 2025-11-20 - Write-Detail Usage Guidelines
+- Added critical warnings about `Write-Detail` function usage
+- Documented that `Write-Detail ""` with empty strings will fail (mandatory parameter)
+- Documented that `Write-Detail "=" * 80` must use parentheses: `Write-Detail ("=" * 80)`
+- Added examples of correct vs incorrect usage patterns
+- Updated "Common Pitfalls to Avoid" section with Write-Detail warnings
+- Added to help prevent parameter validation errors in scripts
 
 ### 2025-11-17 - Initial CLAUDE.md Creation
 - Comprehensive documentation of all scripts
