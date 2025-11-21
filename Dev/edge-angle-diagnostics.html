@@ -58,7 +58,7 @@
 <div id="wrap">
   <div id="canvases" class="worker-hidden">
     <button id="togglePanel">Hide Panel ▶</button>
-    <h2 class="section-title">Pivot Scene (Rotating Cube + Mt Cook Terrain) - <span id="renderStatus" style="color:#f59e0b;">Initializing...</span></h2>
+    <h2 class="section-title">Pivot Scene (3D Terrain + Line Tests)</h2>
     <canvas id="pivotCanvas" class="gl"></canvas>
     <canvas id="fpsCanvas" class="fps"></canvas>
 
@@ -873,7 +873,18 @@ document.getElementById('cubeSize').oninput = (e)=>{
 };
 
 pivotCanvas.addEventListener('pointerdown', e=>{dragging=true; lastX=e.clientX; lastY=e.clientY; pivotCanvas.setPointerCapture(e.pointerId);});
-pivotCanvas.addEventListener('pointerup', e=>{dragging=false; pivotCanvas.releasePointerCapture(e.pointerId);});
+pivotCanvas.addEventListener('pointerup', e=>{
+  dragging=false;
+  pivotCanvas.releasePointerCapture(e.pointerId);
+  // Log camera position after mouse release
+  console.log('Camera Position:', {
+    yaw: yaw.toFixed(3),
+    pitch: pitch.toFixed(3),
+    zoomLevel: zoomLevel.toFixed(3),
+    yawDegrees: (yaw * 180 / Math.PI).toFixed(1) + '°',
+    pitchDegrees: (pitch * 180 / Math.PI).toFixed(1) + '°'
+  });
+});
 pivotCanvas.addEventListener('pointermove', e=>{
   if(!dragging) return;
   const dx=e.clientX-lastX, dy=e.clientY-lastY; lastX=e.clientX; lastY=e.clientY;
@@ -985,27 +996,10 @@ function resizeCanvas(gl,canvas){
   gl.viewport(0,0,w,h);
 }
 let startTime = performance.now();
-let frameCount = 0;
-const renderStatus = document.getElementById('renderStatus');
-
-function updateRenderStatus() {
-  if (frameCount === 0) {
-    renderStatus.textContent = 'Initializing...';
-    renderStatus.style.color = '#f59e0b';
-  } else if (frameCount < 60) {
-    renderStatus.textContent = `Rendering (${frameCount} frames)`;
-    renderStatus.style.color = '#22c55e';
-  } else if (frameCount === 60) {
-    renderStatus.textContent = `Active (${frameCount}+ frames)`;
-    renderStatus.style.color = '#22c55e';
-  }
-}
 
 function drawPivot(){
   if (!pivotGL || !program) {
     console.error('drawPivot called but missing pivotGL or program', { pivotGL: !!pivotGL, program: !!program });
-    renderStatus.textContent = 'ERROR: Missing GL context or program';
-    renderStatus.style.color = '#ef4444';
     return;
   }
 
@@ -1014,33 +1008,10 @@ function drawPivot(){
     return;
   }
 
-  frameCount++;
-  if (frameCount === 1) {
-    console.log('First frame drawing...');
-    updateRenderStatus();
-  } else if (frameCount === 60) {
-    console.log('60 frames rendered successfully');
-    updateRenderStatus();
-  } else if (frameCount % 60 === 0) {
-    updateRenderStatus();
-  }
   resizeCanvas(pivotGL, pivotCanvas);
 
   pivotGL.clearColor(0.07,0.09,0.16,1);
   pivotGL.clear(pivotGL.COLOR_BUFFER_BIT|pivotGL.DEPTH_BUFFER_BIT);
-
-  if (frameCount === 1) {
-    console.log('Canvas dimensions:', { width: pivotCanvas.width, height: pivotCanvas.height });
-    console.log('Viewport:', pivotGL.getParameter(pivotGL.VIEWPORT));
-    console.log('Depth test enabled:', pivotGL.getParameter(pivotGL.DEPTH_TEST));
-    console.log('Culling enabled:', pivotGL.getParameter(pivotGL.CULL_FACE));
-    console.log('Blend enabled:', pivotGL.getParameter(pivotGL.BLEND));
-    console.log('Current program:', pivotGL.getParameter(pivotGL.CURRENT_PROGRAM));
-    if (pivotAPI === 'WebGL2') {
-      console.log('Current VAO binding:', pivotGL.getParameter(pivotGL.VERTEX_ARRAY_BINDING));
-      console.log('Expected VAO:', vao);
-    }
-  }
 
   // Simple 2D triangle test mode
   if (testTriangleActive && testProgram) {
@@ -1150,23 +1121,6 @@ function drawPivot(){
 
   // Render cube (if visible)
   if (cubeVisible) {
-    if (frameCount === 1) {
-      console.log('Matrices computed:', { aspect, time: t });
-      console.log('MVP matrix (first 4 values):', [mvp[0], mvp[1], mvp[2], mvp[3]]);
-      console.log('MVP matrix (full):', Array.from(mvp));
-
-      // Log a test vertex transformation
-      const testVert = [0, 0, 0, 1]; // Origin
-      const transformed = [
-        mvp[0]*testVert[0] + mvp[4]*testVert[1] + mvp[8]*testVert[2] + mvp[12]*testVert[3],
-        mvp[1]*testVert[0] + mvp[5]*testVert[1] + mvp[9]*testVert[2] + mvp[13]*testVert[3],
-        mvp[2]*testVert[0] + mvp[6]*testVert[1] + mvp[10]*testVert[2] + mvp[14]*testVert[3],
-        mvp[3]*testVert[0] + mvp[7]*testVert[1] + mvp[11]*testVert[2] + mvp[15]*testVert[3]
-      ];
-      console.log('Test vertex at origin transforms to:', transformed);
-      console.log('After perspective divide:', [transformed[0]/transformed[3], transformed[1]/transformed[3], transformed[2]/transformed[3]]);
-    }
-
     // Apply cube scale
     const scaleMat = matScale(cubeScale, cubeScale, cubeScale);
     const cubeMVP = matMul(scaleMat, mvp);
@@ -1176,16 +1130,8 @@ function drawPivot(){
   if (vao) {
     // WebGL2: VAO stores all vertex attribute state
     pivotGL.bindVertexArray(vao);
-    if (frameCount === 1) {
-      console.log('Using VAO (WebGL2 path)');
-      console.log('VAO binding after bind:', pivotGL.getParameter(pivotGL.VERTEX_ARRAY_BINDING));
-      console.log('VAO matches expected:', pivotGL.getParameter(pivotGL.VERTEX_ARRAY_BINDING) === vao);
-    }
   } else {
     // WebGL1: Manually bind buffers and set up vertex attributes
-    if (frameCount === 1) {
-      console.log('Using manual buffer binding (WebGL1 path)', { vbo: !!vbo, ibo: !!ibo, locPos, locCol });
-    }
     pivotGL.bindBuffer(pivotGL.ARRAY_BUFFER, vbo);
     pivotGL.bindBuffer(pivotGL.ELEMENT_ARRAY_BUFFER, ibo);
 
@@ -1202,32 +1148,7 @@ function drawPivot(){
     pivotGL.uniformMatrix4fv(uMVP,false,cubeMVP);
     pivotGL.uniform1f(uTime, t);
 
-    if (frameCount === 1) {
-      console.log('Uniforms set:', { uMVP, uTime, time: t, cubeScale });
-      console.log('About to draw 36 triangles...');
-      console.log('Current ARRAY_BUFFER binding:', pivotGL.getParameter(pivotGL.ARRAY_BUFFER_BINDING));
-      console.log('Current ELEMENT_ARRAY_BUFFER binding:', pivotGL.getParameter(pivotGL.ELEMENT_ARRAY_BUFFER_BINDING));
-      console.log('Vertex attrib 0 (pos) enabled:', pivotGL.getVertexAttrib(locPos, pivotGL.VERTEX_ATTRIB_ARRAY_ENABLED));
-      console.log('Vertex attrib 0 (pos) buffer:', pivotGL.getVertexAttrib(locPos, pivotGL.VERTEX_ATTRIB_ARRAY_BUFFER_BINDING));
-      console.log('Vertex attrib 0 (pos) size:', pivotGL.getVertexAttrib(locPos, pivotGL.VERTEX_ATTRIB_ARRAY_SIZE));
-      console.log('Vertex attrib 1 (col) enabled:', pivotGL.getVertexAttrib(locCol, pivotGL.VERTEX_ATTRIB_ARRAY_ENABLED));
-      console.log('Vertex attrib 1 (col) buffer:', pivotGL.getVertexAttrib(locCol, pivotGL.VERTEX_ATTRIB_ARRAY_BUFFER_BINDING));
-      console.log('Vertex attrib 1 (col) size:', pivotGL.getVertexAttrib(locCol, pivotGL.VERTEX_ATTRIB_ARRAY_SIZE));
-      console.log('Expected VBO:', vbo);
-      console.log('Expected IBO:', ibo);
-    }
-
     pivotGL.drawElements(pivotGL.TRIANGLES, 36, pivotGL.UNSIGNED_SHORT, 0);
-
-    if (frameCount === 1) {
-      checkGLError(pivotGL, 'after drawElements');
-      console.log('First frame complete!');
-
-      // Try reading a pixel to see what was drawn
-      const pixels = new Uint8Array(4);
-      pivotGL.readPixels(pivotCanvas.width/2, pivotCanvas.height/2, 1, 1, pivotGL.RGBA, pivotGL.UNSIGNED_BYTE, pixels);
-      console.log('Center pixel color (RGBA):', Array.from(pixels));
-    }
   } // End of cube rendering
 
   fps.tick();
