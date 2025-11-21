@@ -88,6 +88,7 @@
     </div>
 
     <h2>Camera Defaults</h2>
+    <p style="font-size:0.85em;color:#94a3b8;margin-top:-8px;">Set initial camera position (applied on page load). Try: yaw=35°, pitch=-35°, zoom=-30</p>
     <div class="row" style="flex-wrap: wrap; gap: 8px;">
       <label>Yaw (°): <input type="number" id="defaultYaw" value="0" step="1" style="width:60px;"></label>
       <label>Pitch (°): <input type="number" id="defaultPitch" value="0" step="1" style="width:60px;"></label>
@@ -856,6 +857,8 @@ if (pivotGL) {
 }
 
 /* Pivot interactions and cube controls */
+// Camera angles in RADIANS (use degrees * Math.PI/180 for initial values)
+// Example: let yaw = 35 * Math.PI / 180;  // 35 degrees
 let yaw=0, pitch=0, dragging=false, lastX=0, lastY=0;
 let cubeVisible = false;  // Start with cube hidden
 let cubeScale = 1.5;
@@ -909,6 +912,17 @@ document.getElementById('setCurrent').onclick = ()=>{
 
   addStatus(`Defaults updated to current position (yaw=${yawDeg}°, pitch=${pitchDeg}°, zoom=${zoom})`, 'ok');
 };
+
+// Apply defaults on page load
+(function applyInitialDefaults() {
+  const yawDeg = parseFloat(document.getElementById('defaultYaw').value);
+  const pitchDeg = parseFloat(document.getElementById('defaultPitch').value);
+  const zoom = parseFloat(document.getElementById('defaultZoom').value);
+
+  yaw = yawDeg * Math.PI / 180;
+  pitch = pitchDeg * Math.PI / 180;
+  zoomLevel = zoom;
+})();
 
 pivotCanvas.addEventListener('pointerdown', e=>{dragging=true; lastX=e.clientX; lastY=e.clientY; pivotCanvas.setPointerCapture(e.pointerId);});
 pivotCanvas.addEventListener('pointerup', e=>{
