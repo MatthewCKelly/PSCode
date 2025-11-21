@@ -112,7 +112,7 @@ Function Parse-RegFile {
 #region Main Execution
 
 Write-Detail "Proxy Registry File Reader" -Level Info
-Write-Detail "=" * 80 -Level Info
+Write-Detail ("=" * 80) -Level Info
 
 # Validate folder path
 if (-not (Test-Path $FolderPath)) {
@@ -141,7 +141,7 @@ if ($RegFiles.Count -eq 0) {
 }
 
 Write-Detail "Found $($RegFiles.Count) registry file(s)" -Level Success
-Write-Detail ""
+Write-Host ""
 
 # Collection to store all decoded settings
 $AllSettings = @()
@@ -186,11 +186,11 @@ foreach ($RegFile in $RegFiles) {
     }
 }
 
-Write-Detail ""
-Write-Detail "=" * 80 -Level Info
+Write-Host ""
+Write-Detail ("=" * 80) -Level Info
 Write-Detail "DECODED SETTINGS SUMMARY" -Level Info
-Write-Detail "=" * 80 -Level Info
-Write-Detail ""
+Write-Detail ("=" * 80) -Level Info
+Write-Host ""
 
 # Display results based on output format
 switch ($OutputFormat) {
@@ -198,9 +198,9 @@ switch ($OutputFormat) {
         # Display as formatted table
         $AllSettings | Format-Table -Property File, Version, ProxyEnabled, ProxyServer, AutoConfigEnabled, AutoDetectEnabled -AutoSize
 
-        Write-Detail ""
+        Write-Host ""
         Write-Detail "DETAILED SETTINGS:" -Level Info
-        Write-Detail ""
+        Write-Host ""
 
         foreach ($Setting in $AllSettings) {
             Write-Host "`n$($Setting.File):" -ForegroundColor Cyan
@@ -239,9 +239,9 @@ switch ($OutputFormat) {
     }
 }
 
-Write-Detail ""
-Write-Detail "=" * 80 -Level Info
+Write-Host ""
+Write-Detail ("=" * 80) -Level Info
 Write-Detail "Processing complete - $($AllSettings.Count) file(s) decoded successfully" -Level Success
-Write-Detail "=" * 80 -Level Info
+Write-Detail ("=" * 80) -Level Info
 
 #endregion
