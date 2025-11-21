@@ -37,7 +37,7 @@ Function Write-Detail {
     .PARAMETER Message
         The message to write to the log
     .PARAMETER Level
-        The logging level (Info, Warning, Error, Debug). Default is Info
+        The logging level (Info, Warning, Error, Debug, Success). Default is Info
     .PARAMETER LogFile
         Optional path to log file for persistent logging
     .INPUTS
@@ -56,7 +56,7 @@ Function Write-Detail {
         [Parameter(Mandatory = $true)]
         [string]$Message,
 
-        [ValidateSet('Info', 'Warning', 'Error', 'Debug')]
+        [ValidateSet('Info', 'Warning', 'Error', 'Debug', 'Success')]
         [string]$Level = 'Info',
 
         [string]$LogFile = $null
@@ -73,6 +73,7 @@ Function Write-Detail {
     switch ($Level) {
         'Error'   { Write-Host $logEntry -ForegroundColor White -BackgroundColor Red }
         'Warning' { Write-Host $logEntry -ForegroundColor Black -BackgroundColor Yellow }
+        'Success' { Write-Host $logEntry -ForegroundColor Green }
         'Debug'   { Write-Host $logEntry -ForegroundColor Gray }
         default   { Write-Host $logEntry }
     }
