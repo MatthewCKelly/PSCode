@@ -86,6 +86,19 @@
     <div class="row">
       <label>Cube Size: <input type="range" id="cubeSize" min="0.5" max="3" step="0.1" value="1.5" style="width:120px;vertical-align:middle;"> <span id="cubeSizeValue">1.5</span></label>
     </div>
+
+    <h2>Camera Defaults</h2>
+    <div class="row" style="flex-wrap: wrap; gap: 8px;">
+      <label>Yaw (°): <input type="number" id="defaultYaw" value="0" step="1" style="width:60px;"></label>
+      <label>Pitch (°): <input type="number" id="defaultPitch" value="0" step="1" style="width:60px;"></label>
+      <label>Zoom: <input type="number" id="defaultZoom" value="-6" step="0.5" style="width:60px;"></label>
+    </div>
+    <div class="row">
+      <button id="applyDefaults">Apply Defaults</button>
+      <button id="setCurrent">Set Current as Default</button>
+    </div>
+
+    <h2>Tests</h2>
     <div class="row">
       <button id="testCanvasVisible">Test Canvas Visibility</button>
       <button id="testSimpleTriangle">Test Simple 2D Triangle</button>
@@ -872,17 +885,40 @@ document.getElementById('cubeSize').oninput = (e)=>{
   document.getElementById('cubeSizeValue').textContent = cubeScale.toFixed(1);
 };
 
+// Camera defaults
+document.getElementById('applyDefaults').onclick = ()=>{
+  const yawDeg = parseFloat(document.getElementById('defaultYaw').value);
+  const pitchDeg = parseFloat(document.getElementById('defaultPitch').value);
+  const zoom = parseFloat(document.getElementById('defaultZoom').value);
+
+  yaw = yawDeg * Math.PI / 180;
+  pitch = pitchDeg * Math.PI / 180;
+  zoomLevel = zoom;
+
+  addStatus(`Camera set to yaw=${yawDeg}°, pitch=${pitchDeg}°, zoom=${zoom}`, 'ok');
+};
+
+document.getElementById('setCurrent').onclick = ()=>{
+  const yawDeg = (yaw * 180 / Math.PI).toFixed(1);
+  const pitchDeg = (pitch * 180 / Math.PI).toFixed(1);
+  const zoom = zoomLevel.toFixed(3);
+
+  document.getElementById('defaultYaw').value = yawDeg;
+  document.getElementById('defaultPitch').value = pitchDeg;
+  document.getElementById('defaultZoom').value = zoom;
+
+  addStatus(`Defaults updated to current position (yaw=${yawDeg}°, pitch=${pitchDeg}°, zoom=${zoom})`, 'ok');
+};
+
 pivotCanvas.addEventListener('pointerdown', e=>{dragging=true; lastX=e.clientX; lastY=e.clientY; pivotCanvas.setPointerCapture(e.pointerId);});
 pivotCanvas.addEventListener('pointerup', e=>{
   dragging=false;
   pivotCanvas.releasePointerCapture(e.pointerId);
   // Log camera position after mouse release
   console.log('Camera Position:', {
-    yaw: yaw.toFixed(3),
-    pitch: pitch.toFixed(3),
-    zoomLevel: zoomLevel.toFixed(3),
-    yawDegrees: (yaw * 180 / Math.PI).toFixed(1) + '°',
-    pitchDegrees: (pitch * 180 / Math.PI).toFixed(1) + '°'
+    yaw: (yaw * 180 / Math.PI).toFixed(1) + '°',
+    pitch: (pitch * 180 / Math.PI).toFixed(1) + '°',
+    zoomLevel: zoomLevel.toFixed(3)
   });
 });
 pivotCanvas.addEventListener('pointermove', e=>{
