@@ -58,7 +58,7 @@
 <div id="wrap">
   <div id="canvases" class="worker-hidden">
     <button id="togglePanel">Hide Panel ▶</button>
-    <h2 class="section-title">Pivot Scene (3D Terrain + Line Tests)</h2>
+    <h2 class="section-title">Pivot Scene (Christmas Tree 🎄 + Line Tests)</h2>
     <canvas id="pivotCanvas" class="gl"></canvas>
     <canvas id="fpsCanvas" class="fps"></canvas>
 
@@ -90,9 +90,9 @@
     <h2>Camera Defaults</h2>
     <p style="font-size:0.85em;color:#94a3b8;margin-top:-8px;">Set initial camera position (applied on page load). Try: yaw=35°, pitch=-35°, zoom=-30</p>
     <div class="row" style="flex-wrap: wrap; gap: 8px;">
-      <label>Yaw (°): <input type="number" id="defaultYaw" value="0" step="1" style="width:60px;"></label>
-      <label>Pitch (°): <input type="number" id="defaultPitch" value="0" step="1" style="width:60px;"></label>
-      <label>Zoom: <input type="number" id="defaultZoom" value="-6" step="0.5" style="width:60px;"></label>
+      <label>Yaw (°): <input type="number" id="defaultYaw" value="30" step="1" style="width:60px;"></label>
+      <label>Pitch (°): <input type="number" id="defaultPitch" value="-30" step="1" style="width:60px;"></label>
+      <label>Zoom: <input type="number" id="defaultZoom" value="-30" step="0.5" style="width:60px;"></label>
     </div>
     <div class="row">
       <button id="applyDefaults">Apply Defaults</button>
@@ -588,72 +588,87 @@ if (pivotGL) {
     terrainProgram = link(pivotGL, vs, fs);
     terrainMVP = pivotGL.getUniformLocation(terrainProgram, 'uMVP');
 
-    // Generate 3D cone terrain (Mt Cook) - proper 3D shape centered on plane
-    // Cone centered at (0, 0, 0) with radial symmetry
+    // Generate 3D Christmas Tree - festive cone centered on plane
+    // Tree centered at (0, 0, 0) with radial symmetry
     const terrainVerts = [];
-    const heightLevels = 25;  // Number of height rings (base to peak)
-    const angularSegments = 32;  // Number of segments around the cone
-    const baseRadius = 5;     // Radius at base (y=0)
-    const peakHeight = 6;     // Height of peak above ground
+    const heightLevels = 30;  // Number of height rings (base to peak)
+    const angularSegments = 32;  // Number of segments around the tree
+    const baseRadius = 4;     // Radius at base (y=0)
+    const peakHeight = 8;     // Height of tree
     const centerZ = 0;        // Z position (centered on ground plane)
 
-    // Generate vertices with colors for each height level
+    // Generate vertices with Christmas colors for each height level
     for (let level = 0; level <= heightLevels; level++) {
       const t = level / heightLevels;  // 0 (base) to 1 (peak)
       const y = t * peakHeight;        // Linear height
-      const radius = baseRadius * (1 - t);  // Linear taper to point
 
-      // Height-based color gradient: brown -> green -> gray -> white
-      let r, g, b;
-      if (t < 0.2) {
-        // Base: brown/rocky (0.0 - 0.2)
-        const tt = t / 0.2;
-        r = 0.4 + tt * 0.2;
-        g = 0.3 + tt * 0.2;
-        b = 0.2;
-      } else if (t < 0.5) {
-        // Lower slopes: green/vegetation (0.2 - 0.5)
-        const tt = (t - 0.2) / 0.3;
-        r = 0.3 + tt * 0.2;
-        g = 0.5 + tt * 0.2;
-        b = 0.2 + tt * 0.3;
-      } else if (t < 0.75) {
-        // Upper slopes: gray/rock (0.5 - 0.75)
-        const tt = (t - 0.5) / 0.25;
-        r = 0.5 + tt * 0.3;
-        g = 0.6 + tt * 0.2;
-        b = 0.5 + tt * 0.3;
+      // Tiered Christmas tree shape (3 tiers)
+      let radiusMultiplier;
+      if (t < 0.12) {
+        // Trunk (brown cylinder)
+        radiusMultiplier = 0.15;
+      } else if (t < 0.35) {
+        // Bottom tier
+        radiusMultiplier = (1 - (t - 0.12) / 0.23) * 0.95;
+      } else if (t < 0.65) {
+        // Middle tier
+        radiusMultiplier = (1 - (t - 0.35) / 0.30) * 0.75;
+      } else if (t < 0.90) {
+        // Top tier
+        radiusMultiplier = (1 - (t - 0.65) / 0.25) * 0.55;
       } else {
-        // Summit: white/snow (0.75 - 1.0)
-        const tt = (t - 0.75) / 0.25;
-        r = 0.8 + tt * 0.2;
-        g = 0.8 + tt * 0.2;
-        b = 0.8 + tt * 0.2;
+        // Star at top
+        radiusMultiplier = 0.15;
       }
 
-      // Add variation to make it more mountain-like (roughness)
-      const roughness = Math.sin(t * Math.PI * 5) * 0.15 * radius;
+      const radius = baseRadius * radiusMultiplier;
+
+      // Christmas tree colors: brown trunk, green foliage, gold star
+      let r, g, b;
+      if (t < 0.12) {
+        // Trunk: brown (0.0 - 0.12)
+        r = 0.4;
+        g = 0.25;
+        b = 0.15;
+      } else if (t < 0.90) {
+        // Tree foliage: green (0.12 - 0.90)
+        const greenBase = 0.1 + (Math.sin(t * Math.PI * 8) * 0.05);  // Slight variation
+        r = greenBase;
+        g = 0.4 + (Math.sin(t * Math.PI * 6) * 0.1);  // Darker green
+        b = 0.1;
+      } else {
+        // Star at top: gold/yellow (0.90 - 1.0)
+        r = 1.0;
+        g = 0.85;
+        b = 0.2;
+      }
+
+      // Add ornament-like colored spots randomly on the green parts
+      const ornamentSeed = Math.sin(level * 7.89) * Math.cos(level * 3.14);
+      const hasOrnament = t >= 0.12 && t < 0.90 && ornamentSeed > 0.7;
+
+      if (hasOrnament) {
+        // Random ornament colors (red, gold, blue, silver)
+        const ornamentType = (level % 4);
+        if (ornamentType === 0) { r = 0.9; g = 0.1; b = 0.1; }       // Red
+        else if (ornamentType === 1) { r = 1.0; g = 0.8; b = 0.0; }  // Gold
+        else if (ornamentType === 2) { r = 0.1; g = 0.4; b = 0.9; }  // Blue
+        else { r = 0.8; g = 0.8; b = 0.9; }                          // Silver
+      }
 
       // Create ring of vertices at this height
       for (let seg = 0; seg < angularSegments; seg++) {
         const angle = (seg / angularSegments) * Math.PI * 2;
 
-        // Add angular variation for mountain ridges
-        const ridgeVariation = Math.sin(angle * 4) * 0.2 * radius;
-        const currentRadius = radius + roughness + ridgeVariation;
+        const x = Math.cos(angle) * radius;
+        const z = centerZ + Math.sin(angle) * radius;
 
-        const x = Math.cos(angle) * currentRadius;
-        const z = centerZ + Math.sin(angle) * currentRadius;
-
-        // Add angular color variation for ridges (lighter on ridges)
-        const ridgeBrightness = 1.0 + Math.sin(angle * 4) * 0.15;
-
-        terrainVerts.push(x, y, z, r * ridgeBrightness, g * ridgeBrightness, b * ridgeBrightness);
+        terrainVerts.push(x, y, z, r, g, b);
       }
     }
 
-    // Add apex vertex at peak (single point at top) - pure white
-    terrainVerts.push(0, peakHeight, centerZ, 1.0, 1.0, 1.0);
+    // Add apex vertex at peak (star point at top) - bright gold
+    terrainVerts.push(0, peakHeight, centerZ, 1.0, 0.85, 0.2);
 
     terrainCount = terrainVerts.length / 6;  // Now 6 floats per vertex (x,y,z,r,g,b)
 
