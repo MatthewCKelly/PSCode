@@ -873,7 +873,18 @@ document.getElementById('cubeSize').oninput = (e)=>{
 };
 
 pivotCanvas.addEventListener('pointerdown', e=>{dragging=true; lastX=e.clientX; lastY=e.clientY; pivotCanvas.setPointerCapture(e.pointerId);});
-pivotCanvas.addEventListener('pointerup', e=>{dragging=false; pivotCanvas.releasePointerCapture(e.pointerId);});
+pivotCanvas.addEventListener('pointerup', e=>{
+  dragging=false;
+  pivotCanvas.releasePointerCapture(e.pointerId);
+  // Log camera position after mouse release
+  console.log('Camera Position:', {
+    yaw: yaw.toFixed(3),
+    pitch: pitch.toFixed(3),
+    zoomLevel: zoomLevel.toFixed(3),
+    yawDegrees: (yaw * 180 / Math.PI).toFixed(1) + '°',
+    pitchDegrees: (pitch * 180 / Math.PI).toFixed(1) + '°'
+  });
+});
 pivotCanvas.addEventListener('pointermove', e=>{
   if(!dragging) return;
   const dx=e.clientX-lastX, dy=e.clientY-lastY; lastX=e.clientX; lastY=e.clientY;
