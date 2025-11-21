@@ -912,19 +912,36 @@ function generateBezierCurve(segments) {
       { x: 0, y: 8.0 }
     ];
 
-    // Create curve segments between control points using cubic Bézier
+    // Create curve segments between control points using cubic Bézier with smooth tangents
     for (let i = 0; i < profile.length - 1; i++) {
       const p0 = profile[i];
       const p3 = profile[i + 1];
 
-      // Generate control points for smooth curve
+      // Calculate tangent at p0 (based on previous and next points)
+      let tangent0 = { x: p3.x - p0.x, y: p3.y - p0.y };
+      if (i > 0) {
+        const pPrev = profile[i - 1];
+        tangent0.x = (p3.x - pPrev.x) * 0.5;
+        tangent0.y = (p3.y - pPrev.y) * 0.5;
+      }
+
+      // Calculate tangent at p3 (based on current and next points)
+      let tangent3 = { x: p3.x - p0.x, y: p3.y - p0.y };
+      if (i < profile.length - 2) {
+        const pNext = profile[i + 2];
+        tangent3.x = (pNext.x - p0.x) * 0.5;
+        tangent3.y = (pNext.y - p0.y) * 0.5;
+      }
+
+      // Generate smooth control points using tangents (Catmull-Rom style)
+      const tension = 0.25; // Lower = smoother curves (0.25-0.5 works well)
       const p1 = {
-        x: p0.x + (p3.x - p0.x) * 0.3,
-        y: p0.y + (p3.y - p0.y) * 0.3
+        x: p0.x + tangent0.x * tension,
+        y: p0.y + tangent0.y * tension
       };
       const p2 = {
-        x: p0.x + (p3.x - p0.x) * 0.7,
-        y: p0.y + (p3.y - p0.y) * 0.7
+        x: p3.x - tangent3.x * tension,
+        y: p3.y - tangent3.y * tension
       };
 
       // Generate points along this segment
@@ -1024,7 +1041,7 @@ document.getElementById('bezierSegments').oninput = (e)=>{
   const segments = parseInt(e.target.value);
   document.getElementById('bezierSegmentsValue').textContent = segments;
   generateBezierCurve(segments);
-  addStatus(`Bézier curve regenerated with ${segments} segments`, 'ok');
+  // addStatus(`Bézier curve regenerated with ${segments} segments`, 'ok');
 };
 
 // Camera defaults
