@@ -1,6 +1,6 @@
 # CLAUDE.md - AI Assistant Guide for PSCode/Dev Directory
 
-> **Last Updated:** 2025-11-18
+> **Last Updated:** 2025-11-20
 > **Directory:** PSCode/Dev - Development & Testing Scripts
 > **Parent Repository:** PSCode - PowerShell Utility Scripts Collection
 
@@ -196,17 +196,17 @@ Offset  Length  Type    Description
 ------  ------  ------  -----------
 0x00    4       DWORD   Version/Counter (increments on each change)
 0x04    4       DWORD   Connection Flags (bit field)
-0x08    4       DWORD   Proxy Server String Length (bytes)
-0x0C    N       ASCII   Proxy Server String (null-terminated, if length > 0)
+0x08    4       DWORD   Unknown Field (purpose unknown, varies 1-15 typically)
+0x0C    4       DWORD   Proxy Server String Length (bytes)
+0x10    N       ASCII   Proxy Server String (null-terminated, if length > 0)
 ---     4       DWORD   Proxy Bypass String Length (bytes)
 ---     N       ASCII   Proxy Bypass String (null-terminated, if length > 0)
----     4       DWORD   Unknown Field (purpose unknown)
----     1       BYTE    Extra byte (only if Unknown Field ≠ 0, typically 0x20)
 ---     4       DWORD   Auto Config URL String Length (bytes)
----     N       ASCII   Auto Config URL String (null-terminated)
+---     N       ASCII   Auto Config URL String (null-terminated, if length > 0)
+---     32      BYTES   Padding (0x00 bytes)
 ```
 
-**Important Discovery:** There is an unknown 4-byte field between the Proxy Bypass section and the AutoConfig URL section. If this field is non-zero, an additional byte follows before the AutoConfig URL length field. This explains the variable offset for the AutoConfig URL in different configurations.
+**CRITICAL FIX (2025-11-20):** The previous documentation incorrectly stated that proxy server length was at offset 0x08. The correct structure has an unknown field at 0x08, and proxy server length starts at 0x0C (offset 12). This was causing all subsequent fields to be parsed at wrong offsets.
 
 ### Connection Flags Bit Field (Offset 0x04)
 
@@ -227,43 +227,44 @@ Bit     Hex     Description
 
 ### Example Binary Structures
 
-**Sample 1: With AutoConfig URL (Unknown Field = 1)**
+**Sample 1: PAC URL Only (No Proxy)**
 ```
 Offset  Hex Data                            Decoded Value
 ------  ----------------------------------  -------------
 0x00    46 00 00 00                        Version: 70
-0x04    1E 01 00 00 (or 4A 01 00 00)      Flags: varies
-0x08    01 00 00 00                        Proxy Length: 1
-0x0C    00                                 Proxy: (null terminator only)
-0x0D    00 00 00 00                        Bypass Length: 0
-0x11    01 00 00 00                        Unknown Field: 1 ⭐
-0x15    20                                 Extra Byte: 0x20 (space) ⭐
-0x16    42 00 00 00                        AutoConfig URL Length: 66
-0x1A    68 74 74 70 3A 2F 2F ...           "http://webdefence..."
+0x04    03 00 00 00                        Flags: 0x03 (Direct + Proxy bit set)
+0x08    05 00 00 00                        Unknown Field: 5
+0x0C    00 00 00 00                        Proxy Length: 0
+0x10    00 00 00 00                        Bypass Length: 0
+0x14    42 00 00 00                        PAC URL Length: 66 bytes
+0x18    68 74 74 70 3A 2F 2F ...           "http://webdefence.global..."
+...     00 00 00 00 00 ... (32 bytes)      Padding
 ```
 
-**Sample 2: With AutoConfig URL (Unknown Field = 0)**
+**Sample 2: Proxy + Bypass + PAC URL**
 ```
 Offset  Hex Data                            Decoded Value
 ------  ----------------------------------  -------------
 0x00    46 00 00 00                        Version: 70
-0x04    62 1F 00 00                        Flags: 0x1F62 (8034)
-0x08    01 00 00 00                        Proxy Length: 1
-0x0C    00                                 Proxy: (null terminator only)
-0x0D    00 00 00 00                        Bypass Length: 0
-0x11    00 00 00 00                        Unknown Field: 0 ⭐
-0x15    42 00 00 00                        AutoConfig URL Length: 66 (no extra byte!)
-0x19    68 74 74 70 3A 2F 2F ...           "http://..."
+0x04    05 00 00 00                        Flags: 0x05 (Direct + AutoConfig)
+0x08    0F 00 00 00                        Unknown Field: 15
+0x0C    18 00 00 00                        Proxy Length: 24 bytes
+0x10    68 74 74 70 3A 2F 2F 31 32 37...   "http://127.20.20.20:3128!"
+0x28    21 00 00 00                        Bypass Length: 33 bytes
+0x2C    68 6F 6D 65 2E 63 72 61 73 68...   "home.crash.co.nz;fh.local;..."
+0x4D    42 00 00 00                        PAC URL Length: 66 bytes
+0x51    68 74 74 70 3A 2F 2F ...           "http://webdefence..."
+...     00 00 00 00 00 ... (32 bytes)      Padding
 ```
 
 **Key Observations:**
-- Version counter is consistent (0x46 = 70)
-- Flags field varies significantly between configurations
+- Version counter is consistent (0x46 = 70 decimal)
+- Flags field varies based on enabled features (bitfield)
 - String lengths are always stored as little-endian DWORDs
-- Zero-length strings still have length field (0x00000000)
-- **Unknown field at offset 0x11** controls whether an extra byte appears
-- **When Unknown Field = 1**: Extra byte 0x20, AutoConfig URL starts at offset 0x16
-- **When Unknown Field = 0**: No extra byte, AutoConfig URL starts at offset 0x15
+- Zero-length strings still have length field (0x00000000) but no string data
+- **Unknown field at offset 0x08** varies from 1-15, purpose unknown
+- All structures end with 32 bytes of 0x00 padding
+- Total parsed bytes + 32 padding = total file size
 
 ---
 
@@ -277,7 +278,7 @@ Function Write-Detail {
         [Parameter(Mandatory = $true)]
         [string]$Message,
 
-        [ValidateSet('Info', 'Warning', 'Error', 'Debug')]
+        [ValidateSet('Info', 'Warning', 'Error', 'Debug', 'Success')]
         [string]$Level = 'Info',
 
         [string]$LogFile = $null
@@ -289,7 +290,7 @@ Function Write-Detail {
 
 **Parameters:**
 - `Message` - The log message (required)
-- `Level` - Log level: Info, Warning, Error, Debug (default: Info)
+- `Level` - Log level: Info, Warning, Error, Debug, Success (default: Info)
 - `LogFile` - Optional file path for persistent logging
 
 **Output Format:**
@@ -301,6 +302,7 @@ Function Write-Detail {
 **Color Coding:**
 - **Error** - White text on Red background
 - **Warning** - Black text on Yellow background
+- **Success** - Green text
 - **Debug** - Gray text
 - **Info** - Default console colors
 
@@ -424,11 +426,11 @@ Function Decode-ConnectionSettings {
 1. Read version (offset 0, 4 bytes)
 2. Read flags (offset 4, 4 bytes)
 3. Decode flag bits into boolean properties
-4. Parse proxy server section (length + string)
-5. Parse proxy bypass section (length + string)
-6. **Parse unknown field (4 bytes)**
-7. **If unknown field ≠ 0, skip 1 extra byte**
-8. Parse auto config URL section (length + string)
+4. Read unknown field (offset 8, 4 bytes)
+5. Parse proxy server section (offset 12, length + string)
+6. Parse proxy bypass section (length + string)
+7. Parse auto config URL section (length + string)
+8. Remaining 32 bytes are padding
 
 **String Extraction:**
 - Reads length field first (4-byte DWORD)
@@ -519,10 +521,16 @@ Set-ItemProperty -Path $RegistryPath -Name $ValueName -Value $BinaryData -Type B
 
 **Consistent offset tracking:**
 ```powershell
-$Offset = 8  # Start after version and flags
+# Read fixed-position fields first
+$Version = Read-UInt32FromBytes -Data $Data -Start 0
+$Flags = Read-UInt32FromBytes -Data $Data -Start 4
+$UnknownField = Read-UInt32FromBytes -Data $Data -Start 8
+
+# Start variable-length section parsing at offset 12
+$Offset = 12
 
 # Read proxy server section
-$ProxyLength = Read-UInt32FromBytes -Data $Data -Start $Offset -Offset 0
+$ProxyLength = Read-UInt32FromBytes -Data $Data -Start $Offset
 $Offset += 4
 
 if ($ProxyLength -gt 0 -and ($Offset + $ProxyLength) -le $Data.Length) {
@@ -535,6 +543,8 @@ $Offset += $ProxyLength
 ```
 
 **Key principles:**
+- Fixed fields (version, flags, unknown) are at known offsets (0, 4, 8)
+- Variable-length parsing starts at offset 12
 - Always increment offset after reading length field
 - Validate bounds before extracting string data
 - Handle zero-length strings gracefully
@@ -1019,14 +1029,30 @@ $Data.DefaultConnectionSettings | Format-Hex
 
 ## Changelog
 
+### 2025-11-20 - Critical Binary Structure Fix
+- **CRITICAL FIX:** Corrected binary structure documentation
+  - Unknown field is at offset 0x08 (not proxy length)
+  - Proxy server length is at offset 0x0C (was incorrectly documented at 0x08)
+  - All variable-length parsing starts at offset 12 (not 8)
+- Updated all binary structure examples with correct offsets
+- Removed outdated "extra byte" documentation
+- Added 32-byte padding documentation
+- Updated Write-Detail function to include 'Success' level
+- All 12 sample registry files now parse correctly
+
 ### 2025-11-18 - Initial CLAUDE.md Creation
 - Comprehensive documentation of defaultproxysettings.ps1
-- Binary structure format documentation
+- Binary structure format documentation (contained errors, corrected 2025-11-20)
 - Function reference with correct syntax
 - AI assistant guidelines for binary parsing
 - Testing and debugging guidance
 
 ### Recent Script Updates (from git history)
+- **2025-11-20** - Fix proxy settings decoder - correct binary structure offsets
+  - Changed parsing offset from 8 to 12 for proxy length field
+  - Added proper handling of unknown field at bytes 8-11
+  - Removed incorrect "unknown field" parsing after bypass section
+  - Verified all 12 test samples parse correctly with 32-byte padding
 - **2025-11-18** - Update Default Proxy string decoder
   - Improved Read-UInt32FromBytes function
   - Enhanced bounds checking
