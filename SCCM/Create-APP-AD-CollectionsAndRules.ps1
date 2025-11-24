@@ -1,3 +1,10 @@
+# Version 1.1 - 2025-11-24
+# - Added folder selection for SCCM collections
+# - Added collection name validation (length and invalid characters)
+# - Collections now created/moved to selected folder
+# - Added comprehensive operation summary at end
+# - Added error handling and tracking
+# - Improved logging throughout script
 
 [STRING]$gCMSourceSite = "XXX";                           # SCCM Sitename
 [STRING]$gCMSite  =      "ROOT\SMS\site_$gCMSourceSite"   # WMI path
@@ -525,11 +532,11 @@ Function Add-SCCMCollectionRule {
         [Parameter(Mandatory=$false, HelpMessage="Limit to collection (Query)", ValueFromPipeline=$false)] [String] $limitToCollectionId = $null,
         [Parameter(Mandatory=$true,  HelpMessage="Rule Name", ValueFromPipeline=$true)] [String] $queryRuleName
     )
- 
+
     PROCESS {
         # Get the specified collection (to make sure we have the lazy properties)
         $coll = [wmi]"$($SccmServer.SccmProvider.NamespacePath):SMS_Collection.CollectionID='$collectionID'"
- 
+
         # Build the new rule
         if ($queryExpression.Length -gt 0) {
             # Create a query rule
@@ -540,11 +547,11 @@ Function Add-SCCMCollectionRule {
             if ([string]::IsNullOrEmpty($limitToCollectionId) -ne $True) {
                 $newRule.LimitToCollectionID = $limitToCollectionId
             }
- 
+
             $null = $coll.AddMembershipRule($newRule)
         } else {
             $ruleClass = [WMICLASS]"$($SccmServer.SccmProvider.NamespacePath):SMS_CollectionRuleDirect"
- 
+
             # Find each computer
             $computer = Get-SCCMComputer -sccmServer $SccmServer -NetbiosName $name
             # See if the computer is already a member
@@ -562,14 +569,208 @@ Function Add-SCCMCollectionRule {
                 $newRule.RuleName = $name
                 $newRule.ResourceClassName = "SMS_R_System"
                 $newRule.ResourceID = $computer.ResourceID
- 
+
                 $null = $coll.AddMembershipRule($newRule)
             } else {
                 Write-Verbose "Computer $name is already in the collection"
             }
         }
     }
-}
+}           # End of Add-SCCMCollectionRule
+
+Function Get-SCCMCollectionFolders {
+<#
+    .SYNOPSIS
+    Retrieves SCCM collection folders for user selection
+    .DESCRIPTION
+    Gets all collection folders from SCCM and returns them for user selection
+    .PARAMETER SccmServer
+    The SCCM server object
+    .PARAMETER Credential
+    Optional credentials for SCCM access
+    .OUTPUTS
+    Array of folder objects with ContainerNodeID, Name, and Path
+#>
+    [CmdletBinding()]
+    PARAM (
+        [Parameter(Mandatory=$true, HelpMessage="SCCM Server")][Alias("Server","SmsServer")][System.Object] $SccmServer,
+        [Parameter(Mandatory=$false, HelpMessage="Credentials to use")][System.Management.Automation.PSCredential] $credential = $null
+    )
+
+    PROCESS {
+        try {
+            Write-Detail "Retrieving SCCM collection folders..."
+
+            # ObjectType 5000 is for Device Collections
+            $Filter = "ObjectType = 5000"
+
+            if ($credential -eq $null) {
+                $folders = Get-WmiObject -Class SMS_ObjectContainerNode -Namespace $SccmServer.Namespace -ComputerName $SccmServer.Machine -Filter $Filter
+            } else {
+                $folders = Get-WmiObject -Class SMS_ObjectContainerNode -Namespace $SccmServer.Namespace -ComputerName $SccmServer.Machine -Filter $Filter -Credential $credential
+            }
+
+            # Build folder path for each folder
+            $folderList = @()
+            foreach ($folder in $folders) {
+                $folderObj = New-Object PSObject -Property @{
+                    ContainerNodeID = $folder.ContainerNodeID
+                    Name = $folder.Name
+                    ParentContainerNodeID = $folder.ParentContainerNodeID
+                    Path = $folder.Name
+                }
+                $folderList += $folderObj
+            }
+
+            # Add root folder option
+            $rootFolder = New-Object PSObject -Property @{
+                ContainerNodeID = 0
+                Name = "Root (No Folder)"
+                ParentContainerNodeID = 0
+                Path = "\"
+            }
+            $folderList = @($rootFolder) + $folderList
+
+            return $folderList
+        }
+        catch {
+            Write-Detail "Error retrieving folders: $($_.Exception.Message)"
+            throw
+        }
+    }
+}           # End of Get-SCCMCollectionFolders
+
+Function Move-SCCMCollectionToFolder {
+<#
+    .SYNOPSIS
+    Moves an SCCM collection to a specified folder
+    .DESCRIPTION
+    Moves a collection to the specified folder using SMS_ObjectContainerItem
+    .PARAMETER SccmServer
+    The SCCM server object
+    .PARAMETER CollectionID
+    The collection ID to move
+    .PARAMETER FolderID
+    The target folder's ContainerNodeID
+    .PARAMETER Credential
+    Optional credentials for SCCM access
+#>
+    [CmdletBinding()]
+    PARAM (
+        [Parameter(Mandatory=$true, HelpMessage="SCCM Server")][System.Object] $SccmServer,
+        [Parameter(Mandatory=$true, HelpMessage="Collection ID")][String] $CollectionID,
+        [Parameter(Mandatory=$true, HelpMessage="Folder Container Node ID")][int] $FolderID,
+        [Parameter(Mandatory=$false, HelpMessage="Credentials to use")][System.Management.Automation.PSCredential] $credential = $null
+    )
+
+    PROCESS {
+        try {
+            # Skip if folder is root (0)
+            if ($FolderID -eq 0) {
+                Write-Verbose "Collection will remain in root folder"
+                return $true
+            }
+
+            # Check if collection is already in a folder
+            $Filter = "InstanceKey = '$CollectionID' AND ObjectType = 5000"
+
+            if ($credential -eq $null) {
+                $existingItem = Get-WmiObject -Class SMS_ObjectContainerItem -Namespace $SccmServer.Namespace -ComputerName $SccmServer.Machine -Filter $Filter
+            } else {
+                $existingItem = Get-WmiObject -Class SMS_ObjectContainerItem -Namespace $SccmServer.Namespace -ComputerName $SccmServer.Machine -Filter $Filter -Credential $credential
+            }
+
+            if ($existingItem) {
+                # Update existing folder assignment
+                $existingItem.ContainerNodeID = $FolderID
+                $existingItem.Put() | Out-Null
+                Write-Verbose "Moved collection $CollectionID to folder $FolderID"
+            } else {
+                # Create new folder assignment
+                $containerItemClass = [WMICLASS]"\\$($SccmServer.Machine)\$($SccmServer.Namespace):SMS_ObjectContainerItem"
+                $newItem = $containerItemClass.CreateInstance()
+                $newItem.ContainerNodeID = $FolderID
+                $newItem.InstanceKey = $CollectionID
+                $newItem.ObjectType = 5000  # Device Collection
+                $newItem.Put() | Out-Null
+                Write-Verbose "Added collection $CollectionID to folder $FolderID"
+            }
+
+            return $true
+        }
+        catch {
+            Write-Detail "Error moving collection to folder: $($_.Exception.Message)"
+            return $false
+        }
+    }
+}           # End of Move-SCCMCollectionToFolder
+
+Function Test-CollectionName {
+<#
+    .SYNOPSIS
+    Validates SCCM collection name for length and invalid characters
+    .DESCRIPTION
+    Checks if a collection name is valid according to SCCM constraints:
+    - Maximum 127 characters
+    - No invalid characters: \ / : * ? " < > |
+    .PARAMETER Name
+    The collection name to validate
+    .OUTPUTS
+    Hashtable with IsValid (bool), Message (string), and SanitizedName (string)
+#>
+    [CmdletBinding()]
+    PARAM (
+        [Parameter(Mandatory=$true, HelpMessage="Collection name to validate")][String] $Name
+    )
+
+    PROCESS {
+        $result = @{
+            IsValid = $true
+            Message = ""
+            SanitizedName = $Name
+            OriginalLength = $Name.Length
+        }
+
+        # Check for invalid characters
+        $invalidChars = @('\', '/', ':', '*', '?', '"', '<', '>', '|')
+        $foundInvalidChars = @()
+
+        foreach ($char in $invalidChars) {
+            if ($Name.Contains($char)) {
+                $foundInvalidChars += $char
+            }
+        }
+
+        if ($foundInvalidChars.Count -gt 0) {
+            $result.IsValid = $false
+            $result.Message = "Contains invalid characters: $($foundInvalidChars -join ', ')"
+            # Sanitize by removing invalid characters
+            $sanitized = $Name
+            foreach ($char in $invalidChars) {
+                $sanitized = $sanitized.Replace($char, '')
+            }
+            $result.SanitizedName = $sanitized
+        }
+
+        # Check length (SCCM max is 127 characters)
+        if ($Name.Length -gt 127) {
+            $result.IsValid = $false
+            if ($result.Message.Length -gt 0) {
+                $result.Message += "; "
+            }
+            $result.Message += "Name too long ($($Name.Length) characters, max 127)"
+            # Truncate to 127 characters
+            $result.SanitizedName = $result.SanitizedName.Substring(0, 127)
+        }
+
+        # Final check on sanitized name length
+        if ($result.SanitizedName.Length -gt 127) {
+            $result.SanitizedName = $result.SanitizedName.Substring(0, 127)
+        }
+
+        return $result
+    }
+}           # End of Test-CollectionName
 
 #endregion
 
@@ -719,19 +920,39 @@ $CollectionsToCreate = $SQLdataTable | Out-GridView -Title "Select only the coll
     $UpdatedCollections += $CollectionsToCreate | Select-Object -Property $Colname, $RuleName 
 
 
+    # Validate and sanitize collection names
+    $validatedCollections = @()
+    $nameIssues = @()
+
     foreach ($ColCheck in $UpdatedCollections) {
-        if ($ColCheck.Name.length -gt 127 ) {
-        
-        
-            Write-Detail "This name is too long.. `"$($ColCheck.Name)`""
+        $validation = Test-CollectionName -Name $ColCheck.Name
 
+        if (-not $validation.IsValid) {
+            Write-Detail "WARNING: Name validation issue: $($validation.Message)"
+            Write-Detail "  Original: `"$($ColCheck.Name)`""
+            Write-Detail "  Sanitized: `"$($validation.SanitizedName)`""
 
+            $nameIssues += [PSCustomObject]@{
+                Original = $ColCheck.Name
+                Sanitized = $validation.SanitizedName
+                Issue = $validation.Message
+            }
 
-        
+            # Update the collection name with sanitized version
+            $ColCheck.Name = $validation.SanitizedName
         }
+
+        $validatedCollections += $ColCheck
     }
 
-    $UpdatedCollections = $UpdatedCollections | Sort-Object Name | Out-GridView  -Title "Select only the collections you wish to create" -PassThru 
+    # Show name issues if any were found
+    if ($nameIssues.Count -gt 0) {
+        Write-Host ""
+        Write-Detail "WARNING: The following collection names had issues and were sanitized:"
+        $nameIssues | Out-GridView -Title "Collection Name Issues - Review Sanitized Names" -Wait
+    }
+
+    $UpdatedCollections = $validatedCollections | Sort-Object Name | Out-GridView  -Title "Select only the collections you wish to create" -PassThru 
 
 
 
@@ -744,6 +965,25 @@ $myServer = Connect-SCCMServer -HostName $gCMSServ -siteCode $gCMSourceSite -cre
 Write-Detail "SCCM Server    `t$($myServer.Machine)"
 Write-Detail "SCCM Namespace `t$($myServer.Namespace)"
 Write-Detail "SCCM SccmProvider`t$($myServer.SccmProvider)"
+
+# Get and select folder for collections
+Write-Host ""
+Write-Detail "Retrieving SCCM collection folders..."
+$availableFolders = Get-SCCMCollectionFolders -SccmServer $myServer -credential $myCred
+$selectedFolder = $availableFolders | Select-Object ContainerNodeID, Name, Path | Out-GridView -Title "Select folder for collections (or choose Root)" -OutputMode Single
+
+if ($null -eq $selectedFolder) {
+    Write-Detail "No folder selected, using root folder"
+    $selectedFolder = $availableFolders | Where-Object { $_.ContainerNodeID -eq 0 }
+} else {
+    Write-Detail "Selected folder: $($selectedFolder.Name) [ID: $($selectedFolder.ContainerNodeID)]"
+}
+
+# Initialize tracking variables for summary
+$createdCollections = @()
+$existingCollections = @()
+$addedRules = @()
+$errors = @()
 
 # Process the Collections
 
@@ -760,13 +1000,22 @@ foreach ($bndCol in $UpdatedCollections) {
 
     if ($CollectionsToUpdate.Name -like $ColName) {
 
-            Write-Detail "Collection exists"
-             
+            Write-Detail "Collection exists: `"$ColName`""
+            $existingCollections += [PSCustomObject]@{
+                Name = $ColName
+                CollectionID = ""
+                Action = "Already Exists"
+            }
+
             Foreach ($TmoCollection in $CollectionsToUpdate) {
-                
+
                 $ColID = $TmoCollection.CollectionID.ToString();
                 $TmoCollection.psBase.Get()
                 Write-Detail "Rule count = $($TmoCollection.CollectionRules.Count)"
+
+                # Update the tracking with actual collection ID
+                $existingCollections[-1].CollectionID = $ColID
+
                 if (   $TmoCollection.CollectionRules.Count -gt 0) {
                     # Already has rules
                     # $TmoCollection.CollectionRules.__CLASS
@@ -805,15 +1054,26 @@ foreach ($bndCol in $UpdatedCollections) {
                 } else {
 
                     Write-Detail "No Rules exist for for `"$($TmoCollection.Name)`" [$ColID] - `"$colRuleName`""
-                    
+
                     if ([string]::IsNullOrEmpty($colRuleQry)  -eq $True) {
                         Write-Detail "No Rule for collection."
 
                     } else {
                         write-Detail "Creating rule for `"$($TmoCollection.Name)`" [$ColID] - `"$colRuleName`""
-                        Add-SCCMCollectionRule -Server $myServer -collectionID $ColID -queryExpression $colRuleQry -queryRuleName $colRuleName -Verbose
-                        write-Detail "Added rule to `"$($TmoCollection.Name)`" - $dateVal"
-                        $numADDRule++
+                        try {
+                            Add-SCCMCollectionRule -Server $myServer -collectionID $ColID -queryExpression $colRuleQry -queryRuleName $colRuleName -Verbose
+                            write-Detail "Added rule to `"$($TmoCollection.Name)`""
+                            $numADDRule++
+                            $addedRules += [PSCustomObject]@{
+                                CollectionName = $TmoCollection.Name
+                                CollectionID = $ColID
+                                RuleName = $colRuleName
+                            }
+                        }
+                        catch {
+                            Write-Detail "ERROR: Failed to add rule: $($_.Exception.Message)"
+                            $errors += "Failed to add rule to $($TmoCollection.Name): $($_.Exception.Message)"
+                        }
                     }
                     # Created New collection Rule
                     $AddQueryToCollection = $false;
@@ -822,19 +1082,29 @@ foreach ($bndCol in $UpdatedCollections) {
 
 
                 if( $AddQueryToCollection -and  ($ColID -like  "$($gCMSourceSite)?????") ) {
-                    
+
                     # Add-SCCMCollectionRule -Server $myServer -collectionID $ColID -queryExpression "select SMS_R_SYSTEM.ResourceID from SMS_R_System where SMS_R_System.SecurityGroupName like `"FHNZ\\EPT_EOL_$dateVal`"" -queryRuleName "Members of ad Group FHNZ\\EPT_EOL_$dateVal" -Verbose
-                    
+
                     if ([string]::IsNullOrEmpty($colRuleQry)  -eq $True) {
                         Write-Detail "No Rule for collection."
 
                     } else {
                         write-Detail "Creating rule for `"$($TmoCollection.Name)`" [$ColID] - `"$colRuleName`""
-                        Add-SCCMCollectionRule -Server $myServer -collectionID $ColID -queryExpression $colRuleQry -queryRuleName $colRuleName -Verbose
-                        $numADDRule++
+                        try {
+                            Add-SCCMCollectionRule -Server $myServer -collectionID $ColID -queryExpression $colRuleQry -queryRuleName $colRuleName -Verbose
+                            $numADDRule++
+                            $addedRules += [PSCustomObject]@{
+                                CollectionName = $TmoCollection.Name
+                                CollectionID = $ColID
+                                RuleName = $colRuleName
+                            }
+                            write-Detail "Added rule to `"$($TmoCollection.Name)`""
+                        }
+                        catch {
+                            Write-Detail "ERROR: Failed to add rule: $($_.Exception.Message)"
+                            $errors += "Failed to add rule to $($TmoCollection.Name): $($_.Exception.Message)"
+                        }
                     }
-
-                    write-Detail "Added rule to `"$($TmoCollection.Name)`" - $dateVal"
                 }
 
 
@@ -845,29 +1115,63 @@ foreach ($bndCol in $UpdatedCollections) {
         } else {
 
             Write-Detail "Creating the collection `"$ColName`""
-             
-            $newCollection = New-SCCMCollection -SccmServer $myServer -name $ColName -parentCollectionID 'SMS00001' -refreshDays 7 -Verbose
-             if ($newCollection.Count -gt 1) {
+
+            try {
+                $newCollection = New-SCCMCollection -SccmServer $myServer -name $ColName -parentCollectionID 'SMS00001' -refreshDays 7 -Verbose
+                if ($newCollection.Count -gt 1) {
                     $newCollection = $newCollection[1]
                     $numNew++
-                
-             }
+                }
 
-            [VOID]$newCollection.psBase.Get();
-            $ColID = $newCollection.CollectionID.ToString();
+                [VOID]$newCollection.psBase.Get();
+                $ColID = $newCollection.CollectionID.ToString();
 
-            if ( $ColID -like "$($gCMSourceSite)?????"  ) {
-                
+                Write-Detail "Successfully created collection [$ColID]"
+
+                # Move collection to selected folder
+                if ($selectedFolder.ContainerNodeID -ne 0) {
+                    Write-Detail "Moving collection to folder `"$($selectedFolder.Name)`"..."
+                    $moveResult = Move-SCCMCollectionToFolder -SccmServer $myServer -CollectionID $ColID -FolderID $selectedFolder.ContainerNodeID -credential $myCred
+                    if ($moveResult) {
+                        Write-Detail "Successfully moved to folder"
+                    }
+                }
+
+                # Track the creation
+                $createdCollections += [PSCustomObject]@{
+                    Name = $ColName
+                    CollectionID = $ColID
+                    Folder = $selectedFolder.Name
+                }
+
+                # Add rule if present
+                if ( $ColID -like "$($gCMSourceSite)?????"  ) {
+
                     if ([string]::IsNullOrEmpty($colRuleQry)  -eq $True) {
                         Write-Detail "No Rule for collection."
 
                     } else {
                         write-Detail "Creating rule for `"$($newCollection.Name)`" [$ColID] - `"$colRuleName`""
-                        Add-SCCMCollectionRule -Server $myServer -collectionID $ColID -queryExpression $colRuleQry -queryRuleName $colRuleName -Verbose
+                        try {
+                            Add-SCCMCollectionRule -Server $myServer -collectionID $ColID -queryExpression $colRuleQry -queryRuleName $colRuleName -Verbose
+                            write-Detail "    > Added rule to `"$($newCollection.Name)`" - `"$colRuleName`""
+                            $addedRules += [PSCustomObject]@{
+                                CollectionName = $newCollection.Name
+                                CollectionID = $ColID
+                                RuleName = $colRuleName
+                            }
+                        }
+                        catch {
+                            Write-Detail "ERROR: Failed to add rule: $($_.Exception.Message)"
+                            $errors += "Failed to add rule to $($newCollection.Name): $($_.Exception.Message)"
+                        }
                     }
-                write-Detail "    > Added rule to `"$($newCollection.Name)`" - `"$colRuleName`""
+                }
             }
-            
+            catch {
+                Write-Detail "ERROR: Failed to create collection `"$ColName`": $($_.Exception.Message)"
+                $errors += "Failed to create collection $ColName`: $($_.Exception.Message)"
+            }
 
         }
 
@@ -875,7 +1179,59 @@ foreach ($bndCol in $UpdatedCollections) {
 
 }
 
+# Display Summary
+Write-Host ""
+Write-Host ""
+Write-Detail "================================================================================"
+Write-Detail "                            OPERATION SUMMARY                                   "
+Write-Detail "================================================================================"
+Write-Host ""
 
+Write-Detail "Selected Folder: $($selectedFolder.Name) [ID: $($selectedFolder.ContainerNodeID)]"
+Write-Host ""
+
+if ($createdCollections.Count -gt 0) {
+    Write-Detail "CREATED COLLECTIONS: $($createdCollections.Count)"
+    foreach ($col in $createdCollections) {
+        Write-Detail "  [+] $($col.CollectionID) - $($col.Name)"
+        Write-Detail "      Folder: $($col.Folder)"
+    }
+    Write-Host ""
+}
+
+if ($existingCollections.Count -gt 0) {
+    Write-Detail "EXISTING COLLECTIONS (Not Modified): $($existingCollections.Count)"
+    foreach ($col in $existingCollections) {
+        Write-Detail "  [=] $($col.CollectionID) - $($col.Name)"
+    }
+    Write-Host ""
+}
+
+if ($addedRules.Count -gt 0) {
+    Write-Detail "RULES ADDED: $($addedRules.Count)"
+    foreach ($rule in $addedRules) {
+        Write-Detail "  [>] $($rule.CollectionID) - $($rule.CollectionName)"
+        Write-Detail "      Rule: $($rule.RuleName)"
+    }
+    Write-Host ""
+}
+
+if ($errors.Count -gt 0) {
+    Write-Detail "ERRORS ENCOUNTERED: $($errors.Count)"
+    foreach ($error in $errors) {
+        Write-Detail "  [!] $error"
+    }
+    Write-Host ""
+}
+
+Write-Detail "================================================================================"
+Write-Detail "Summary:"
+Write-Detail "  - Created: $($createdCollections.Count) collections"
+Write-Detail "  - Existing: $($existingCollections.Count) collections"
+Write-Detail "  - Rules Added: $($addedRules.Count)"
+Write-Detail "  - Errors: $($errors.Count)"
+Write-Detail "================================================================================"
+Write-Host ""
 
 Write-Detail "Logs : `"$logFile`""
 
