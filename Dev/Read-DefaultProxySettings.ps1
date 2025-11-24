@@ -155,9 +155,21 @@ Function Decode-ConnectionSettings {
         Write-Detail -Message "Auto Config Enabled: $($Settings.AutoConfigEnabled)" -Level Info
         Write-Detail -Message "Auto Detect Enabled: $($Settings.AutoDetectEnabled)" -Level Info
 
-        # Parse data sections sequentially - always read length fields even if feature is disabled
-        $Offset = 8
-        Write-Detail -Message "Starting data parsing at offset $Offset (after version and flags)" -Level Debug
+        # Unknown field at bytes 8-11 (possibly increment counter or secondary version)
+        $Settings.UnknownField = Read-UInt32FromBytes -Data $Data -Start 8
+        Write-Detail -Message "Unknown field (bytes 8-11): $($Settings.UnknownField)" -Level Debug
+
+        # Parse data sections sequentially - structure is:
+        # Bytes 12-15: Proxy server length
+        # Bytes 16+: Proxy server string (if length > 0)
+        # Next 4 bytes: Bypass length
+        # Next bytes: Bypass string (if length > 0)
+        # Next 4 bytes: PAC URL length
+        # Next bytes: PAC URL string (if length > 0)
+        # Final 32 bytes: Padding (0x00)
+
+        $Offset = 12
+        Write-Detail -Message "Starting data parsing at offset $Offset (proxy length field)" -Level Debug
 
         # Proxy server section (always read length field)
         if ($Data.Length -gt ($Offset + 3)) {
@@ -229,31 +241,6 @@ Function Decode-ConnectionSettings {
             Write-Detail -Message "Not enough bytes remaining to read bypass length" -Level Warning
             $Settings.ProxyBypass = ""
         } # end of bypass parsing
-
-        # Unknown field between bypass and auto config sections
-        # This field exists after bypass section and affects AutoConfig URL offset
-        if ($Data.Length -gt ($Offset + 3)) {
-            Write-Detail -Message "Reading unknown field at offset $Offset" -Level Debug
-            Write-Detail -Message "Unknown field bytes: 0x$($Data[$Offset].ToString('X2')) 0x$($Data[$Offset+1].ToString('X2')) 0x$($Data[$Offset+2].ToString('X2')) 0x$($Data[$Offset+3].ToString('X2'))" -Level Debug
-
-            $UnknownField = Read-UInt32FromBytes -Data $Data -Start $Offset
-            Write-Detail -Message "Unknown field value: $UnknownField" -Level Debug
-            $Settings.UnknownField = $UnknownField
-            $Offset += 4
-
-            # If unknown field is non-zero, skip 1 additional byte
-            # This pattern is seen in Sample 1 vs Sample 2
-            if ($UnknownField -ne 0) {
-                Write-Detail -Message "Unknown field is non-zero ($UnknownField), skipping 1 extra byte at offset $Offset" -Level Debug
-                if ($Offset -lt $Data.Length) {
-                    $ExtraByte = $Data[$Offset]
-                    Write-Detail -Message "Extra byte: 0x$($ExtraByte.ToString('X2'))" -Level Debug
-                    $Settings.UnknownExtraByte = $ExtraByte
-                    # $Offset += 1
-                }
-            }
-            Write-Detail -Message "After unknown field section, offset now: $Offset" -Level Debug
-        } # end of unknown field parsing
 
         # Auto config URL section (always read length field)
         if ($Data.Length -gt ($Offset + 3)) {
@@ -348,22 +335,29 @@ try {
     } # end of hex dump loop
 
     Write-Detail -Message "STRUCTURE BREAKDOWN:" -Level Info
-    Write-Detail -Message "Bytes 0-3   (Version):  $($Bytes[0].ToString('X2')) $($Bytes[1].ToString('X2')) $($Bytes[2].ToString('X2')) $($Bytes[3].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 0)))" -Level Info
-    Write-Detail -Message "Bytes 4-7   (Flags):    $($Bytes[4].ToString('X2')) $($Bytes[5].ToString('X2')) $($Bytes[6].ToString('X2')) $($Bytes[7].ToString('X2')) = 0x$(([System.BitConverter]::ToUInt32($Bytes, 4)).ToString('X8'))" -Level Info
-    Write-Detail -Message "Bytes 8-11  (Field 1):  $($Bytes[8].ToString('X2')) $($Bytes[9].ToString('X2')) $($Bytes[10].ToString('X2')) $($Bytes[11].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 8)))" -Level Info
-    Write-Detail -Message "Bytes 12-15 (Field 2):  $($Bytes[12].ToString('X2')) $($Bytes[13].ToString('X2')) $($Bytes[14].ToString('X2')) $($Bytes[15].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 12)))" -Level Info
-    Write-Detail -Message "Bytes 16-19 (Field 3):  $($Bytes[16].ToString('X2')) $($Bytes[17].ToString('X2')) $($Bytes[18].ToString('X2')) $($Bytes[19].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 16)))" -Level Info
-    Write-Detail -Message "Bytes 20-23 (Field 4):  $($Bytes[20].ToString('X2')) $($Bytes[21].ToString('X2')) $($Bytes[22].ToString('X2')) $($Bytes[23].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 20)))" -Level Info
+    Write-Detail -Message "Bytes 0-3   (Version):      $($Bytes[0].ToString('X2')) $($Bytes[1].ToString('X2')) $($Bytes[2].ToString('X2')) $($Bytes[3].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 0)))" -Level Info
+    Write-Detail -Message "Bytes 4-7   (Flags):        $($Bytes[4].ToString('X2')) $($Bytes[5].ToString('X2')) $($Bytes[6].ToString('X2')) $($Bytes[7].ToString('X2')) = 0x$(([System.BitConverter]::ToUInt32($Bytes, 4)).ToString('X8'))" -Level Info
+    Write-Detail -Message "Bytes 8-11  (Unknown):      $($Bytes[8].ToString('X2')) $($Bytes[9].ToString('X2')) $($Bytes[10].ToString('X2')) $($Bytes[11].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 8)))" -Level Info
+    Write-Detail -Message "Bytes 12-15 (Proxy Len):    $($Bytes[12].ToString('X2')) $($Bytes[13].ToString('X2')) $($Bytes[14].ToString('X2')) $($Bytes[15].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 12)))" -Level Info
+    if ($Bytes.Length -gt 19) {
+        Write-Detail -Message "Bytes 16-19 (Data/Len):     $($Bytes[16].ToString('X2')) $($Bytes[17].ToString('X2')) $($Bytes[18].ToString('X2')) $($Bytes[19].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 16)))" -Level Info
+    }
+    if ($Bytes.Length -gt 23) {
+        Write-Detail -Message "Bytes 20-23 (Data/Len):     $($Bytes[20].ToString('X2')) $($Bytes[21].ToString('X2')) $($Bytes[22].ToString('X2')) $($Bytes[23].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 20)))" -Level Info
+    }
 
-    # Compare against known patterns from your two samples
-    Write-Detail -Message "PATTERN ANALYSIS:" -Level Info
-    Write-Detail -Message "Sample 1: 46,00,00,00,1e,01,00,00,01,00,00,00,00,00,00,00,01,00,00,00,20,42,00,00,00,68,74,74,70..." -Level Info
-    Write-Detail -Message "Sample 2: 46,00,00,00,62,1f,00,00,01,00,00,00,00,00,00,00,00,00,00,00,42,00,00,00,68,74,74,70..." -Level Info
-    Write-Detail -Message "Differences:" -Level Info
-    Write-Detail -Message "  Bytes 4-7:  Sample 1=1e,01,00,00 (286) vs Sample 2=62,1f,00,00 (8034)" -Level Info
-    Write-Detail -Message "  Bytes 16-19: Sample 1=01,00,00,00 (1) vs Sample 2=00,00,00,00 (0)" -Level Info
-    Write-Detail -Message "  Bytes 20:    Sample 1=20 (space char) vs Sample 2=42 (length 66)" -Level Info
-    Write-Detail -Message "Conclusion: Auto config URL length appears to be at offset 21-24 in Sample 1, offset 20-23 in Sample 2" -Level Info
+    # Structure documentation
+    Write-Detail -Message "STRUCTURE:" -Level Info
+    Write-Detail -Message "  Bytes 0-3:   Version/Counter (DWORD)" -Level Info
+    Write-Detail -Message "  Bytes 4-7:   Connection Flags (DWORD)" -Level Info
+    Write-Detail -Message "  Bytes 8-11:  Unknown Field (DWORD)" -Level Info
+    Write-Detail -Message "  Bytes 12-15: Proxy Server Length (DWORD)" -Level Info
+    Write-Detail -Message "  Bytes 16+:   Proxy Server String (if length > 0)" -Level Info
+    Write-Detail -Message "  Next 4:      Bypass Length (DWORD)" -Level Info
+    Write-Detail -Message "  Next bytes:  Bypass String (if length > 0)" -Level Info
+    Write-Detail -Message "  Next 4:      PAC URL Length (DWORD)" -Level Info
+    Write-Detail -Message "  Next bytes:  PAC URL String (if length > 0)" -Level Info
+    Write-Detail -Message "  Final 32:    Padding (0x00 bytes)" -Level Info
     Write-Detail -Message "========================================" -Level Info
 
 } catch {
@@ -382,10 +376,7 @@ Write-Detail -Message "========================================" -Level Info
 Write-Detail -Message "CURRENT CONFIGURATION SUMMARY:" -Level Info
 Write-Detail -Message "Version/Counter: $($CurrentSettings.Version)" -Level Info
 if ($CurrentSettings.ContainsKey('UnknownField')) {
-    Write-Detail -Message "Unknown Field (offset 16-19): $($CurrentSettings.UnknownField)" -Level Debug
-    if ($CurrentSettings.ContainsKey('UnknownExtraByte')) {
-        Write-Detail -Message "Unknown Extra Byte: 0x$($CurrentSettings.UnknownExtraByte.ToString('X2'))" -Level Debug
-    }
+    Write-Detail -Message "Unknown Field (bytes 8-11): $($CurrentSettings.UnknownField)" -Level Debug
 }
 Write-Detail -Message "Direct Connection: $($CurrentSettings.DirectConnection)" -Level Info
 Write-Detail -Message "Proxy Enabled: $($CurrentSettings.ProxyEnabled)" -Level Info
