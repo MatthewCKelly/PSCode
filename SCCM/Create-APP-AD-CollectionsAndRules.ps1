@@ -1,0 +1,884 @@
+
+[STRING]$gCMSourceSite = "XXX";                           # SCCM Sitename
+[STRING]$gCMSite  =      "ROOT\SMS\site_$gCMSourceSite"   # WMI path
+[STRING]$gUPN     =      "SCCM.LOCAL"                     # Local UPN
+[STRING]$gCMSServ =      "SCCMSITESEVER.SCCM.LOCAL"       # FQDN to Site
+[STRING]$gDomain  =      $env:USERDOMAIN;                 # Run as local user ?
+
+# Database parameters
+$ConnectionTimeout = 30;
+[STRING]$ServerName        = "SCCMSQLSRV.SCCM.LOCAL";     # FQDN To SQL Server
+[STRING]$DatabaseName      = "CM_XXX";                    # SCCM DB
+
+
+
+[INT]$psVer       = $PSVersionTable.PSVersion.Major;
+$UsrObj = ([adsi]"LDAP://$(whoami /fqdn)")
+
+<#
+$UsrObj.mail
+$UsrObj.displayName
+$UsrObj.userPrincipalName
+$UsrObj.sAMAccountName
+#>
+
+
+[STRING]$gStrLine = "-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-";
+
+
+#endregion
+
+
+#region Helper Functions
+
+##########################################################################################
+#                                   Helper Functions
+##########################################################################################
+
+<#
+function Validate-Filename { 
+	Param([ValidatePattern("^\d{8}_[a-zA-Z]{3,4}_[a-zA-Z]{1}\.jpg"]$filename) 
+	Write-host "The filename $filename is valid" 
+} #>
+
+Function Write-Detail {
+<#
+    .SYNOPSIS
+	Writes to host formatted 
+    .DESCRIPTION
+	"Write-Detail"
+    .PARAMETER message
+
+    .INPUTS
+        [String]
+
+    .OUTPUTS
+        [Standard Out]
+    .EXAMPLE
+	    Write-Detail -message "This is my message for the log file."
+    .LINK
+#>
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true,HelpMessage="Please Enter string to display.")]
+        [string]
+        [ValidateNotNullOrEmpty()]
+        $message
+    )
+    # $(Get-CurrentLineNumber)
+    # Write-Host "$(Get-CurrentLineNumber)`t$(Get-Date -Format s) - 
+    Write-Host "$(Get-Date -Format s)`t$($MyInvocation.ScriptLineNumber) `t- $message"
+}          # End of Write-Detail
+
+Function Test-Cred {
+<#
+    .SYNOPSIS
+	    Wrapper for Invoke-WebRequest to handle proxy configuration.
+    .DESCRIPTION
+    	"Test-Cred"
+    .PARAMETER Credential
+        The network credential to check.
+
+    .INPUTS
+        Expects an PSCredential to be passed to it. If not will prompt for the Credential.
+
+    .OUTPUTS
+        [Bool] True or False
+
+    .EXAMPLE
+        Test-Cred -Credential $(Get-Credential -Message "Enter username to be checked.`r`nExclude Domain prefix.")
+	
+#>
+	[CmdletBinding()]
+	Param(
+	[Parameter(Mandatory=$True,HelpMessage="Please Enter Credentials")]
+	$Credential
+	)
+
+	if ($Credential -isnot [System.Management.Automation.PSCredential]) {
+		Write-Warning "Not the correct object type.."
+		$Credential = Get-Credential -Message "`"$Credential`" is not in the correct format!`r`nEnter username to be checked.`r`nExclude Domain prefix." -UserName $Credential
+		# could do error handling here as well..
+	}
+
+	# $Credentials = Get-Credential -Message "Please enter a the password for `"$lAdminUsr`"" -UserName $lAdminUsr;
+	$UserName = $Credential.GetNetworkCredential().UserName;
+	$Password = $Credential.GetNetworkCredential().Password;
+
+
+	$CurrentDomain = "LDAP://" + ([ADSI]"").distinguishedName
+    # "LDAP://" + ([ADSI]"").upnSuffixes
+	$domain = New-Object System.DirectoryServices.DirectoryEntry($CurrentDomain,$UserName,$Password)
+
+	if ($domain.name -eq $null) {
+		write-detail "Authentication failed - please verify your username `"$UserName`" and password.";
+		# exit #terminate the script.
+		return $false;
+	} else {
+		write-detail "Successfully authenticated with domain $($domain.name)";
+		return $true;
+	}
+}           # End of Test-Cred
+
+function get-ProductQuery {
+    [CmdletBinding()]
+    PARAM (
+        [Parameter(Mandatory=$true, HelpMessage="Application Publisher")][STRING]$AppPublisher,
+        [Parameter(Mandatory=$true, HelpMessage="Product displayname",ValueFromPipeline=$true)][String]$AppDisplayName
+    )
+
+$mySQLQuery = "Select
+	[Program Type]
+	, [Display Name]
+	, [Publisher]
+	, isNull([Version],'') as [Version]
+	, [Display Name] + ' - ' + [Program Type] + ' - ' + isNull([Version],'') as [Collection/Rule Name]
+	, count(ResourceID) [Count] 
+	, [Product Code]
+	, CASE [Program Type]
+
+	When '32 Bit' then 
+	'select ResourceID from SMS_R_System inner join SMS_G_System_ADD_REMOVE_PROGRAMS on SMS_G_System_ADD_REMOVE_PROGRAMS.ResourceId = SMS_R_System.ResourceId 
+	where SMS_G_System_ADD_REMOVE_PROGRAMS.DisplayName like `"' + [Display Name] + '`" and SMS_G_System_ADD_REMOVE_PROGRAMS.Version = `"' + [Version] + '`"' 
+	When '64 Bit' Then  
+	'select ResourceID from SMS_R_System inner join SMS_G_System_ADD_REMOVE_PROGRAMS_64 on SMS_G_System_ADD_REMOVE_PROGRAMS_64.ResourceId = SMS_R_System.ResourceId 
+	where SMS_G_System_ADD_REMOVE_PROGRAMS_64.DisplayName like `"' + [Display Name] + '`" and SMS_G_System_ADD_REMOVE_PROGRAMS_64.Version = `"' + [Version] + '`"' 
+	ELSE ''
+	end
+	as [WQL query]
+
+
+
+from ( 
+-- 32 Bit Apps
+SELECT  DISTINCT     
+             
+             v_R_System.ResourceID as 'ResourceID', 
+			  '32 Bit' as 'Program Type',
+			  v_GS_ADD_REMOVE_PROGRAMS.DisplayName0 AS 'Display Name', 
+           
+			  ISNULL(v_GS_ADD_REMOVE_PROGRAMS.Publisher0, '') AS 'Publisher',
+			  v_GS_ADD_REMOVE_PROGRAMS.Version0 AS 'Version', 
+              v_GS_ADD_REMOVE_PROGRAMS.ProdID0 AS 'Product Code'
+              
+FROM            v_R_System  with (nolock) INNER JOIN
+                         v_GS_ADD_REMOVE_PROGRAMS with (nolock) ON v_R_System.ResourceID = v_GS_ADD_REMOVE_PROGRAMS.ResourceID
+			
+WHERE		
+				Publisher0 like '{0}'
+		AND DisplayName0 like '{1}'
+UNION
+
+-- 64 Bit Apps
+
+SELECT   DISTINCT    
+              
+              v_R_System.ResourceID as 'ResourceID', 
+			  '64 Bit' as 'Program Type',
+			  v_GS_ADD_REMOVE_PROGRAMS_64.DisplayName0 AS 'Display Name', 
+            
+			  ISNULL(v_GS_ADD_REMOVE_PROGRAMS_64.Publisher0, '') AS 'Publisher', 
+              v_GS_ADD_REMOVE_PROGRAMS_64.Version0 AS 'Version', 
+			  v_GS_ADD_REMOVE_PROGRAMS_64.ProdID0 AS 'Product Code'
+
+FROM          v_R_System with (nolock) 
+				INNER JOIN
+                         v_GS_ADD_REMOVE_PROGRAMS_64 with (nolock) ON v_R_System.ResourceID = v_GS_ADD_REMOVE_PROGRAMS_64.ResourceID
+				
+WHERE  
+		Publisher0 like '{0}'
+		AND DisplayName0 like '{1}'
+) as combined
+		
+ group by [Program Type], [Display Name], [Publisher], [Version], [Product Code]
+
+order by 'Display Name', 'Program Type', 'Version'" -f $AppPublisher,$AppDisplayName;
+Return [STRING]$mySQLQuery;
+
+}
+
+function get-AppPublisher {
+    [CmdletBinding()]
+    PARAM (
+        [Parameter(Mandatory=$false, HelpMessage="Application Publisher")][STRING]$AppPublisher
+    )
+
+$mySQLQuery = "SELECT  DISTINCT     
+-- 32 Bit Apps             
+			  ISNULL(v_GS_ADD_REMOVE_PROGRAMS.Publisher0, '') AS 'Publisher'
+              
+FROM            v_R_System  with (nolock) INNER JOIN
+                         v_GS_ADD_REMOVE_PROGRAMS with (nolock) ON v_R_System.ResourceID = v_GS_ADD_REMOVE_PROGRAMS.ResourceID
+			
+	
+
+UNION
+
+-- 64 Bit Apps
+
+SELECT   DISTINCT    
+              
+            
+			  ISNULL(v_GS_ADD_REMOVE_PROGRAMS_64.Publisher0, '') AS 'Publisher'
+
+FROM          v_R_System with (nolock) 
+				INNER JOIN
+                         v_GS_ADD_REMOVE_PROGRAMS_64 with (nolock) ON v_R_System.ResourceID = v_GS_ADD_REMOVE_PROGRAMS_64.ResourceID
+						
+
+
+order by 'Publisher';" -f $AppPublisher;
+Return [STRING]$mySQLQuery;
+
+}
+
+function get-AppProducts {
+    [CmdletBinding()]
+    PARAM (
+        [Parameter(Mandatory=$true, HelpMessage="Application Publishers")][STRING]$Publisher
+    )
+
+$mySQLQuery = "Select
+	[Program Type]
+	, [Display Name]
+	, [Publisher]
+	, isNull([Version],'') as [Version]
+	, [Display Name] + ' - ' + [Program Type] + ' - ' + isNull([Version],'') as [Collection/Rule Name]
+	, count(ResourceID) [Count] 
+	, [Product Code]
+	, CASE [Program Type]
+
+	When '32 Bit' then 
+	'select ResourceID from SMS_R_System inner join SMS_G_System_ADD_REMOVE_PROGRAMS on SMS_G_System_ADD_REMOVE_PROGRAMS.ResourceId = SMS_R_System.ResourceId 
+	where SMS_G_System_ADD_REMOVE_PROGRAMS.DisplayName like `"' + [Display Name] + '`" and SMS_G_System_ADD_REMOVE_PROGRAMS.Version = `"' + [Version] + '`"' 
+	When '64 Bit' Then  
+	'select ResourceID from SMS_R_System inner join SMS_G_System_ADD_REMOVE_PROGRAMS_64 on SMS_G_System_ADD_REMOVE_PROGRAMS_64.ResourceId = SMS_R_System.ResourceId 
+	where SMS_G_System_ADD_REMOVE_PROGRAMS_64.DisplayName like `"' + [Display Name] + '`" and SMS_G_System_ADD_REMOVE_PROGRAMS_64.Version = `"' + [Version] + '`"' 
+	ELSE ''
+	end
+	as [WQL query]
+
+
+
+from ( 
+-- 32 Bit Apps
+SELECT  DISTINCT     
+             
+             v_R_System.ResourceID as 'ResourceID', 
+			  '32 Bit' as 'Program Type',
+			  v_GS_ADD_REMOVE_PROGRAMS.DisplayName0 AS 'Display Name', 
+           
+			  ISNULL(v_GS_ADD_REMOVE_PROGRAMS.Publisher0, '') AS 'Publisher',
+			  v_GS_ADD_REMOVE_PROGRAMS.Version0 AS 'Version', 
+              v_GS_ADD_REMOVE_PROGRAMS.ProdID0 AS 'Product Code'
+              
+FROM            v_R_System  with (nolock) INNER JOIN
+                         v_GS_ADD_REMOVE_PROGRAMS with (nolock) ON v_R_System.ResourceID = v_GS_ADD_REMOVE_PROGRAMS.ResourceID
+			
+WHERE		
+				Publisher0 in ({0})
+UNION
+
+-- 64 Bit Apps
+
+SELECT   DISTINCT    
+              
+              v_R_System.ResourceID as 'ResourceID', 
+			  '64 Bit' as 'Program Type',
+			  v_GS_ADD_REMOVE_PROGRAMS_64.DisplayName0 AS 'Display Name', 
+            
+			  ISNULL(v_GS_ADD_REMOVE_PROGRAMS_64.Publisher0, '') AS 'Publisher', 
+              v_GS_ADD_REMOVE_PROGRAMS_64.Version0 AS 'Version', 
+			  v_GS_ADD_REMOVE_PROGRAMS_64.ProdID0 AS 'Product Code'
+
+FROM          v_R_System with (nolock) 
+				INNER JOIN
+                         v_GS_ADD_REMOVE_PROGRAMS_64 with (nolock) ON v_R_System.ResourceID = v_GS_ADD_REMOVE_PROGRAMS_64.ResourceID
+				
+WHERE  
+		Publisher0 in ({0})
+) as combined
+		
+ group by [Program Type], [Display Name], [Publisher], [Version], [Product Code]
+
+order by 'Display Name', 'Program Type', 'Version';" -f $Publisher;
+Return [STRING]$mySQLQuery;
+
+}
+
+<#
+    
+    From...
+    http://www.hasmug.com/2011/09/25/sccm-powershell-script-to-check-for-local-dp-get-sccmclienthaslocaldp/
+
+#>
+Function Get-SCCMClientHasLocalDP {
+    [CmdletBinding()]
+    PARAM (
+        [Parameter(Mandatory=$true, HelpMessage="SCCM Server")][Alias("Server","SmsServer")][System.Object] $SccmServer,
+        [Parameter(Mandatory=$true, HelpMessage="ClientName",ValueFromPipeline=$true)][String] $clientName,
+		[Parameter(Mandatory=$false,HelpMessage="Credentials to use" )][System.Management.Automation.PSCredential] $credential = $null
+    )
+ 
+    PROCESS {
+		$DP = $false
+        Write-Detail "SCCM Servers = `"$SccmServer`""
+        Write-Detail "Client Name  = `"$clientName`""
+    
+		if ($credential -eq $null) {
+			$client = Get-SCCMObject -sccmServer $SccmServer -class SMS_R_System -Filter "Name = '$($clientName)'"
+			if (-not $client) {
+				throw "Client does not exist in SCCM. Please check your spelling"
+			}
+			$Filter = "SMS_R_System.ADSiteName = '$($client.ADSiteName)' and Name IN (Select ServerName FROM SMS_DistributionPointInfo)"
+            Write-Detail "Filter is `"$Filter`""
+        	$DP = Get-SCCMObject -sccmServer $SccmServer -class SMS_R_System -Filter $Filter
+		} else {
+            Write-Detail "Get-SCCMObject -sccmServer $SccmServer -class SMS_R_System -Filter `"Name = '$($clientName)'`" -credential `$credential"
+			$client = Get-SCCMObject -sccmServer $SccmServer -class SMS_R_System -Filter "Name = '$($clientName)' AND Client = 1" -credential $credential
+            
+			if (-not $client) {
+				throw "Client does not exist in SCCM. Please check your spelling"
+			}
+            $Filter = "SMS_R_System.ADSiteName = '$($client.ADSiteName)' AND SystemRoles like 'SMS Distribution Point'"
+			# $Filter = "SMS_R_System.ADSiteName = '$($client.ADSiteName)' and Name IN (Select ServerName FROM SMS_DistributionPointInfo)"
+            Write-Detail "Filter is `"$Filter`""
+        	$DP = Get-SCCMObject -sccmServer $SccmServer -class SMS_R_System -Filter $Filter -credential $credential
+		}
+ 
+		if ($DP) {
+ 			return $true
+		} else {
+			return $false
+		}
+    }
+} # End of Get-SCCMClientHasLocalDP
+
+Function Get-ADSiteHasLocalDP {
+    [CmdletBinding()]
+    PARAM (
+        [Parameter(Mandatory=$true, HelpMessage="SCCM Server")][Alias("Server","SmsServer")][System.Object] $SccmServer,
+        [Parameter(Mandatory=$true, HelpMessage="Enter the AD SiteName you wish to find ",ValueFromPipeline=$true)][String] $ADSiteName,
+		[Parameter(Mandatory=$false,HelpMessage="Credentials to use" )][System.Management.Automation.PSCredential] $credential = $null
+    )
+ 
+    PROCESS {
+		$DP = $false
+        Write-Detail "SCCM Servers = `"$SccmServer`""
+        Write-Detail "Client Name  = `"$clientName`""
+        $Filter = "SMS_R_System.ADSiteName = '$ADSiteName' AND SystemRoles like 'SMS Distribution Point'"
+        Write-Detail "Filter is `"$Filter`""
+		if ($credential -eq $null) {
+        	$DP = Get-SCCMObject -sccmServer $SccmServer -class SMS_R_System -Filter $Filter
+		} else {
+        	$DP = Get-SCCMObject -sccmServer $SccmServer -class SMS_R_System -Filter $Filter -credential $credential
+		}
+ 
+        Write-Detail "Site DP is $($DP.Name)"
+        # $DP | gm
+        # $DP | Out-GridView
+		if ($DP) {
+            # Return the DP 
+ 			return $($DP.Name)
+		} else {
+			return $false
+		}
+    }
+}     # End of Get-ADSiteHasLocalDP
+
+Function Get-SCCMObject {
+    #  Generic query tool
+    [CmdletBinding()]
+    PARAM (
+        [Parameter(Mandatory=$true, HelpMessage="SCCM Server",ValueFromPipelineByPropertyName=$true)][Alias("Server","SmsServer")][System.Object] $SccmServer,
+        [Parameter(Mandatory=$true, HelpMessage="SCCM Class to query",ValueFromPipeline=$true)][Alias("Table","View")][String] $class,
+        [Parameter(Mandatory=$false,HelpMessage="Optional Filter on query")][String] $Filter = $null,
+		[Parameter(Mandatory=$false,HelpMessage="Credentials to use" )][System.Management.Automation.PSCredential] $credential = $null
+
+    )
+ 
+    PROCESS {
+        if ($Filter -eq $null -or $Filter -eq "")
+        {
+            Write-Detail "WMI Query: SELECT * FROM $class"
+            $retObj = get-wmiobject -class $class -computername $SccmServer.Machine -namespace $SccmServer.Namespace -Credential $credential
+        }
+        else
+        {
+            Write-Detail "WMI Query: SELECT * FROM $class WHERE $Filter"
+            $retObj = get-wmiobject -query "SELECT * FROM $class WHERE $Filter" -computername $SccmServer.Machine -namespace $SccmServer.Namespace  -Credential $credential
+        }
+ 
+        return $retObj
+    }
+}           # End of Get-SCCMObject
+
+Function Connect-SCCMServer {
+    # Connect to one SCCM server
+    [CmdletBinding()]
+    PARAM (
+        [Parameter(Mandatory=$false,HelpMessage="SCCM Server Name or FQDN",ValueFromPipeline=$true)][Alias("ServerName","FQDN","ComputerName")][String] $HostName = (Get-Content env:computername),
+        [Parameter(Mandatory=$false,HelpMessage="Optional SCCM Site Code",ValueFromPipelineByPropertyName=$true )][String] $siteCode = $null,
+        [Parameter(Mandatory=$false,HelpMessage="Credentials to use" )][System.Management.Automation.PSCredential] $credential = $null
+    )
+ 
+    PROCESS {
+        # Get the pointer to the provider for the site code
+        if ($siteCode -eq $null -or $siteCode -eq "") {
+            Write-Detail "Getting provider location for default site on server $HostName"
+            if ($credential -eq $null) {
+                $sccmProviderLocation = Get-WmiObject -query "select * from SMS_ProviderLocation where ProviderForLocalSite = true" -Namespace "root\sms" -computername $HostName -errorAction Stop
+            } else {
+                $sccmProviderLocation = Get-WmiObject -query "select * from SMS_ProviderLocation where ProviderForLocalSite = true" -Namespace "root\sms" -computername $HostName -credential $credential -errorAction Stop
+            }
+        } else {
+            Write-Detail "Getting provider location for site $siteCode on server $HostName"
+            if ($credential -eq $null) {
+                $sccmProviderLocation = Get-WmiObject -query "SELECT * FROM SMS_ProviderLocation where SiteCode = '$siteCode'" -Namespace "root\sms" -computername $HostName -errorAction Stop
+            } else {
+                $sccmProviderLocation = Get-WmiObject -query "SELECT * FROM SMS_ProviderLocation where SiteCode = '$siteCode'" -Namespace "root\sms" -computername $HostName -credential $credential -errorAction Stop
+            }
+        }
+ 
+        # Split up the namespace path
+        $parts = $sccmProviderLocation.NamespacePath -split "\\", 4
+        Write-Detail "Provider is located on $($sccmProviderLocation.Machine) in namespace $($parts[3])"
+ 
+        # Create a new object with information
+        $retObj = New-Object -TypeName System.Object
+        $retObj | add-Member -memberType NoteProperty -name Machine -Value $HostName
+        $retObj | add-Member -memberType NoteProperty -name Namespace -Value $parts[3]
+        $retObj | add-Member -memberType NoteProperty -name SccmProvider -Value $sccmProviderLocation
+ 
+        return $retObj
+    }
+}       # End of Connect-SCCMServer
+
+Function New-SCCMCollection {
+    [CmdletBinding()]
+    PARAM (
+        [Parameter(Mandatory=$true, HelpMessage="SCCM Server")][Alias("Server","SmsServer")][System.Object] $SccmServer,
+        [Parameter(Mandatory=$true, HelpMessage="Collection Name", ValueFromPipeline=$true)][String] $name,
+        [Parameter(Mandatory=$false, HelpMessage="Collection comment")][String] $comment = "",
+        [Parameter(Mandatory=$false, HelpMessage="Refresh Rate in Minutes")] [ValidateRange(0, 59)] [int] $refreshMinutes = 0,
+        [Parameter(Mandatory=$false, HelpMessage="Refresh Rate in Hours")] [ValidateRange(0, 23)] [int] $refreshHours = 0,
+        [Parameter(Mandatory=$false, HelpMessage="Refresh Rate in Days")] [ValidateRange(0, 31)] [int] $refreshDays = 0,
+        [Parameter(Mandatory=$false, HelpMessage="Parent CollectionID")][String] $parentCollectionID = "COLLROOT"
+    )
+ 
+    PROCESS {
+        # Build the parameters for creating the collection
+        $arguments = @{Name = $name; Comment = $comment; OwnedByThisSite = $true}
+        # $newColl = Set-WmiInstance -class "SMS_Collection" -arguments $arguments -computername $SccmServer.Machine -namespace $SccmServer.Namespace
+        $newCollClass = [WMICLASS]"\\$($SccmServer.Machine)\$($SccmServer.Namespace):SMS_Collection"
+        $newColl = $newCollClass.CreateInstance()
+ 
+        $newColl.Name = $name
+        $newColl.Comment = $comment
+        $newColl.OwnedByThisSite = $true
+        $newColl.LimitToCollectionID = $parentCollectionID
+
+        $newColl.Put();
+        # Hack - for some reason without this we don't get the CollectionID value
+        # $hack = $newColl.PSBase | select * | out-null
+ 
+        # It's really hard to set the refresh schedule via Set-WmiInstance, so we'll set it later if necessary
+        if ($refreshMinutes -gt 0 -or $refreshHours -gt 0 -or $refreshDays -gt 0) {
+            Write-Verbose "Create the recur interval object"
+            $intervalClass = [WMICLASS]"\\$($SccmServer.Machine)\$($SccmServer.Namespace):SMS_ST_RecurInterval"
+            $interval = $intervalClass.CreateInstance()
+            if ($refreshMinutes -gt 0) {
+                $interval.MinuteSpan = $refreshMinutes
+            }
+            if ($refreshHours -gt 0) {
+                $interval.HourSpan = $refreshHours
+            }
+            if ($refreshDays -gt 0) {
+                $interval.DaySpan = $refreshDays
+            }
+ 
+            Write-Verbose "Set the refresh schedule"
+            $newColl.RefreshSchedule = $interval
+            $newColl.RefreshType=2
+            $path = $newColl.Put()
+        }
+<# 
+        Write-Verbose "Setting the new $($newColl.CollectionID) parent to $parentCollectionID"
+        $subArguments  = @{SubCollectionID = $newColl.CollectionID}
+        $subArguments += @{ParentCollectionID = $parentCollectionID}
+ 
+        # Add the link
+        $newRelation = Set-WmiInstance -Class "SMS_CollectToSubCollect" -arguments $subArguments -computername $SccmServer.Machine -namespace $SccmServer.Namespace
+ #>
+        Write-Verbose "Return the new collection with ID $($newColl.CollectionID)"
+        return $newColl
+    }
+}
+ 
+Function Add-SCCMCollectionRule {
+    [CmdletBinding()]
+    PARAM (
+        [Parameter(Mandatory=$true,  HelpMessage="SCCM Server")][Alias("Server","SmsServer")][System.Object] $SccmServer,
+        [Parameter(Mandatory=$true,  HelpMessage="CollectionID", ValueFromPipelineByPropertyName=$true)] $collectionID,
+        [Parameter(Mandatory=$false, HelpMessage="Computer name to add (direct)", ValueFromPipeline=$true)] [String] $name,
+        [Parameter(Mandatory=$false, HelpMessage="WQL Query Expression", ValueFromPipeline=$true)] [String] $queryExpression = $null,
+        [Parameter(Mandatory=$false, HelpMessage="Limit to collection (Query)", ValueFromPipeline=$false)] [String] $limitToCollectionId = $null,
+        [Parameter(Mandatory=$true,  HelpMessage="Rule Name", ValueFromPipeline=$true)] [String] $queryRuleName
+    )
+ 
+    PROCESS {
+        # Get the specified collection (to make sure we have the lazy properties)
+        $coll = [wmi]"$($SccmServer.SccmProvider.NamespacePath):SMS_Collection.CollectionID='$collectionID'"
+ 
+        # Build the new rule
+        if ($queryExpression.Length -gt 0) {
+            # Create a query rule
+            $ruleClass = [WMICLASS]"$($SccmServer.SccmProvider.NamespacePath):SMS_CollectionRuleQuery"
+            $newRule = $ruleClass.CreateInstance()
+            $newRule.RuleName = $queryRuleName
+            $newRule.QueryExpression = $queryExpression
+            if ([string]::IsNullOrEmpty($limitToCollectionId) -ne $True) {
+                $newRule.LimitToCollectionID = $limitToCollectionId
+            }
+ 
+            $null = $coll.AddMembershipRule($newRule)
+        } else {
+            $ruleClass = [WMICLASS]"$($SccmServer.SccmProvider.NamespacePath):SMS_CollectionRuleDirect"
+ 
+            # Find each computer
+            $computer = Get-SCCMComputer -sccmServer $SccmServer -NetbiosName $name
+            # See if the computer is already a member
+            $found = $false
+            if ($coll.CollectionRules -ne $null) {
+                foreach ($member in $coll.CollectionRules) {
+                    if ($member.ResourceID -eq $computer.ResourceID) {
+                        $found = $true
+                    }
+                }
+            }
+            if (-not $found) {
+                Write-Verbose "Adding new rule for computer $name"
+                $newRule = $ruleClass.CreateInstance()
+                $newRule.RuleName = $name
+                $newRule.ResourceClassName = "SMS_R_System"
+                $newRule.ResourceID = $computer.ResourceID
+ 
+                $null = $coll.AddMembershipRule($newRule)
+            } else {
+                Write-Verbose "Computer $name is already in the collection"
+            }
+        }
+    }
+}
+
+#endregion
+
+
+if ($myCred -isnot [System.Management.Automation.PSCredential]) {
+    if ($psVer -ge 4) {
+            $myCred = Get-Credential -Message "Please enter the Admin user and password for `"$($UsrObj.displayName)`"";
+	    } else {
+		    $myCred = Get-Credential
+	    }
+}
+
+
+$bTestAccount = Test-Cred -Credential $myCred;
+	if ($bTestAccount -ne $True ) {
+		write-detail "Credentials failed to check out.";
+		return [Bool]$false;    
+	} else {
+
+        Write-Detail "Creds are good..."
+
+    }
+
+
+<#
+[Security.Principal.WindowsIdentity]::GetCurrent().Groups
+
+$currentUser = New-Object Security.Principal.WindowsPrincipal $([Security.Principal.WindowsIdentity]::GetCurrent())
+$currentUser.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
+$currentUser | gm
+
+#>
+
+
+# $NoProxy = [System.Net.WebProxy]::new();
+
+
+$LogFileTime = Get-Date -Format "yyyyMMdd-HHmm"
+$logPath = [System.Environment]::ExpandEnvironmentVariables("%tmp%");
+$logFile = Join-Path -Path $logPath -ChildPath  "$($myInvocation.MyCommand)-$LogFileTime.log";
+
+
+$numNew    = 0;
+$numExst   = 0;
+
+
+
+# Start the logging 
+Start-Transcript -Path $logFile;
+
+
+$csvdelimiter = ",";
+
+
+# Query for App Collections..
+
+
+[void][Reflection.Assembly]::LoadWithPartialName("System.Data");
+[void][Reflection.Assembly]::LoadWithPartialName("System.Data.SqlClient");
+
+
+
+
+#Action of connecting to the Database and executing the query and returning results if there were any.
+$ConnectionString = "Server={0};Database={1};Integrated Security=True;Connect Timeout={2}" -f $ServerName,$DatabaseName,$ConnectionTimeout
+
+$SQLQuery = get-AppPublisher;
+
+$dataAdapter = New-Object System.Data.SqlClient.SqlDataAdapter($SQLQuery, $ConnectionString)
+$SQLdataTable       = New-object “System.Data.DataTable”
+$dataAdapter.Fill($SQLdataTable);
+$dataAdapter.Dispose()
+
+$MyAppPublisher = $SQLdataTable | Out-GridView -Title "Choose a application publisher..." -PassThru
+
+Write-Detail "Looking products associated with the following publisher(s) '$($MyAppPublisher.Publisher -join "', '")' [$($MyAppPublisher.Publisher.count)]"
+
+if ($MyAppPublisher.Publisher.Count -gt 0 ) {
+    # Continue
+    Write-Detail "Looking products associated with the following publisher(s) '$($MyAppPublisher.Publisher -join "', '")' "
+    } else {
+    
+    Write-detail "Nothing selected..."
+
+    throw "Nothing selected, no Publisher selected"
+    Stop-Transcript
+
+    }
+
+
+# 
+
+$SQLQuery = get-AppProducts -Publisher "'$($MyAppPublisher.Publisher -join "', '")'";
+
+
+$dataAdapter = New-Object System.Data.SqlClient.SqlDataAdapter($SQLQuery, $ConnectionString)
+$SQLdataTable       = New-object “System.Data.DataTable”
+$dataAdapter.Fill($SQLdataTable);
+$dataAdapter.Dispose()
+
+
+# $MyAppProduct 
+
+# $SQLQuery = get-ProductQuery -AppPublisher 'Dell Inc.' -AppDisplayName 'Dell SupportAssist for Business PCs';
+# $SQLQuery = get-ProductQuery -AppPublisher 'Adobe%' -AppDisplayName 'Adobe Acrobat%';
+# $SQLQuery = get-ProductQuery -AppPublisher 'Adobe%' -AppDisplayName '%';
+
+# $SQLQuery = get-ProductQuery -AppPublisher 'Dell' -AppDisplayName 'Dell Optimizer';
+
+# 
+# $SQLQuery = get-ProductQuery -AppPublisher 'CrowdStrike, Inc.' -AppDisplayName 'CrowdStrike Sensor Platform';
+# $SQLQuery = get-ProductQuery -AppPublisher 'Dell Inc.' -AppDisplayName 'Dell SupportAssist for Business PCs';
+# $SQLQuery = get-ProductQuery -AppPublisher 'M-Files Corporation' -AppDisplayName 'M-Files Online';
+
+
+if( $SQLdataTable.Rows.Count -ge 1 ) {
+    Write-Detail "We have $($SQLdataTable.Rows.Count) Rows in our dataset"
+
+} else {
+
+    Write-Detail "No product found.."
+    Exit
+}
+
+$CollectionsToCreate = $SQLdataTable | Out-GridView -Title "Select only the collections you wish to create" -PassThru
+
+
+
+# $CollectionsToCreate | Out-GridView 
+
+
+
+    $UpdatedCollections = @();
+
+    # Parse results
+    $Colname            = @{name="Name";Expression={$_.'Collection/Rule Name' + ' - Current Installs' }}
+    $RuleName           = @{name="RuleName";Expression={$_.'Collection/Rule Name'}}
+    $RuleQuery          = @{name="RuleQry";Expression={$_.'WQL query'}}
+    $UpdatedCollections += $CollectionsToCreate | Select-Object -Property $Colname, $RuleName, $RuleQuery 
+
+    $Colname            = @{name="Name";Expression={$_.'Collection/Rule Name' + ' - Install' }}
+    $RuleName           = @{name="RuleName";Expression={''}}
+    $UpdatedCollections += $CollectionsToCreate | Select-Object -Property $Colname, $RuleName 
+
+    $Colname            = @{name="Name";Expression={$_.'Collection/Rule Name' + ' - UnInstall' }}
+    $RuleName           = @{name="RuleName";Expression={''}}
+    $UpdatedCollections += $CollectionsToCreate | Select-Object -Property $Colname, $RuleName 
+
+
+    foreach ($ColCheck in $UpdatedCollections) {
+        if ($ColCheck.Name.length -gt 127 ) {
+        
+        
+            Write-Detail "This name is too long.. `"$($ColCheck.Name)`""
+
+
+
+        
+        }
+    }
+
+    $UpdatedCollections = $UpdatedCollections | Sort-Object Name | Out-GridView  -Title "Select only the collections you wish to create" -PassThru 
+
+
+
+
+
+# Get SCCM object from server..
+$myServer = Connect-SCCMServer -HostName $gCMSServ -siteCode $gCMSourceSite -credential $myCred
+
+
+Write-Detail "SCCM Server    `t$($myServer.Machine)"
+Write-Detail "SCCM Namespace `t$($myServer.Namespace)"
+Write-Detail "SCCM SccmProvider`t$($myServer.SccmProvider)"
+
+# Process the Collections
+
+foreach ($bndCol in $UpdatedCollections) {
+    # Collection
+    $AddQueryToCollection = $true;
+    $ColName = $bndcol.Name
+    $colRuleName = $bndCol.RuleName
+    $colRuleQry  = $bndCol.RuleQry
+
+
+    $filter = "Name = '$ColName'"
+    $CollectionsToUpdate = Get-SCCMObject -sccmServer $myServer -class SMS_Collection -Filter $Filter
+
+    if ($CollectionsToUpdate.Name -like $ColName) {
+
+            Write-Detail "Collection exists"
+             
+            Foreach ($TmoCollection in $CollectionsToUpdate) {
+                
+                $ColID = $TmoCollection.CollectionID.ToString();
+                $TmoCollection.psBase.Get()
+                Write-Detail "Rule count = $($TmoCollection.CollectionRules.Count)"
+                if (   $TmoCollection.CollectionRules.Count -gt 0) {
+                    # Already has rules
+                    # $TmoCollection.CollectionRules.__CLASS
+                    foreach ($tmpRule in $TmoCollection.CollectionRules) {
+
+                                        # Continue if the rule is a query based rule
+                    if ($tmpRule.__CLASS -eq "SMS_CollectionRuleQuery") {
+
+                        # Get the query
+                        $query = $tmpRule.queryExpression
+                        Write-Detail "Found query rule called `"$($tmpRule.RuleName)`""
+                        Write-Detail "Query `"$query`""
+
+                        # Have existing query ?
+                        $AddQueryToCollection = $false;
+
+                    }
+                        
+
+
+
+<#
+    ExcludeCollectionID Property      string ExcludeCollectionID {get;set;}
+    RuleName            Property      string RuleName {get;set;}
+    
+    
+    QueryExpression  Property      string QueryExpression {get;set;}
+    QueryID          Property      uint32 QueryID {get;set;}        
+    RuleName         Property      string RuleName {get;set;}       
+    
+           
+#>
+                    }  # Collection Rules
+
+
+                } else {
+
+                    Write-Detail "No Rules exist for for `"$($TmoCollection.Name)`" [$ColID] - `"$colRuleName`""
+                    
+                    if ([string]::IsNullOrEmpty($colRuleQry)  -eq $True) {
+                        Write-Detail "No Rule for collection."
+
+                    } else {
+                        write-Detail "Creating rule for `"$($TmoCollection.Name)`" [$ColID] - `"$colRuleName`""
+                        Add-SCCMCollectionRule -Server $myServer -collectionID $ColID -queryExpression $colRuleQry -queryRuleName $colRuleName -Verbose
+                        write-Detail "Added rule to `"$($TmoCollection.Name)`" - $dateVal"
+                        $numADDRule++
+                    }
+                    # Created New collection Rule
+                    $AddQueryToCollection = $false;
+
+                }
+
+
+                if( $AddQueryToCollection -and  ($ColID -like  "$($gCMSourceSite)?????") ) {
+                    
+                    # Add-SCCMCollectionRule -Server $myServer -collectionID $ColID -queryExpression "select SMS_R_SYSTEM.ResourceID from SMS_R_System where SMS_R_System.SecurityGroupName like `"FHNZ\\EPT_EOL_$dateVal`"" -queryRuleName "Members of ad Group FHNZ\\EPT_EOL_$dateVal" -Verbose
+                    
+                    if ([string]::IsNullOrEmpty($colRuleQry)  -eq $True) {
+                        Write-Detail "No Rule for collection."
+
+                    } else {
+                        write-Detail "Creating rule for `"$($TmoCollection.Name)`" [$ColID] - `"$colRuleName`""
+                        Add-SCCMCollectionRule -Server $myServer -collectionID $ColID -queryExpression $colRuleQry -queryRuleName $colRuleName -Verbose
+                        $numADDRule++
+                    }
+
+                    write-Detail "Added rule to `"$($TmoCollection.Name)`" - $dateVal"
+                }
+
+
+            }
+
+
+
+        } else {
+
+            Write-Detail "Creating the collection `"$ColName`""
+             
+            $newCollection = New-SCCMCollection -SccmServer $myServer -name $ColName -parentCollectionID 'SMS00001' -refreshDays 7 -Verbose
+             if ($newCollection.Count -gt 1) {
+                    $newCollection = $newCollection[1]
+                    $numNew++
+                
+             }
+
+            [VOID]$newCollection.psBase.Get();
+            $ColID = $newCollection.CollectionID.ToString();
+
+            if ( $ColID -like "$($gCMSourceSite)?????"  ) {
+                
+                    if ([string]::IsNullOrEmpty($colRuleQry)  -eq $True) {
+                        Write-Detail "No Rule for collection."
+
+                    } else {
+                        write-Detail "Creating rule for `"$($newCollection.Name)`" [$ColID] - `"$colRuleName`""
+                        Add-SCCMCollectionRule -Server $myServer -collectionID $ColID -queryExpression $colRuleQry -queryRuleName $colRuleName -Verbose
+                    }
+                write-Detail "    > Added rule to `"$($newCollection.Name)`" - `"$colRuleName`""
+            }
+            
+
+        }
+
+
+
+}
+
+
+
+Write-Detail "Logs : `"$logFile`""
+
+Stop-Transcript
+
+
