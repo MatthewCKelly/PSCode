@@ -196,7 +196,7 @@ Write-Host ""
 switch ($OutputFormat) {
     'Table' {
         # Display as formatted table
-        $AllSettings | Format-Table -Property File, Version, ProxyEnabled, ProxyServer, AutoConfigEnabled, AutoDetectEnabled -AutoSize
+        $AllSettings | Format-Table -Property File, Version, ProxyEnabled, ProxyServer, ProxyBypass, AutoConfigEnabled, AutoDetectEnabled -AutoSize
 
         Write-Host ""
         Write-Detail "DETAILED SETTINGS:" -Level Info
@@ -208,21 +208,10 @@ switch ($OutputFormat) {
             Write-Host "  Flags           : $($Setting.Flags)" -ForegroundColor White
             Write-Host "  Direct Connect  : $($Setting.DirectConnection)" -ForegroundColor $(if ($Setting.DirectConnection) {'Green'} else {'Gray'})
             Write-Host "  Proxy Enabled   : $($Setting.ProxyEnabled)" -ForegroundColor $(if ($Setting.ProxyEnabled) {'Green'} else {'Gray'})
-
-            if ($Setting.ProxyServer -ne "(none)") {
-                Write-Host "  Proxy Server    : $($Setting.ProxyServer)" -ForegroundColor Yellow
-            }
-
-            if ($Setting.ProxyBypass -ne "(none)") {
-                Write-Host "  Proxy Bypass    : $($Setting.ProxyBypass)" -ForegroundColor Yellow
-            }
-
+            Write-Host "  Proxy Server    : $($Setting.ProxyServer)" -ForegroundColor $(if ($Setting.ProxyServer -ne "(none)") {'Yellow'} else {'Gray'})
+            Write-Host "  Proxy Bypass    : $($Setting.ProxyBypass)" -ForegroundColor $(if ($Setting.ProxyBypass -ne "(none)") {'Yellow'} else {'Gray'})
             Write-Host "  Auto Config     : $($Setting.AutoConfigEnabled)" -ForegroundColor $(if ($Setting.AutoConfigEnabled) {'Green'} else {'Gray'})
-
-            if ($Setting.AutoConfigURL -ne "(none)") {
-                Write-Host "  Config URL      : $($Setting.AutoConfigURL)" -ForegroundColor Yellow
-            }
-
+            Write-Host "  Config URL      : $($Setting.AutoConfigURL)" -ForegroundColor $(if ($Setting.AutoConfigURL -ne "(none)") {'Yellow'} else {'Gray'})
             Write-Host "  Auto Detect     : $($Setting.AutoDetectEnabled)" -ForegroundColor $(if ($Setting.AutoDetectEnabled) {'Green'} else {'Gray'})
             Write-Host "  Binary Size     : $($Setting.ByteSize) bytes" -ForegroundColor Gray
         }
