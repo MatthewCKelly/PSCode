@@ -150,6 +150,12 @@ reg export "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Con
 
 ## Version History
 
+- **1.1** (2025-11-20) - Critical decoder fix
+  - Fixed binary structure parsing - corrected offsets (proxy length at offset 12, not 8)
+  - Added Success level support to Write-Detail function
+  - Fixed Write-Detail usage patterns (no empty strings, use parentheses for expressions)
+  - All 12 sample registry files now parse correctly
+
 - **1.0** (2025-11-20) - Initial release
   - Multi-format output support
   - Color-coded display
