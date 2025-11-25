@@ -36,16 +36,21 @@ The **Dev** directory contains development and testing scripts for advanced Wind
 Dev/
 ├── defaultproxysettings.ps1         # Proxy settings decoder/encoder (580 lines)
 ├── Read-DefaultProxySettings.ps1    # Read-only proxy decoder (407 lines)
+├── Set-ProxySettings.ps1            # Parameter-based proxy updater (437 lines)
+├── Read-ProxyRegistryFiles.ps1      # Batch registry file reader (248 lines)
 ├── Test-ProxySettingsDecoder.ps1    # Test harness for decoder (290 lines)
 ├── ProxySettingsKeys/               # Test files directory
 │   ├── README.md                    # Test file documentation
-│   └── *.reg                        # Registry export test files
+│   └── *.reg                        # Registry export test files (12 samples)
+├── PROXY-REGISTRY-READER.md         # Documentation for batch reader
 └── CLAUDE.md                        # This documentation file
 ```
 
 ### Script Statistics
 - **defaultproxysettings.ps1:** 580 lines (full read/write version)
 - **Read-DefaultProxySettings.ps1:** 407 lines (read-only version)
+- **Set-ProxySettings.ps1:** 437 lines (parameter-based updater)
+- **Read-ProxyRegistryFiles.ps1:** 248 lines (batch file reader)
 - **Test-ProxySettingsDecoder.ps1:** 290 lines (test harness)
 - **Functions:** 5 custom functions (shared across scripts)
 - **Registry Path:** `HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections`
@@ -182,6 +187,113 @@ reg export "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Con
 **Exit Codes:**
 - `0` - All tests passed
 - `1` - One or more tests failed
+
+### Set-ProxySettings.ps1 (437 lines)
+
+**Purpose:** Parameter-based script to update Windows proxy settings with automatic validation
+
+**Key Features:**
+- Command-line parameter support for all proxy flags
+- Automatic validation rules enforce consistency
+- Creates backup before making changes
+- Increments version counter automatically
+- Shows before/after/verified settings
+- Supports `-WhatIf` for dry-run testing
+- Preserves current values when parameters not specified
+
+**Parameters:**
+- `-DirectConnection` - Enable direct connection (no proxy)
+- `-ProxyEnabled` - Enable manual proxy server
+- `-ProxyServer` - Proxy server address and port (e.g., "proxy.example.com:8080")
+- `-ProxyBypass` - Semicolon-separated bypass list (e.g., "localhost;*.local")
+- `-AutoConfigEnabled` - Enable automatic configuration script (PAC file)
+- `-AutoConfigURL` - URL to PAC file (e.g., "http://proxy.com/proxy.pac")
+- `-AutoDetectEnabled` - Enable automatic proxy detection (WPAD)
+- `-WhatIf` - Show what would be changed without making changes
+
+**Automatic Validation Rules:**
+1. **When ProxyEnabled = False** → Automatically clears ProxyServer and ProxyBypass
+2. **When AutoConfigEnabled = False** → Automatically clears AutoConfigURL
+3. **When flag enabled but value not specified** → Preserves current value
+
+**Usage:**
+```powershell
+# Enable proxy with bypass list
+.\Set-ProxySettings.ps1 -ProxyEnabled -ProxyServer "proxy.corp.com:8080" -ProxyBypass "localhost;*.corp.com"
+
+# Enable auto-config with PAC file
+.\Set-ProxySettings.ps1 -AutoConfigEnabled -AutoConfigURL "http://proxy.corp.com/proxy.pac"
+
+# Disable all proxies (direct connection only)
+.\Set-ProxySettings.ps1 -DirectConnection
+
+# Enable multiple options
+.\Set-ProxySettings.ps1 -ProxyEnabled -ProxyServer "proxy:8080" -AutoDetectEnabled
+
+# Test without making changes
+.\Set-ProxySettings.ps1 -ProxyEnabled -ProxyServer "test:8080" -WhatIf
+```
+
+**Execution Requirements:**
+- Administrative privileges for registry write operations
+- PowerShell 5.x or higher
+- Windows operating system with registry access
+
+**Exit Codes:**
+- `0` - Success (settings updated or -WhatIf completed)
+- `1` - Error (read failure, write failure, encoding error)
+
+### Read-ProxyRegistryFiles.ps1 (248 lines)
+
+**Purpose:** Batch reader to decode and compare proxy settings from multiple `.reg` files
+
+**Key Features:**
+- Reads all `.reg` files from ProxySettingsKeys folder
+- Decodes binary DefaultConnectionSettings data
+- Multiple output formats: Table, List, Grid
+- Color-coded display for enabled/disabled features
+- Shows all fields including Proxy Bypass in summary
+- Comprehensive error handling
+
+**Parameters:**
+- `-FolderPath` - Path to folder containing .reg files (default: ./ProxySettingsKeys)
+- `-OutputFormat` - Output format: Table (default), List, or Grid
+
+**Usage:**
+```powershell
+# Read all registry files (table format)
+.\Read-ProxyRegistryFiles.ps1
+
+# List format with all properties
+.\Read-ProxyRegistryFiles.ps1 -OutputFormat List
+
+# Interactive grid view
+.\Read-ProxyRegistryFiles.ps1 -OutputFormat Grid
+
+# Custom folder path
+.\Read-ProxyRegistryFiles.ps1 -FolderPath "C:\CustomPath\RegFiles"
+```
+
+**Output Fields:**
+- File name
+- Version/Counter
+- Connection flags (hex)
+- Direct Connection status
+- Proxy Enabled status
+- Proxy Server (always shown, even if "(none)")
+- Proxy Bypass (always shown, even if "(none)")
+- Auto Config Enabled status
+- Auto Config URL (always shown, even if "(none)")
+- Auto Detect Enabled status
+- Binary size in bytes
+
+**Dependencies:**
+- Requires `Read-DefaultProxySettings.ps1` in the same directory
+- Registry export files from: `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections`
+
+**Exit Codes:**
+- `0` - Success (all files processed)
+- `1` - Error (folder not found, decoder script missing)
 
 ---
 
@@ -1029,7 +1141,20 @@ $Data.DefaultConnectionSettings | Format-Hex
 
 ## Changelog
 
-### 2025-11-20 - Critical Binary Structure Fix
+### 2025-11-20 - New Scripts and Critical Fixes
+- **NEW SCRIPT:** Set-ProxySettings.ps1 (437 lines)
+  - Parameter-based proxy configuration updater
+  - Automatic validation rules (clears related fields when flags disabled)
+  - Supports all proxy flags with individual parameters
+  - Creates automatic backup before changes
+  - Increments version counter automatically
+  - Shows before/after/verified settings
+  - Supports -WhatIf for dry-run testing
+- **NEW SCRIPT:** Read-ProxyRegistryFiles.ps1 (248 lines)
+  - Batch reader for multiple .reg files
+  - Multiple output formats (Table, List, Grid)
+  - Color-coded display
+  - Always shows all fields including Proxy Bypass
 - **CRITICAL FIX:** Corrected binary structure documentation
   - Unknown field is at offset 0x08 (not proxy length)
   - Proxy server length is at offset 0x0C (was incorrectly documented at 0x08)

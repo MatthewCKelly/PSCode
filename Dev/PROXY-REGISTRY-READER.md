@@ -122,6 +122,7 @@ This script requires:
 ## Related Scripts
 
 - **Read-DefaultProxySettings.ps1** - Reads current proxy settings from the live registry
+- **Set-ProxySettings.ps1** - Parameter-based script to update proxy settings with automatic validation
 - **Test-ProxySettingsDecoder.ps1** - Comprehensive test harness with validation
 - **defaultproxysettings.ps1** - Original proxy settings tool
 
