@@ -6,7 +6,7 @@
 <xsl:template match="/">
   <html>
     <head>
-      <title>GPU & ANGLE Configuration Reference</title>
+      <title>GPU &amp; ANGLE Configuration Reference</title>
       <style>
         :root { color-scheme: dark; }
         body {
