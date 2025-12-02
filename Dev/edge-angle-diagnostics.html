@@ -116,6 +116,18 @@
     </div>
     <p>Edge GPU page: <span class="mono">edge://gpu</span> &nbsp; | &nbsp; Chrome GPU page: <span class="mono">chrome://gpu</span></p>
 
+    <h2>GPU Detection</h2>
+    <p style="font-size:0.9em;">Detected GPU: <strong id="gpuType" class="mono">Detecting...</strong></p>
+    <div id="arcNotes" style="display:none;background:#1f2937;border-left:3px solid #3b82f6;padding:12px;margin:12px 0;border-radius:4px;">
+      <p style="font-size:0.85em;margin:0 0 8px;color:#93c5fd;"><strong>Intel Arc GPU Detected</strong></p>
+      <ul style="font-size:0.85em;line-height:1.5;margin:0;padding-left:20px;">
+        <li>Intel Arc GPUs work best with latest drivers from <a href="https://www.intel.com/content/www/us/en/download/785597/intel-arc-iris-xe-graphics-windows.html" target="_blank" style="color:#60a5fa;">Intel Download Center</a></li>
+        <li>For WebGL/ANGLE: D3D11 backend recommended for Arc GPUs</li>
+        <li>If experiencing line rendering issues, try D3D11 WARP or update drivers</li>
+        <li>Check <span class="mono">edge://gpu</span> for driver version and feature status</li>
+      </ul>
+    </div>
+
     <h2>ANGLE Backend Testing</h2>
     <p style="font-size:0.9em;">Current backend: <strong id="angleBackend" class="mono">Detecting...</strong></p>
     <p style="font-size:0.9em;margin-top:4px;">Chrome supports 4 ANGLE backends (chrome://flags/#use-angle):</p>
@@ -324,6 +336,70 @@ if (ri) {
     angleBackendEl.textContent = backend;
     angleBackendEl.style.color = backend.includes('WARP') ? '#f59e0b' : '#22c55e';
     console.log('ANGLE backend detected:', backend, '| Full renderer:', ri.renderer);
+  }
+
+  // Detect Intel Arc GPU
+  const gpuTypeEl = document.getElementById('gpuType');
+  if (gpuTypeEl) {
+    const renderer = ri.renderer;
+    const rendererLower = renderer.toLowerCase();
+    const vendor = ri.vendor.toLowerCase();
+
+    let gpuInfo = 'Unknown GPU';
+    let gpuClass = 'ok';
+    let isIntelArc = false;
+
+    // Intel Arc detection
+    if (rendererLower.includes('arc') && (vendor.includes('intel') || rendererLower.includes('intel'))) {
+      isIntelArc = true;
+      // Extract Arc model (A770, A750, A380, etc.)
+      const arcMatch = renderer.match(/Arc.*?(A\d{3})/i);
+      const model = arcMatch ? arcMatch[1] : 'Arc';
+      gpuInfo = `Intel Arc ${model} (Discrete)`;
+      gpuClass = 'ok';
+      addStatus(`Intel Arc GPU detected: ${model}`, 'ok');
+    }
+    // Intel integrated graphics
+    else if (vendor.includes('intel') || rendererLower.includes('intel')) {
+      if (rendererLower.includes('uhd') || rendererLower.includes('iris')) {
+        const match = renderer.match(/(UHD|Iris).*?(\d{3,4})/i);
+        const model = match ? `${match[1]} ${match[2]}` : 'Integrated';
+        gpuInfo = `Intel ${model} (Integrated)`;
+      } else {
+        gpuInfo = 'Intel GPU (Integrated)';
+      }
+      gpuClass = 'ok';
+    }
+    // NVIDIA
+    else if (vendor.includes('nvidia') || rendererLower.includes('nvidia') || rendererLower.includes('geforce') || rendererLower.includes('rtx') || rendererLower.includes('gtx')) {
+      const match = renderer.match(/(RTX|GTX|GeForce)\s*(\d{3,4})/i);
+      const model = match ? `${match[1]} ${match[2]}` : 'GPU';
+      gpuInfo = `NVIDIA ${model}`;
+      gpuClass = 'ok';
+    }
+    // AMD
+    else if (vendor.includes('amd') || rendererLower.includes('radeon') || rendererLower.includes('amd')) {
+      const match = renderer.match(/Radeon.*?(RX\s*\d{3,4}|Vega|VII)/i);
+      const model = match ? match[1] : 'GPU';
+      gpuInfo = `AMD Radeon ${model}`;
+      gpuClass = 'ok';
+    }
+    // Software renderer
+    else if (rendererLower.includes('swiftshader') || rendererLower.includes('llvmpipe')) {
+      gpuInfo = 'Software Renderer (No GPU)';
+      gpuClass = 'warn';
+    }
+
+    gpuTypeEl.textContent = gpuInfo;
+    gpuTypeEl.style.color = gpuClass === 'warn' ? '#f59e0b' : '#22c55e';
+    gpuTypeEl.style.fontWeight = isIntelArc ? 'bold' : 'normal';
+    console.log('GPU detected:', gpuInfo, '| Vendor:', ri.vendor, '| Full renderer:', ri.renderer);
+
+    // Show Intel Arc specific notes
+    const arcNotesEl = document.getElementById('arcNotes');
+    if (arcNotesEl) {
+      arcNotesEl.style.display = isIntelArc ? 'block' : 'none';
+    }
   }
 }
 
@@ -1545,6 +1621,9 @@ document.getElementById('simulateLossWorker').onclick = ()=>{
 
 /* -------------------- Diagnostics pack (JSON) -------------------- */
 document.getElementById('downloadDiag').onclick = ()=>{
+  const gpuTypeEl = document.getElementById('gpuType');
+  const angleBackendEl = document.getElementById('angleBackend');
+
   const data = {
     when: new Date().toISOString(),
     userAgent: navigator.userAgent,
@@ -1555,6 +1634,11 @@ document.getElementById('downloadDiag').onclick = ()=>{
       usedJSHeapSize: performance.memory.usedJSHeapSize
     } : null,
     renderer: ri,
+    gpu: {
+      detected: gpuTypeEl ? gpuTypeEl.textContent : 'Unknown',
+      angleBackend: angleBackendEl ? angleBackendEl.textContent : 'Unknown',
+      isIntelArc: gpuTypeEl && gpuTypeEl.textContent.includes('Intel Arc')
+    },
     fps: fps.snapshot()
   };
   const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
