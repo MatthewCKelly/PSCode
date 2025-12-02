@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="gpu-angle-config.xsl"?>
+<configuration>
+  <metadata>
+    <version>1.0</version>
+    <lastUpdated>2025-12-02</lastUpdated>
+    <description>GPU and ANGLE configuration recommendations for WebGL rendering</description>
+  </metadata>
+
+  <gpuConfigs>
+    <!-- Intel Arc GPUs -->
+    <gpu vendor="Intel" model="Arc">
+      <recommended>D3D11</recommended>
+      <fallback>D3D11 WARP</fallback>
+      <notes>Intel Arc discrete GPUs work best with D3D11 backend. Ensure you have the latest drivers from Intel Download Center. Arc GPUs benefit from driver updates for optimal WebGL performance.</notes>
+      <driverLink>https://www.intel.com/content/www/us/en/download/785597/intel-arc-iris-xe-graphics-windows.html</driverLink>
+      <issues>
+        <issue severity="medium">
+          <problem>Curved line rendering with D3D11</problem>
+          <solution>Update to latest Intel Arc drivers (version 31.0.101.5333 or newer). If issue persists, use D3D11 WARP backend as temporary workaround.</solution>
+          <affectedVersions>Driver versions before 31.0.101.5333</affectedVersions>
+        </issue>
+        <issue severity="low">
+          <problem>WebGL performance lower than expected</problem>
+          <solution>Ensure GPU is not in power-saving mode. Check Windows Graphics Settings and set browser to "High Performance" mode.</solution>
+          <affectedVersions>All versions</affectedVersions>
+        </issue>
+      </issues>
+      <performance>
+        <backend name="D3D11" rating="excellent" fps="60+">Recommended for production use</backend>
+        <backend name="D3D11on12" rating="good" fps="55+">Experimental, may have compatibility issues</backend>
+        <backend name="D3D11 WARP" rating="acceptable" fps="30-45">Software fallback, fixes line rendering issues</backend>
+      </performance>
+    </gpu>
+
+    <!-- Intel Integrated Graphics (UHD) -->
+    <gpu vendor="Intel" model="UHD">
+      <recommended>D3D11</recommended>
+      <fallback>D3D11 WARP</fallback>
+      <notes>Intel UHD integrated graphics perform well with D3D11 backend. For better performance, ensure laptop is plugged in and not in battery-saving mode.</notes>
+      <issues>
+        <issue severity="low">
+          <problem>Reduced performance on battery power</problem>
+          <solution>Connect to AC power or adjust Windows power plan to "High Performance"</solution>
+          <affectedVersions>All versions</affectedVersions>
+        </issue>
+      </issues>
+      <performance>
+        <backend name="D3D11" rating="good" fps="45+">Recommended</backend>
+        <backend name="D3D11 WARP" rating="acceptable" fps="25-35">Software fallback</backend>
+      </performance>
+    </gpu>
+
+    <!-- Intel Iris Xe Graphics -->
+    <gpu vendor="Intel" model="Iris">
+      <recommended>D3D11</recommended>
+      <fallback>D3D11 WARP</fallback>
+      <notes>Intel Iris Xe graphics offer excellent integrated GPU performance. D3D11 is optimal for WebGL workloads.</notes>
+      <issues>
+        <issue severity="low">
+          <problem>Occasional texture corruption in complex scenes</problem>
+          <solution>Update to latest Intel graphics drivers. Clear browser cache and restart.</solution>
+          <affectedVersions>Driver versions before 30.0.101.1340</affectedVersions>
+        </issue>
+      </issues>
+      <performance>
+        <backend name="D3D11" rating="excellent" fps="50+">Recommended</backend>
+        <backend name="D3D11 WARP" rating="good" fps="30-40">Software fallback</backend>
+      </performance>
+    </gpu>
+
+    <!-- NVIDIA GPUs (RTX) -->
+    <gpu vendor="NVIDIA" model="RTX">
+      <recommended>D3D11</recommended>
+      <fallback>D3D11on12</fallback>
+      <notes>NVIDIA RTX GPUs provide excellent WebGL performance with D3D11 backend. No known issues with line rendering.</notes>
+      <driverLink>https://www.nvidia.com/Download/index.aspx</driverLink>
+      <issues>
+        <issue severity="low">
+          <problem>WebGL shader compilation time</problem>
+          <solution>Enable shader cache in browser settings. First load may be slower, subsequent loads will be faster.</solution>
+          <affectedVersions>All versions</affectedVersions>
+        </issue>
+      </issues>
+      <performance>
+        <backend name="D3D11" rating="excellent" fps="90+">Recommended, best performance</backend>
+        <backend name="D3D11on12" rating="excellent" fps="85+">Alternative, similar performance</backend>
+        <backend name="D3D11 WARP" rating="poor" fps="20-30">Not recommended, GPU not utilized</backend>
+      </performance>
+    </gpu>
+
+    <!-- NVIDIA GPUs (GTX) -->
+    <gpu vendor="NVIDIA" model="GTX">
+      <recommended>D3D11</recommended>
+      <fallback>D3D11on12</fallback>
+      <notes>NVIDIA GTX GPUs work well with D3D11 backend. Ensure drivers are up to date for best performance.</notes>
+      <driverLink>https://www.nvidia.com/Download/index.aspx</driverLink>
+      <issues>
+        <issue severity="low">
+          <problem>Older GTX cards (600/700 series) may have reduced WebGL2 performance</problem>
+          <solution>Use WebGL 1.0 contexts where possible. Update to latest Game Ready drivers.</solution>
+          <affectedVersions>GTX 600-700 series</affectedVersions>
+        </issue>
+      </issues>
+      <performance>
+        <backend name="D3D11" rating="excellent" fps="60+">Recommended</backend>
+        <backend name="D3D11on12" rating="good" fps="55+">Alternative</backend>
+      </performance>
+    </gpu>
+
+    <!-- AMD Radeon GPUs -->
+    <gpu vendor="AMD" model="Radeon">
+      <recommended>D3D11</recommended>
+      <fallback>D3D11on12</fallback>
+      <notes>AMD Radeon GPUs perform well with D3D11 backend. Ensure Adrenalin drivers are up to date.</notes>
+      <driverLink>https://www.amd.com/en/support</driverLink>
+      <issues>
+        <issue severity="medium">
+          <problem>Some Radeon RX 5000 series cards experience texture flickering</problem>
+          <solution>Update to AMD Adrenalin 23.11.1 or newer. Disable Enhanced Sync in Radeon Settings.</solution>
+          <affectedVersions>RX 5500-5700 XT with drivers before 23.11.1</affectedVersions>
+        </issue>
+        <issue severity="low">
+          <problem>WebGL performance may vary with power profile</problem>
+          <solution>Set "Graphics Profile" to "High" in AMD Radeon Settings for browser executable</solution>
+          <affectedVersions>All versions</affectedVersions>
+        </issue>
+      </issues>
+      <performance>
+        <backend name="D3D11" rating="excellent" fps="60+">Recommended</backend>
+        <backend name="D3D11on12" rating="good" fps="55+">Alternative for newer cards</backend>
+      </performance>
+    </gpu>
+
+    <!-- Default/Fallback Configuration -->
+    <gpu vendor="default" model="*">
+      <recommended>D3D11</recommended>
+      <fallback>D3D11 WARP</fallback>
+      <notes>Generic GPU detected. D3D11 is the recommended backend for most hardware. If experiencing issues, try D3D11 WARP software renderer.</notes>
+      <issues>
+        <issue severity="medium">
+          <problem>GPU not recognized or masked by browser policy</problem>
+          <solution>Check browser security policies. Enterprise environments may restrict GPU information access.</solution>
+          <affectedVersions>All versions</affectedVersions>
+        </issue>
+      </issues>
+      <performance>
+        <backend name="D3D11" rating="good" fps="varies">Default recommendation</backend>
+        <backend name="D3D11 WARP" rating="acceptable" fps="20-40">Software fallback</backend>
+      </performance>
+    </gpu>
+  </gpuConfigs>
+
+  <browsers>
+    <browser name="Chrome">
+      <flagsUrl>chrome://flags/#use-angle</flagsUrl>
+      <gpuUrl>chrome://gpu</gpuUrl>
+      <notes>Chrome uses ANGLE on Windows for WebGL rendering. Backend can be changed via chrome://flags</notes>
+    </browser>
+    <browser name="Edge">
+      <flagsUrl>edge://flags/#use-angle</flagsUrl>
+      <gpuUrl>edge://gpu</gpuUrl>
+      <notes>Edge (Chromium) uses ANGLE on Windows for WebGL rendering. Backend can be changed via edge://flags</notes>
+    </browser>
+    <browser name="Firefox">
+      <flagsUrl>about:config</flagsUrl>
+      <gpuUrl>about:support</gpuUrl>
+      <notes>Firefox uses ANGLE on Windows but with limited configuration options. See about:config for webgl.angle settings</notes>
+    </browser>
+  </browsers>
+
+  <angleBackends>
+    <backend name="D3D11">
+      <description>Direct3D 11 - Default hardware rendering backend</description>
+      <pros>Best performance, wide hardware support, production-ready</pros>
+      <cons>May have line rendering artifacts on some GPUs (notably Intel Arc with older drivers)</cons>
+      <recommendedFor>Most modern GPUs (2012 and newer)</recommendedFor>
+    </backend>
+    <backend name="D3D11on12">
+      <description>Direct3D 11 via Direct3D 12 translation layer</description>
+      <pros>Leverages D3D12 optimizations, good performance on newer hardware</pros>
+      <cons>Experimental, may have compatibility issues, requires Windows 10 1809+</cons>
+      <recommendedFor>Latest generation GPUs (2020 and newer), testing environments</recommendedFor>
+    </backend>
+    <backend name="D3D9">
+      <description>Direct3D 9 - Legacy rendering backend</description>
+      <pros>Maximum compatibility, works on older hardware</pros>
+      <cons>Reduced performance, limited features, deprecated</cons>
+      <recommendedFor>Legacy hardware (pre-2012 GPUs), compatibility testing</recommendedFor>
+    </backend>
+    <backend name="D3D11 WARP">
+      <description>Windows Advanced Rasterization Platform - Software renderer</description>
+      <pros>Fixes line rendering issues, no GPU required, consistent behavior</pros>
+      <cons>Significantly reduced performance (CPU-based), not suitable for complex scenes</cons>
+      <recommendedFor>Troubleshooting rendering issues, systems without compatible GPU</recommendedFor>
+    </backend>
+  </angleBackends>
+</configuration>
