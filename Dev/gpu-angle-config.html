@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GPU & ANGLE Configuration Guide</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  html,body { height:100%; margin:0; background:#0f172a; color:#e2e8f0;
+    font-family: system-ui, Segoe UI, Arial, sans-serif; }
+  .container { max-width: 1000px; margin: 0 auto; padding: 24px; }
+
+  .header { text-align: center; margin-bottom: 32px; border-bottom: 2px solid #334155; padding-bottom: 16px; }
+  .header h1 { margin: 0 0 8px; color: #93c5fd; }
+  .header p { margin: 0; color: #94a3b8; font-size: 0.95em; }
+
+  .detection-card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+
+  .detection-card h2 {
+    margin: 0 0 16px;
+    color: #93c5fd;
+    font-size: 1.3em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .status-grid {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 12px 20px;
+    font-size: 0.95em;
+  }
+
+  .status-label {
+    color: #94a3b8;
+    font-weight: 500;
+  }
+
+  .status-value {
+    color: #e2e8f0;
+    font-family: ui-monospace, monospace;
+    font-weight: 600;
+  }
+
+  .status-icon {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+  }
+  .status-icon.green { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+  .status-icon.yellow { background: #f59e0b; box-shadow: 0 0 8px #f59e0b; }
+  .status-icon.red { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
+  .status-icon.blue { background: #3b82f6; box-shadow: 0 0 8px #3b82f6; }
+
+  .recommendation {
+    background: #1f2937;
+    border-left: 4px solid #3b82f6;
+    padding: 16px;
+    margin: 16px 0;
+    border-radius: 4px;
+  }
+
+  .recommendation h3 {
+    margin: 0 0 12px;
+    color: #60a5fa;
+    font-size: 1.1em;
+  }
+
+  .recommendation.warning { border-left-color: #f59e0b; }
+  .recommendation.error { border-left-color: #ef4444; }
+  .recommendation.success { border-left-color: #22c55e; }
+
+  .instructions {
+    background: #0f172a;
+    border: 1px solid #334155;
+    padding: 16px;
+    margin: 12px 0;
+    border-radius: 6px;
+  }
+
+  .instructions h4 {
+    margin: 0 0 12px;
+    color: #93c5fd;
+    font-size: 1em;
+  }
+
+  .instructions ol {
+    margin: 8px 0;
+    padding-left: 24px;
+    line-height: 1.6;
+  }
+
+  .instructions li { margin-bottom: 8px; }
+
+  .code {
+    background: #1e293b;
+    border: 1px solid #334155;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: ui-monospace, monospace;
+    font-size: 0.9em;
+    color: #93c5fd;
+  }
+
+  .link-button {
+    display: inline-block;
+    background: #3b82f6;
+    color: white;
+    padding: 10px 16px;
+    text-decoration: none;
+    border-radius: 6px;
+    font-weight: 500;
+    margin: 8px 8px 8px 0;
+    transition: background 0.2s;
+  }
+
+  .link-button:hover { background: #2563eb; }
+  .link-button.secondary { background: #64748b; }
+  .link-button.secondary:hover { background: #475569; }
+
+  #xmlConfig {
+    display: none;
+  }
+
+  .loading {
+    text-align: center;
+    padding: 40px;
+    color: #94a3b8;
+  }
+
+  .spinner {
+    border: 3px solid #334155;
+    border-top: 3px solid #3b82f6;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 16px;
+  }
+
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  .hidden { display: none; }
+
+  .browser-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    border-bottom: 2px solid #334155;
+  }
+
+  .browser-tab {
+    padding: 10px 20px;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    cursor: pointer;
+    color: #94a3b8;
+    transition: all 0.2s;
+  }
+
+  .browser-tab:hover {
+    background: #334155;
+  }
+
+  .browser-tab.active {
+    background: #3b82f6;
+    color: white;
+    border-color: #3b82f6;
+  }
+
+  .browser-content {
+    display: none;
+  }
+
+  .browser-content.active {
+    display: block;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1>🎮 GPU & ANGLE Configuration Guide</h1>
+    <p>Automatic detection and configuration recommendations for WebGL/ANGLE rendering</p>
+  </div>
+
+  <!-- Detection Results -->
+  <div class="detection-card">
+    <h2>
+      <span id="detectionIcon" class="status-icon blue"></span>
+      System Detection
+    </h2>
+    <div class="status-grid">
+      <div class="status-label">Browser:</div>
+      <div class="status-value" id="browserName">Detecting...</div>
+
+      <div class="status-label">GPU Vendor:</div>
+      <div class="status-value" id="gpuVendor">Detecting...</div>
+
+      <div class="status-label">GPU Model:</div>
+      <div class="status-value" id="gpuModel">Detecting...</div>
+
+      <div class="status-label">ANGLE Backend:</div>
+      <div class="status-value" id="angleBackend">Detecting...</div>
+
+      <div class="status-label">WebGL Version:</div>
+      <div class="status-value" id="webglVersion">Detecting...</div>
+
+      <div class="status-label">Status:</div>
+      <div class="status-value" id="configStatus">Analyzing...</div>
+    </div>
+  </div>
+
+  <!-- Recommendations -->
+  <div id="recommendations" class="hidden">
+    <div class="detection-card">
+      <h2>📋 Configuration Recommendations</h2>
+      <div id="recommendationContent"></div>
+    </div>
+  </div>
+
+  <!-- Browser Instructions -->
+  <div id="instructions" class="hidden">
+    <div class="detection-card">
+      <h2>⚙️ How to Change ANGLE Backend</h2>
+
+      <div class="browser-tabs">
+        <div class="browser-tab active" data-browser="chrome">Chrome</div>
+        <div class="browser-tab" data-browser="edge">Edge</div>
+        <div class="browser-tab" data-browser="firefox">Firefox</div>
+      </div>
+
+      <!-- Chrome Instructions -->
+      <div class="browser-content active" data-browser="chrome">
+        <div class="instructions">
+          <h4>Chrome - Change ANGLE Backend</h4>
+          <ol>
+            <li>Open Chrome and navigate to <span class="code">chrome://flags</span></li>
+            <li>Search for <strong>"Choose ANGLE graphics backend"</strong></li>
+            <li>Change the setting to your recommended backend: <strong id="recommendedBackendChrome" style="color:#22c55e;">D3D11</strong></li>
+            <li>Click <strong>"Relaunch"</strong> to apply changes</li>
+            <li>Verify the change by visiting <span class="code">chrome://gpu</span></li>
+          </ol>
+          <a href="chrome://flags/#use-angle" class="link-button">Open Chrome Flags</a>
+          <a href="chrome://gpu" class="link-button secondary">View GPU Info</a>
+        </div>
+      </div>
+
+      <!-- Edge Instructions -->
+      <div class="browser-content" data-browser="edge">
+        <div class="instructions">
+          <h4>Microsoft Edge - Change ANGLE Backend</h4>
+          <ol>
+            <li>Open Edge and navigate to <span class="code">edge://flags</span></li>
+            <li>Search for <strong>"Choose ANGLE graphics backend"</strong></li>
+            <li>Change the setting to your recommended backend: <strong id="recommendedBackendEdge" style="color:#22c55e;">D3D11</strong></li>
+            <li>Click <strong>"Restart"</strong> to apply changes</li>
+            <li>Verify the change by visiting <span class="code">edge://gpu</span></li>
+          </ol>
+          <a href="edge://flags/#use-angle" class="link-button">Open Edge Flags</a>
+          <a href="edge://gpu" class="link-button secondary">View GPU Info</a>
+        </div>
+      </div>
+
+      <!-- Firefox Instructions -->
+      <div class="browser-content" data-browser="firefox">
+        <div class="instructions">
+          <h4>Firefox - WebGL Settings</h4>
+          <ol>
+            <li>Open Firefox and navigate to <span class="code">about:config</span></li>
+            <li>Accept the warning if prompted</li>
+            <li>Search for <strong>"webgl.angle.force-d3d11"</strong></li>
+            <li>Set to <strong>true</strong> to force D3D11 backend</li>
+            <li>Restart Firefox to apply changes</li>
+            <li>Verify by visiting <span class="code">about:support</span> and checking Graphics section</li>
+          </ol>
+          <p style="margin-top:12px;color:#94a3b8;font-size:0.9em;">
+            <strong>Note:</strong> Firefox uses ANGLE on Windows but with more limited configuration options.
+          </p>
+          <a href="about:config" class="link-button">Open about:config</a>
+          <a href="about:support" class="link-button secondary">View Support Info</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading Indicator -->
+  <div id="loading" class="loading">
+    <div class="spinner"></div>
+    <p>Detecting system configuration...</p>
+  </div>
+</div>
+
+<!-- Hidden canvas for WebGL context -->
+<canvas id="glCanvas" width="1" height="1" style="display:none;"></canvas>
+
+<!-- Configuration Data -->
+<div id="xmlConfig"></div>
+
+<script>
+// Browser tab switching
+document.querySelectorAll('.browser-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const browser = tab.dataset.browser;
+
+    // Update tabs
+    document.querySelectorAll('.browser-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+
+    // Update content
+    document.querySelectorAll('.browser-content').forEach(c => c.classList.remove('active'));
+    document.querySelector(`.browser-content[data-browser="${browser}"]`).classList.add('active');
+  });
+});
+
+// Detection results storage
+const detection = {
+  browser: '',
+  gpuVendor: '',
+  gpuModel: '',
+  angleBackend: '',
+  webglVersion: '',
+  rendererString: '',
+  isIntelArc: false,
+  recommended: null
+};
+
+// Detect browser
+function detectBrowser() {
+  const ua = navigator.userAgent;
+  if (ua.includes('Edg/')) return 'Edge';
+  if (ua.includes('Chrome/')) return 'Chrome';
+  if (ua.includes('Firefox/')) return 'Firefox';
+  if (ua.includes('Safari/') && !ua.includes('Chrome')) return 'Safari';
+  return 'Unknown';
+}
+
+// Create WebGL context and detect GPU
+function detectGPU() {
+  const canvas = document.getElementById('glCanvas');
+  const gl = canvas.getContext('webgl2') || canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+
+  if (!gl) {
+    console.error('WebGL not available');
+    return null;
+  }
+
+  detection.webglVersion = gl.constructor.name === 'WebGL2RenderingContext' ? 'WebGL 2.0' : 'WebGL 1.0';
+
+  // Get renderer info
+  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  if (dbg) {
+    const vendor = gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL);
+    const renderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);
+
+    detection.gpuVendor = vendor;
+    detection.rendererString = renderer;
+
+    // Parse GPU model
+    const rendererLower = renderer.toLowerCase();
+
+    // Intel Arc detection
+    if (rendererLower.includes('arc') && (vendor.toLowerCase().includes('intel') || rendererLower.includes('intel'))) {
+      detection.isIntelArc = true;
+      const arcMatch = renderer.match(/Arc.*?(A\d{3})/i);
+      detection.gpuModel = arcMatch ? `Intel Arc ${arcMatch[1]}` : 'Intel Arc';
+    }
+    // Intel integrated
+    else if (vendor.toLowerCase().includes('intel') || rendererLower.includes('intel')) {
+      if (rendererLower.includes('uhd') || rendererLower.includes('iris')) {
+        const match = renderer.match(/(UHD|Iris).*?(\d{3,4})/i);
+        detection.gpuModel = match ? `Intel ${match[1]} ${match[2]}` : 'Intel Integrated';
+      } else {
+        detection.gpuModel = 'Intel Integrated';
+      }
+    }
+    // NVIDIA
+    else if (rendererLower.includes('nvidia') || rendererLower.includes('geforce') || rendererLower.includes('rtx') || rendererLower.includes('gtx')) {
+      const match = renderer.match(/(RTX|GTX|GeForce)\s*(\d{3,4})/i);
+      detection.gpuModel = match ? `NVIDIA ${match[1]} ${match[2]}` : 'NVIDIA GPU';
+    }
+    // AMD
+    else if (rendererLower.includes('amd') || rendererLower.includes('radeon')) {
+      const match = renderer.match(/Radeon.*?(RX\s*\d{3,4}|Vega|VII)/i);
+      detection.gpuModel = match ? `AMD Radeon ${match[1]}` : 'AMD Radeon';
+    }
+    // Software
+    else if (rendererLower.includes('swiftshader') || rendererLower.includes('llvmpipe')) {
+      detection.gpuModel = 'Software Renderer';
+    }
+    else {
+      detection.gpuModel = 'Unknown GPU';
+    }
+
+    // Detect ANGLE backend
+    if (rendererLower.includes('warp')) {
+      detection.angleBackend = 'D3D11 WARP (Software)';
+    } else if (rendererLower.includes('d3d11on12') || rendererLower.includes('direct3d11on12')) {
+      detection.angleBackend = 'D3D11on12';
+    } else if (rendererLower.includes('d3d11') || rendererLower.includes('direct3d11')) {
+      detection.angleBackend = 'D3D11';
+    } else if (rendererLower.includes('d3d9') || rendererLower.includes('direct3d9')) {
+      detection.angleBackend = 'D3D9';
+    } else if (rendererLower.includes('opengl')) {
+      detection.angleBackend = 'OpenGL';
+    } else if (rendererLower.includes('metal')) {
+      detection.angleBackend = 'Metal';
+    } else {
+      detection.angleBackend = 'Unknown';
+    }
+
+  } else {
+    detection.gpuVendor = gl.getParameter(gl.VENDOR);
+    detection.rendererString = gl.getParameter(gl.RENDERER);
+    detection.gpuModel = 'Masked (Policy Restricted)';
+    detection.angleBackend = 'Unknown';
+  }
+
+  detection.browser = detectBrowser();
+
+  return detection;
+}
+
+// Load and parse XML configuration
+async function loadXMLConfig() {
+  try {
+    const response = await fetch('gpu-angle-config.xml');
+    const xmlText = await response.text();
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+
+    // Check for parsing errors
+    if (xmlDoc.querySelector('parsererror')) {
+      console.error('XML parsing error');
+      return null;
+    }
+
+    return xmlDoc;
+  } catch (e) {
+    console.error('Failed to load XML config:', e);
+    return null;
+  }
+}
+
+// Find matching configuration
+function findMatchingConfig(xmlDoc) {
+  if (!xmlDoc) return null;
+
+  const gpuConfigs = xmlDoc.querySelectorAll('gpu');
+
+  for (const config of gpuConfigs) {
+    const vendor = config.getAttribute('vendor').toLowerCase();
+    const model = config.getAttribute('model').toLowerCase();
+
+    const detectionVendor = detection.gpuVendor.toLowerCase();
+    const detectionModel = detection.gpuModel.toLowerCase();
+
+    // Match vendor
+    if (detectionVendor.includes(vendor) || detectionModel.includes(vendor)) {
+      // Match model (wildcards supported)
+      if (model === '*' || detectionModel.includes(model)) {
+        return config;
+      }
+    }
+  }
+
+  // Return default config if no match
+  return xmlDoc.querySelector('gpu[vendor="default"]');
+}
+
+// Display recommendations
+function displayRecommendations(config) {
+  if (!config) {
+    document.getElementById('recommendationContent').innerHTML = `
+      <div class="recommendation warning">
+        <h3>⚠️ No Specific Configuration Found</h3>
+        <p>Unable to find specific recommendations for your GPU. Using default settings.</p>
+        <p><strong>Current Setup:</strong></p>
+        <ul>
+          <li>GPU: ${detection.gpuModel}</li>
+          <li>ANGLE: ${detection.angleBackend}</li>
+        </ul>
+        <p>If experiencing issues, try D3D11 WARP backend as a fallback.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const recommendedBackend = config.querySelector('recommended')?.textContent || 'D3D11';
+  const currentBackend = detection.angleBackend;
+
+  // Check if current matches recommended
+  const isOptimal = currentBackend.includes(recommendedBackend);
+
+  let html = '';
+
+  if (isOptimal) {
+    html += `
+      <div class="recommendation success">
+        <h3>✅ Optimal Configuration</h3>
+        <p>Your current ANGLE backend matches the recommended configuration for your GPU.</p>
+        <ul>
+          <li><strong>Current Backend:</strong> ${currentBackend}</li>
+          <li><strong>Recommended:</strong> ${recommendedBackend}</li>
+          <li><strong>Status:</strong> <span style="color:#22c55e;">Optimal</span></li>
+        </ul>
+      </div>
+    `;
+  } else {
+    html += `
+      <div class="recommendation warning">
+        <h3>⚠️ Configuration Mismatch</h3>
+        <p>Your current ANGLE backend differs from the recommended setting for your GPU.</p>
+        <ul>
+          <li><strong>Current Backend:</strong> ${currentBackend}</li>
+          <li><strong>Recommended:</strong> <span style="color:#22c55e;font-weight:bold;">${recommendedBackend}</span></li>
+          <li><strong>Action:</strong> Consider changing to recommended backend</li>
+        </ul>
+      </div>
+    `;
+  }
+
+  // Add notes
+  const notes = config.querySelector('notes')?.textContent;
+  if (notes) {
+    html += `
+      <div class="recommendation">
+        <h3>📝 GPU-Specific Notes</h3>
+        <p>${notes}</p>
+      </div>
+    `;
+  }
+
+  // Add issues/workarounds
+  const issues = config.querySelectorAll('issue');
+  if (issues.length > 0) {
+    html += `
+      <div class="recommendation ${isOptimal ? '' : 'warning'}">
+        <h3>🔧 Known Issues & Workarounds</h3>
+        <ul>
+    `;
+
+    issues.forEach(issue => {
+      const problem = issue.querySelector('problem')?.textContent || 'Unknown issue';
+      const solution = issue.querySelector('solution')?.textContent || 'No solution available';
+      html += `
+        <li>
+          <strong>${problem}</strong><br>
+          <em style="color:#94a3b8;">Solution: ${solution}</em>
+        </li>
+      `;
+    });
+
+    html += `
+        </ul>
+      </div>
+    `;
+  }
+
+  document.getElementById('recommendationContent').innerHTML = html;
+
+  // Update recommended backend in instructions
+  document.getElementById('recommendedBackendChrome').textContent = recommendedBackend;
+  document.getElementById('recommendedBackendEdge').textContent = recommendedBackend;
+
+  detection.recommended = recommendedBackend;
+}
+
+// Update UI
+function updateUI() {
+  document.getElementById('browserName').textContent = detection.browser;
+  document.getElementById('gpuVendor').textContent = detection.gpuVendor;
+  document.getElementById('gpuModel').textContent = detection.gpuModel;
+  document.getElementById('angleBackend').textContent = detection.angleBackend;
+  document.getElementById('webglVersion').textContent = detection.webglVersion;
+
+  // Update status
+  const isOptimal = detection.recommended && detection.angleBackend.includes(detection.recommended);
+  const statusEl = document.getElementById('configStatus');
+  const iconEl = document.getElementById('detectionIcon');
+
+  if (isOptimal) {
+    statusEl.innerHTML = '<span style="color:#22c55e;">✓ Optimal</span>';
+    iconEl.className = 'status-icon green';
+  } else if (detection.recommended) {
+    statusEl.innerHTML = '<span style="color:#f59e0b;">⚠ Needs Configuration</span>';
+    iconEl.className = 'status-icon yellow';
+  } else {
+    statusEl.innerHTML = '<span style="color:#94a3b8;">Unknown</span>';
+    iconEl.className = 'status-icon blue';
+  }
+
+  // Show sections
+  document.getElementById('loading').classList.add('hidden');
+  document.getElementById('recommendations').classList.remove('hidden');
+  document.getElementById('instructions').classList.remove('hidden');
+}
+
+// Initialize
+async function init() {
+  console.log('Initializing GPU/ANGLE detection...');
+
+  // Detect GPU
+  detectGPU();
+  console.log('Detection results:', detection);
+
+  // Load XML config
+  const xmlDoc = await loadXMLConfig();
+
+  if (xmlDoc) {
+    console.log('XML config loaded');
+
+    // Find matching config
+    const config = findMatchingConfig(xmlDoc);
+    console.log('Matched config:', config);
+
+    // Display recommendations
+    displayRecommendations(config);
+  } else {
+    console.warn('No XML config available, showing default recommendations');
+    displayRecommendations(null);
+  }
+
+  // Update UI
+  updateUI();
+}
+
+// Run on page load
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+</script>
+
+</body>
+</html>
