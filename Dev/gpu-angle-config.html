@@ -251,14 +251,21 @@
         <div class="instructions">
           <h4>Chrome - Change ANGLE Backend</h4>
           <ol>
-            <li>Open Chrome and navigate to <span class="code">chrome://flags</span></li>
+            <li>Copy this URL: <span class="code">chrome://flags/#use-angle</span>
+              <button onclick="copyToClipboard('chrome://flags/#use-angle', this)" class="link-button" style="padding:4px 10px;margin-left:8px;font-size:0.85em;">📋 Copy</button>
+            </li>
+            <li>Paste it into Chrome's address bar and press Enter</li>
             <li>Search for <strong>"Choose ANGLE graphics backend"</strong></li>
             <li>Change the setting to your recommended backend: <strong id="recommendedBackendChrome" style="color:#22c55e;">D3D11</strong></li>
             <li>Click <strong>"Relaunch"</strong> to apply changes</li>
-            <li>Verify the change by visiting <span class="code">chrome://gpu</span></li>
+            <li>Verify by copying <span class="code">chrome://gpu</span>
+              <button onclick="copyToClipboard('chrome://gpu', this)" class="link-button secondary" style="padding:4px 10px;margin-left:8px;font-size:0.85em;">📋 Copy</button>
+              and pasting into address bar
+            </li>
           </ol>
-          <a href="chrome://flags/#use-angle" class="link-button">Open Chrome Flags</a>
-          <a href="chrome://gpu" class="link-button secondary">View GPU Info</a>
+          <p style="margin-top:12px;color:#94a3b8;font-size:0.9em;">
+            <strong>Note:</strong> Browsers block direct links to internal URLs for security. You must manually copy/paste these URLs.
+          </p>
         </div>
       </div>
 
@@ -267,14 +274,21 @@
         <div class="instructions">
           <h4>Microsoft Edge - Change ANGLE Backend</h4>
           <ol>
-            <li>Open Edge and navigate to <span class="code">edge://flags</span></li>
+            <li>Copy this URL: <span class="code">edge://flags/#use-angle</span>
+              <button onclick="copyToClipboard('edge://flags/#use-angle', this)" class="link-button" style="padding:4px 10px;margin-left:8px;font-size:0.85em;">📋 Copy</button>
+            </li>
+            <li>Paste it into Edge's address bar and press Enter</li>
             <li>Search for <strong>"Choose ANGLE graphics backend"</strong></li>
             <li>Change the setting to your recommended backend: <strong id="recommendedBackendEdge" style="color:#22c55e;">D3D11</strong></li>
             <li>Click <strong>"Restart"</strong> to apply changes</li>
-            <li>Verify the change by visiting <span class="code">edge://gpu</span></li>
+            <li>Verify by copying <span class="code">edge://gpu</span>
+              <button onclick="copyToClipboard('edge://gpu', this)" class="link-button secondary" style="padding:4px 10px;margin-left:8px;font-size:0.85em;">📋 Copy</button>
+              and pasting into address bar
+            </li>
           </ol>
-          <a href="edge://flags/#use-angle" class="link-button">Open Edge Flags</a>
-          <a href="edge://gpu" class="link-button secondary">View GPU Info</a>
+          <p style="margin-top:12px;color:#94a3b8;font-size:0.9em;">
+            <strong>Note:</strong> Browsers block direct links to internal URLs for security. You must manually copy/paste these URLs.
+          </p>
         </div>
       </div>
 
@@ -283,18 +297,22 @@
         <div class="instructions">
           <h4>Firefox - WebGL Settings</h4>
           <ol>
-            <li>Open Firefox and navigate to <span class="code">about:config</span></li>
+            <li>Copy this URL: <span class="code">about:config</span>
+              <button onclick="copyToClipboard('about:config', this)" class="link-button" style="padding:4px 10px;margin-left:8px;font-size:0.85em;">📋 Copy</button>
+            </li>
+            <li>Paste it into Firefox's address bar and press Enter</li>
             <li>Accept the warning if prompted</li>
             <li>Search for <strong>"webgl.angle.force-d3d11"</strong></li>
             <li>Set to <strong>true</strong> to force D3D11 backend</li>
             <li>Restart Firefox to apply changes</li>
-            <li>Verify by visiting <span class="code">about:support</span> and checking Graphics section</li>
+            <li>Verify by copying <span class="code">about:support</span>
+              <button onclick="copyToClipboard('about:support', this)" class="link-button secondary" style="padding:4px 10px;margin-left:8px;font-size:0.85em;">📋 Copy</button>
+              and checking Graphics section
+            </li>
           </ol>
           <p style="margin-top:12px;color:#94a3b8;font-size:0.9em;">
             <strong>Note:</strong> Firefox uses ANGLE on Windows but with more limited configuration options.
           </p>
-          <a href="about:config" class="link-button">Open about:config</a>
-          <a href="about:support" class="link-button secondary">View Support Info</a>
         </div>
       </div>
     </div>
@@ -314,6 +332,30 @@
 <div id="xmlConfig"></div>
 
 <script>
+// Copy to clipboard function
+function copyToClipboard(text, button) {
+  navigator.clipboard.writeText(text).then(() => {
+    // Show success feedback
+    const originalText = button.textContent;
+    button.textContent = '✓ Copied!';
+    button.style.background = '#22c55e';
+
+    setTimeout(() => {
+      button.textContent = originalText;
+      button.style.background = '';
+    }, 2000);
+  }).catch(err => {
+    console.error('Failed to copy:', err);
+    button.textContent = '✗ Failed';
+    button.style.background = '#ef4444';
+
+    setTimeout(() => {
+      button.textContent = '📋 Copy';
+      button.style.background = '';
+    }, 2000);
+  });
+}
+
 // Browser tab switching
 document.querySelectorAll('.browser-tab').forEach(tab => {
   tab.addEventListener('click', () => {
