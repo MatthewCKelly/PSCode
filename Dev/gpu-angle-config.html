@@ -241,13 +241,13 @@
       <h2>⚙️ How to Change ANGLE Backend</h2>
 
       <div class="browser-tabs">
-        <div class="browser-tab active" data-browser="chrome">Chrome</div>
+        <div class="browser-tab" data-browser="chrome">Chrome</div>
         <div class="browser-tab" data-browser="edge">Edge</div>
         <div class="browser-tab" data-browser="firefox">Firefox</div>
       </div>
 
       <!-- Chrome Instructions -->
-      <div class="browser-content active" data-browser="chrome">
+      <div class="browser-content" data-browser="chrome">
         <div class="instructions">
           <h4>Chrome - Change ANGLE Backend</h4>
           <ol>
@@ -604,6 +604,34 @@ function updateUI() {
   } else {
     statusEl.innerHTML = '<span style="color:#94a3b8;">Unknown</span>';
     iconEl.className = 'status-icon blue';
+  }
+
+  // Activate the detected browser's tab
+  const browserMap = {
+    'Edge': 'edge',
+    'Chrome': 'chrome',
+    'Firefox': 'firefox',
+    'Safari': 'chrome' // Default to Chrome for Safari
+  };
+
+  const detectedBrowser = browserMap[detection.browser] || 'chrome';
+
+  // Remove all active classes
+  document.querySelectorAll('.browser-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.browser-content').forEach(c => c.classList.remove('active'));
+
+  // Activate detected browser tab and content
+  const activeTab = document.querySelector(`.browser-tab[data-browser="${detectedBrowser}"]`);
+  const activeContent = document.querySelector(`.browser-content[data-browser="${detectedBrowser}"]`);
+
+  if (activeTab && activeContent) {
+    activeTab.classList.add('active');
+    activeContent.classList.add('active');
+    console.log(`Activated browser tab: ${detectedBrowser} (detected: ${detection.browser})`);
+  } else {
+    // Fallback to Chrome if browser not found
+    document.querySelector('.browser-tab[data-browser="chrome"]').classList.add('active');
+    document.querySelector('.browser-content[data-browser="chrome"]').classList.add('active');
   }
 
   // Show sections
