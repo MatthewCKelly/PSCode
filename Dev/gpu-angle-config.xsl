@@ -271,11 +271,16 @@
         <div class="toc">
           <h2>📑 Table of Contents</h2>
           <ul>
+            <li><a href="#summary-table">Quick Reference Summary</a></li>
             <li><a href="#gpu-configs">GPU Configurations</a></li>
             <li><a href="#angle-backends">ANGLE Backends</a></li>
             <li><a href="#browser-info">Browser Information</a></li>
           </ul>
         </div>
+
+        <!-- Quick Reference Summary Table -->
+        <h2 id="summary-table">📊 Quick Reference Summary</h2>
+        <xsl:apply-templates select="/configuration/summaryTable"/>
 
         <!-- GPU Configurations -->
         <h2 id="gpu-configs">🖥️ GPU Configurations</h2>
@@ -292,6 +297,62 @@
       </div>
     </body>
   </html>
+</xsl:template>
+
+<!-- Summary Table Template -->
+<xsl:template match="summaryTable">
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:20px;margin-bottom:24px;overflow-x:auto;">
+    <p style="color:#94a3b8;margin:0 0 16px;font-size:0.95em;">
+      Quick reference for ANGLE backend recommendations by GPU type and application.
+      <strong style="color:#f59e0b;">Note:</strong> Cesium/Propeller recommendations differ for Intel Arc GPUs.
+    </p>
+    <table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:6px;overflow:hidden;">
+      <thead>
+        <tr style="background:#1e293b;">
+          <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">GPU</th>
+          <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">Standard Backend</th>
+          <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">Cesium Backend</th>
+          <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">Issue Description</th>
+        </tr>
+      </thead>
+      <tbody>
+        <xsl:for-each select="entry">
+          <tr>
+            <xsl:if test="position() mod 2 = 0">
+              <xsl:attribute name="style">background:#1e293b;</xsl:attribute>
+            </xsl:if>
+            <td style="padding:12px;border-bottom:1px solid #334155;font-weight:600;color:#e2e8f0;">
+              <xsl:value-of select="gpu"/>
+            </td>
+            <td style="padding:12px;border-bottom:1px solid #334155;">
+              <span style="display:inline-block;background:#22c55e;color:#0f172a;padding:4px 10px;border-radius:4px;font-size:0.85em;font-weight:600;">
+                <xsl:value-of select="standardBackend"/>
+              </span>
+            </td>
+            <td style="padding:12px;border-bottom:1px solid #334155;">
+              <span>
+                <xsl:attribute name="style">
+                  display:inline-block;padding:4px 10px;border-radius:4px;font-size:0.85em;font-weight:600;
+                  <xsl:choose>
+                    <xsl:when test="cesiumBackend = standardBackend">background:#22c55e;color:#0f172a;</xsl:when>
+                    <xsl:otherwise>background:#f59e0b;color:#0f172a;</xsl:otherwise>
+                  </xsl:choose>
+                </xsl:attribute>
+                <xsl:value-of select="cesiumBackend"/>
+              </span>
+            </td>
+            <td style="padding:12px;border-bottom:1px solid #334155;color:#94a3b8;font-size:0.9em;line-height:1.4;">
+              <xsl:value-of select="issueDescription"/>
+            </td>
+          </tr>
+        </xsl:for-each>
+      </tbody>
+    </table>
+    <p style="color:#64748b;margin:16px 0 0;font-size:0.85em;">
+      💡 <strong>Tip:</strong> If using Cesium/Propeller with Intel Arc, use D3D11 WARP despite performance impact.
+      For general browsing, D3D11 provides better performance.
+    </p>
+  </div>
 </xsl:template>
 
 <!-- GPU Configuration Template -->
