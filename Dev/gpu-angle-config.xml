@@ -7,6 +7,46 @@
     <description>GPU and ANGLE configuration recommendations for WebGL rendering</description>
   </metadata>
 
+  <!-- Quick Reference Summary Table -->
+  <summaryTable>
+    <entry>
+      <gpu>Intel Arc</gpu>
+      <standardBackend>D3D11</standardBackend>
+      <cesiumBackend>D3D11 WARP</cesiumBackend>
+      <issueDescription>In Propeller/Cesium some polylines are not rendered correctly with D3D11. D3D11 WARP fixes rendering but will reduce performance of browser across all pages.</issueDescription>
+    </entry>
+    <entry>
+      <gpu>Intel UHD</gpu>
+      <standardBackend>D3D11</standardBackend>
+      <cesiumBackend>D3D11</cesiumBackend>
+      <issueDescription>No known issues. D3D11 works well for both standard and Cesium applications.</issueDescription>
+    </entry>
+    <entry>
+      <gpu>Intel Iris Xe</gpu>
+      <standardBackend>D3D11</standardBackend>
+      <cesiumBackend>D3D11</cesiumBackend>
+      <issueDescription>No known issues. D3D11 works well for both standard and Cesium applications.</issueDescription>
+    </entry>
+    <entry>
+      <gpu>NVIDIA RTX</gpu>
+      <standardBackend>D3D11</standardBackend>
+      <cesiumBackend>D3D11</cesiumBackend>
+      <issueDescription>No known issues. Excellent performance with D3D11 for all WebGL applications.</issueDescription>
+    </entry>
+    <entry>
+      <gpu>NVIDIA GTX</gpu>
+      <standardBackend>D3D11</standardBackend>
+      <cesiumBackend>D3D11</cesiumBackend>
+      <issueDescription>No known issues. Good performance with D3D11 for all WebGL applications.</issueDescription>
+    </entry>
+    <entry>
+      <gpu>AMD Radeon</gpu>
+      <standardBackend>D3D11</standardBackend>
+      <cesiumBackend>D3D11</cesiumBackend>
+      <issueDescription>No known issues. D3D11 recommended for both standard and Cesium applications.</issueDescription>
+    </entry>
+  </summaryTable>
+
   <gpuConfigs>
     <!-- Intel Arc GPUs -->
     <gpu vendor="Intel" model="Arc">
