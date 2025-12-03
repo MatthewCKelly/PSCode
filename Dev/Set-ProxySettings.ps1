@@ -174,7 +174,7 @@ Function Encode-ConnectionSettings {
     try {
         $BinaryData = @()
 
-        # Version (increment from current)
+        # Version (preserve from current)
         $VersionBytes = [System.BitConverter]::GetBytes([uint32]$Settings.Version)
         $BinaryData += $VersionBytes
 
@@ -276,7 +276,7 @@ Write-Detail "  Auto Detect     : $($CurrentSettings.AutoDetectEnabled)" -Level 
 
 # Build new settings
 $NewSettings = @{
-    Version = $CurrentSettings.Version + 1  # Increment version
+    Version = $CurrentSettings.Version  # Preserve version (doesn't change in practice)
     UnknownField = $CurrentSettings.UnknownField
     DirectConnection = $DirectConnection.IsPresent
     ProxyEnabled = $ProxyEnabled.IsPresent
