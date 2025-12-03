@@ -14,10 +14,80 @@
           background: #0f172a;
           color: #e2e8f0;
           margin: 0;
-          padding: 20px;
+          padding: 0;
           line-height: 1.6;
         }
-        .container { max-width: 1200px; margin: 0 auto; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; padding-top: 80px; }
+
+        /* Sticky Navigation */
+        .sticky-nav {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          background: #1e293b;
+          border-bottom: 2px solid #334155;
+          z-index: 1000;
+          transition: all 0.3s ease;
+        }
+
+        .sticky-nav.collapsed {
+          padding: 8px 0;
+        }
+
+        .nav-content {
+          max-width: 1200px;
+          margin: 0 auto;
+          padding: 12px 20px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+
+        .nav-title {
+          font-size: 1.2em;
+          font-weight: 600;
+          color: #93c5fd;
+          margin: 0;
+        }
+
+        .nav-links {
+          display: flex;
+          gap: 20px;
+          transition: all 0.3s ease;
+        }
+
+        .nav-links.collapsed {
+          gap: 12px;
+        }
+
+        .nav-links a {
+          color: #94a3b8;
+          text-decoration: none;
+          padding: 6px 12px;
+          border-radius: 4px;
+          transition: all 0.2s;
+          font-size: 0.9em;
+        }
+
+        .nav-links a:hover {
+          background: #334155;
+          color: #e2e8f0;
+        }
+
+        .toggle-nav {
+          background: #334155;
+          border: none;
+          color: #e2e8f0;
+          padding: 6px 12px;
+          border-radius: 4px;
+          cursor: pointer;
+          font-size: 0.85em;
+        }
+
+        .toggle-nav:hover {
+          background: #475569;
+        }
         h1 { color: #93c5fd; border-bottom: 2px solid #334155; padding-bottom: 12px; }
         h2 { color: #60a5fa; margin-top: 32px; }
         h3 { color: #93c5fd; margin-top: 20px; }
@@ -250,9 +320,21 @@
       </style>
     </head>
     <body>
-      <div class="container">
-        <h1>🎮 GPU &amp; ANGLE Configuration Reference</h1>
+      <!-- Sticky Navigation -->
+      <nav class="sticky-nav" id="stickyNav">
+        <div class="nav-content">
+          <h1 class="nav-title">🎮 GPU &amp; ANGLE Config</h1>
+          <div class="nav-links" id="navLinks">
+            <a href="#summary-table">Summary</a>
+            <a href="#gpu-configs">GPU Configs</a>
+            <a href="#angle-backends">Backends</a>
+            <a href="#browser-info">Browsers</a>
+          </div>
+          <button class="toggle-nav" id="toggleNav">Collapse ▲</button>
+        </div>
+      </nav>
 
+      <div class="container">
         <!-- Metadata -->
         <div class="metadata">
           <div class="metadata-grid">
@@ -267,20 +349,9 @@
           </div>
         </div>
 
-        <!-- Table of Contents -->
-        <div class="toc">
-          <h2>📑 Table of Contents</h2>
-          <ul>
-            <li><a href="#summary-table">Quick Reference Summary</a></li>
-            <li><a href="#gpu-configs">GPU Configurations</a></li>
-            <li><a href="#angle-backends">ANGLE Backends</a></li>
-            <li><a href="#browser-info">Browser Information</a></li>
-          </ul>
-        </div>
-
         <!-- Quick Reference Summary Table -->
         <h2 id="summary-table">📊 Quick Reference Summary</h2>
-        <xsl:apply-templates select="/configuration/summaryTable"/>
+        <xsl:call-template name="summaryTable"/>
 
         <!-- GPU Configurations -->
         <h2 id="gpu-configs">🖥️ GPU Configurations</h2>
@@ -295,12 +366,60 @@
         <xsl:apply-templates select="/configuration/browsers/browser"/>
 
       </div>
+
+      <!-- Scroll Handler Script -->
+      <script>
+        // Sticky nav collapse on scroll
+        const stickyNav = document.getElementById('stickyNav');
+        const navLinks = document.getElementById('navLinks');
+        const toggleBtn = document.getElementById('toggleNav');
+        let isCollapsed = false;
+
+        window.addEventListener('scroll', () => {
+          if (window.scrollY > 100 && !isCollapsed) {
+            stickyNav.classList.add('collapsed');
+            navLinks.classList.add('collapsed');
+            isCollapsed = true;
+          } else if (window.scrollY <= 100 && isCollapsed) {
+            stickyNav.classList.remove('collapsed');
+            navLinks.classList.remove('collapsed');
+            isCollapsed = false;
+          }
+        });
+
+        // Toggle button
+        toggleBtn.addEventListener('click', () => {
+          if (navLinks.style.display === 'none') {
+            navLinks.style.display = 'flex';
+            toggleBtn.textContent = 'Collapse ▲';
+          } else {
+            navLinks.style.display = 'none';
+            toggleBtn.textContent = 'Expand ▼';
+          }
+        });
+
+        // Smooth scroll for nav links
+        document.querySelectorAll('.nav-links a').forEach(link => {
+          link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const target = document.querySelector(link.getAttribute('href'));
+            if (target) {
+              const offset = 80; // Account for fixed nav
+              const targetPos = target.offsetTop - offset;
+              window.scrollTo({
+                top: targetPos,
+                behavior: 'smooth'
+              });
+            }
+          });
+        });
+      </script>
     </body>
   </html>
 </xsl:template>
 
-<!-- Summary Table Template -->
-<xsl:template match="summaryTable">
+<!-- Summary Table Template (Generated from gpuConfigs) -->
+<xsl:template name="summaryTable">
   <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:20px;margin-bottom:24px;overflow-x:auto;">
     <p style="color:#94a3b8;margin:0 0 16px;font-size:0.95em;">
       Quick reference for ANGLE backend recommendations by GPU type and application.
@@ -316,17 +435,17 @@
         </tr>
       </thead>
       <tbody>
-        <xsl:for-each select="entry">
+        <xsl:for-each select="/configuration/gpuConfigs/gpu[@displayName]">
           <tr>
             <xsl:if test="position() mod 2 = 0">
               <xsl:attribute name="style">background:#1e293b;</xsl:attribute>
             </xsl:if>
             <td style="padding:12px;border-bottom:1px solid #334155;font-weight:600;color:#e2e8f0;">
-              <xsl:value-of select="gpu"/>
+              <xsl:value-of select="@displayName"/>
             </td>
             <td style="padding:12px;border-bottom:1px solid #334155;">
               <span style="display:inline-block;background:#22c55e;color:#0f172a;padding:4px 10px;border-radius:4px;font-size:0.85em;font-weight:600;">
-                <xsl:value-of select="standardBackend"/>
+                <xsl:value-of select="recommended"/>
               </span>
             </td>
             <td style="padding:12px;border-bottom:1px solid #334155;">
@@ -334,7 +453,7 @@
                 <xsl:attribute name="style">
                   display:inline-block;padding:4px 10px;border-radius:4px;font-size:0.85em;font-weight:600;
                   <xsl:choose>
-                    <xsl:when test="cesiumBackend = standardBackend">background:#22c55e;color:#0f172a;</xsl:when>
+                    <xsl:when test="cesiumBackend = recommended">background:#22c55e;color:#0f172a;</xsl:when>
                     <xsl:otherwise>background:#f59e0b;color:#0f172a;</xsl:otherwise>
                   </xsl:choose>
                 </xsl:attribute>
@@ -342,7 +461,7 @@
               </span>
             </td>
             <td style="padding:12px;border-bottom:1px solid #334155;color:#94a3b8;font-size:0.9em;line-height:1.4;">
-              <xsl:value-of select="issueDescription"/>
+              <xsl:value-of select="cesiumIssue"/>
             </td>
           </tr>
         </xsl:for-each>
