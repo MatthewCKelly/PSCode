@@ -216,6 +216,9 @@
       <div class="status-label">GPU Model:</div>
       <div class="status-value" id="gpuModel">Detecting...</div>
 
+      <div class="status-label">Renderer:</div>
+      <div class="status-value" id="rendererString" style="font-family: 'Courier New', monospace; font-size: 0.9em; color: #94a3b8;">Detecting...</div>
+
       <div class="status-label">ANGLE Backend:</div>
       <div class="status-value" id="angleBackend">Detecting...</div>
 
@@ -629,6 +632,7 @@ function updateUI() {
   document.getElementById('browserName').textContent = detection.browser;
   document.getElementById('gpuVendor').textContent = detection.gpuVendor;
   document.getElementById('gpuModel').textContent = detection.gpuModel;
+  document.getElementById('rendererString').textContent = detection.rendererString || 'Unknown';
   document.getElementById('angleBackend').textContent = detection.angleBackend;
   document.getElementById('webglVersion').textContent = detection.webglVersion;
 
