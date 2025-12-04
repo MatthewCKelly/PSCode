@@ -399,16 +399,14 @@
 <xsl:template name="summaryTable">
   <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:20px;margin-bottom:24px;overflow-x:auto;">
     <p style="color:#94a3b8;margin:0 0 16px;font-size:0.95em;">
-      Quick reference for ANGLE backend recommendations by GPU type and application.
-      <strong style="color:#f59e0b;">Note:</strong> Propeller (Cesium backend) recommendations differ for Intel Arc GPUs.
+      Quick reference for ANGLE backend recommendations by GPU type.
     </p>
     <table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:6px;overflow:hidden;">
       <thead>
         <tr style="background:#1e293b;">
           <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">GPU</th>
-          <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">Standard Backend</th>
-          <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">Propeller Backend</th>
-          <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">Issue Description</th>
+          <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">Recommended Backend</th>
+          <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">Notes</th>
         </tr>
       </thead>
       <tbody>
@@ -425,30 +423,13 @@
                 <xsl:value-of select="recommended"/>
               </span>
             </td>
-            <td style="padding:12px;border-bottom:1px solid #334155;">
-              <span>
-                <xsl:variable name="cesiumBackend" select="issues/issue[@context='cesium']/recommendedBackend"/>
-                <xsl:attribute name="style">
-                  display:inline-block;padding:4px 10px;border-radius:4px;font-size:0.85em;font-weight:600;
-                  <xsl:choose>
-                    <xsl:when test="$cesiumBackend = recommended">background:#22c55e;color:#0f172a;</xsl:when>
-                    <xsl:otherwise>background:#f59e0b;color:#0f172a;</xsl:otherwise>
-                  </xsl:choose>
-                </xsl:attribute>
-                <xsl:value-of select="$cesiumBackend"/>
-              </span>
-            </td>
             <td style="padding:12px;border-bottom:1px solid #334155;color:#94a3b8;font-size:0.9em;line-height:1.4;">
-              <xsl:value-of select="issues/issue[@context='cesium']/solution"/>
+              <xsl:value-of select="notes"/>
             </td>
           </tr>
         </xsl:for-each>
       </tbody>
     </table>
-    <p style="color:#64748b;margin:16px 0 0;font-size:0.85em;">
-      💡 <strong>Tip:</strong> If using Propeller (Cesium backend) with Intel Arc, use D3D11 WARP despite performance impact.
-      For general browsing, D3D11 provides better performance.
-    </p>
   </div>
 </xsl:template>
 
