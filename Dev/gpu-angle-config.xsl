@@ -74,20 +74,6 @@
           background: #334155;
           color: #e2e8f0;
         }
-
-        .toggle-nav {
-          background: #334155;
-          border: none;
-          color: #e2e8f0;
-          padding: 6px 12px;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 0.85em;
-        }
-
-        .toggle-nav:hover {
-          background: #475569;
-        }
         h1 { color: #93c5fd; border-bottom: 2px solid #334155; padding-bottom: 12px; }
         h2 { color: #60a5fa; margin-top: 32px; }
         h3 { color: #93c5fd; margin-top: 20px; }
@@ -330,7 +316,6 @@
             <a href="#angle-backends">Backends</a>
             <a href="#browser-info">Browsers</a>
           </div>
-          <button class="toggle-nav" id="toggleNav">Collapse ▲</button>
         </div>
       </nav>
 
@@ -374,7 +359,6 @@
         // Sticky nav collapse on scroll
         const stickyNav = document.getElementById('stickyNav');
         const navLinks = document.getElementById('navLinks');
-        const toggleBtn = document.getElementById('toggleNav');
         let isCollapsed = false;
 
         window.addEventListener('scroll', () => {
@@ -386,17 +370,6 @@
             stickyNav.classList.remove('collapsed');
             navLinks.classList.remove('collapsed');
             isCollapsed = false;
-          }
-        });
-
-        // Toggle button
-        toggleBtn.addEventListener('click', () => {
-          if (navLinks.style.display === 'none') {
-            navLinks.style.display = 'flex';
-            toggleBtn.textContent = 'Collapse ▲';
-          } else {
-            navLinks.style.display = 'none';
-            toggleBtn.textContent = 'Expand ▼';
           }
         });
 
@@ -454,18 +427,19 @@
             </td>
             <td style="padding:12px;border-bottom:1px solid #334155;">
               <span>
+                <xsl:variable name="cesiumBackend" select="issues/issue[@context='cesium']/recommendedBackend"/>
                 <xsl:attribute name="style">
                   display:inline-block;padding:4px 10px;border-radius:4px;font-size:0.85em;font-weight:600;
                   <xsl:choose>
-                    <xsl:when test="cesiumBackend = recommended">background:#22c55e;color:#0f172a;</xsl:when>
+                    <xsl:when test="$cesiumBackend = recommended">background:#22c55e;color:#0f172a;</xsl:when>
                     <xsl:otherwise>background:#f59e0b;color:#0f172a;</xsl:otherwise>
                   </xsl:choose>
                 </xsl:attribute>
-                <xsl:value-of select="cesiumBackend"/>
+                <xsl:value-of select="$cesiumBackend"/>
               </span>
             </td>
             <td style="padding:12px;border-bottom:1px solid #334155;color:#94a3b8;font-size:0.9em;line-height:1.4;">
-              <xsl:value-of select="cesiumIssue"/>
+              <xsl:value-of select="issues/issue[@context='cesium']/solution"/>
             </td>
           </tr>
         </xsl:for-each>
