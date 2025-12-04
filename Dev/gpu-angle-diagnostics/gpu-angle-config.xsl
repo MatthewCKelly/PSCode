@@ -400,14 +400,14 @@
   <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:20px;margin-bottom:24px;overflow-x:auto;">
     <p style="color:#94a3b8;margin:0 0 16px;font-size:0.95em;">
       Quick reference for ANGLE backend recommendations by GPU type and application.
-      <strong style="color:#f59e0b;">Note:</strong> Cesium/Propeller recommendations differ for Intel Arc GPUs.
+      <strong style="color:#f59e0b;">Note:</strong> Propeller (Cesium backend) recommendations differ for Intel Arc GPUs.
     </p>
     <table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:6px;overflow:hidden;">
       <thead>
         <tr style="background:#1e293b;">
           <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">GPU</th>
           <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">Standard Backend</th>
-          <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">Cesium Backend</th>
+          <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">Propeller Backend</th>
           <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">Issue Description</th>
         </tr>
       </thead>
@@ -446,7 +446,7 @@
       </tbody>
     </table>
     <p style="color:#64748b;margin:16px 0 0;font-size:0.85em;">
-      💡 <strong>Tip:</strong> If using Cesium/Propeller with Intel Arc, use D3D11 WARP despite performance impact.
+      💡 <strong>Tip:</strong> If using Propeller (Cesium backend) with Intel Arc, use D3D11 WARP despite performance impact.
       For general browsing, D3D11 provides better performance.
     </p>
   </div>

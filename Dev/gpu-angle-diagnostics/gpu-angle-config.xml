@@ -16,8 +16,8 @@
       <driverLink>https://www.intel.com/content/www/us/en/download/785597/intel-arc-iris-xe-graphics-windows.html</driverLink>
       <issues>
         <issue severity="medium" context="cesium">
-          <problem>Polylines not rendered correctly in Cesium/Propeller</problem>
-          <solution>Use D3D11 WARP backend for Cesium applications. This fixes rendering but will reduce performance of browser across all pages.</solution>
+          <problem>Polylines not rendered correctly in Propeller (Cesium backend)</problem>
+          <solution>Use D3D11 WARP backend for Propeller applications. This fixes polyline rendering but will reduce performance of browser across all pages.</solution>
           <recommendedBackend>D3D11 WARP</recommendedBackend>
           <affectedVersions>All versions with D3D11</affectedVersions>
         </issue>

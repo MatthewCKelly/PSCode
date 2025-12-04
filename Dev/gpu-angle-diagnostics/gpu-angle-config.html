@@ -604,9 +604,24 @@ function displayRecommendations(config) {
     issues.forEach(issue => {
       const problem = issue.querySelector('problem')?.textContent || 'Unknown issue';
       const solution = issue.querySelector('solution')?.textContent || 'No solution available';
+      const context = issue.getAttribute('context');
+      const severity = issue.getAttribute('severity');
+
+      // Highlight Propeller (Cesium) specific issues
+      const isPropellerIssue = context === 'cesium';
+      const isHighPriority = severity === 'medium' || severity === 'high';
+
+      let issueStyle = '';
+      let issueLabel = '';
+
+      if (isPropellerIssue && isHighPriority) {
+        issueStyle = 'background:#3b2200;border-left:4px solid #f59e0b;padding:12px;margin:8px 0;border-radius:4px;';
+        issueLabel = '<span style="background:#f59e0b;color:#0f172a;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;margin-right:8px;">⚠️ PROPELLER</span>';
+      }
+
       html += `
-        <li>
-          <strong>${problem}</strong><br>
+        <li style="${issueStyle}">
+          ${issueLabel}<strong>${problem}</strong><br>
           <em style="color:#94a3b8;">Solution: ${solution}</em>
         </li>
       `;
