@@ -369,6 +369,8 @@
 
       <!-- Scroll Handler Script -->
       <script>
+        <xsl:text disable-output-escaping="yes">
+        <![CDATA[
         // Sticky nav collapse on scroll
         const stickyNav = document.getElementById('stickyNav');
         const navLinks = document.getElementById('navLinks');
@@ -413,6 +415,8 @@
             }
           });
         });
+        ]]>
+        </xsl:text>
       </script>
     </body>
   </html>
