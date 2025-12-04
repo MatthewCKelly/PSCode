@@ -45,11 +45,6 @@
       <fallback>D3D11 WARP</fallback>
       <notes>Intel UHD integrated graphics perform well with D3D11 backend. For better performance, ensure laptop is plugged in and not in battery-saving mode.</notes>
       <issues>
-        <issue severity="info" context="cesium">
-          <problem>No known Cesium-specific issues</problem>
-          <solution>D3D11 works well for both standard and Cesium applications</solution>
-          <recommendedBackend>D3D11</recommendedBackend>
-        </issue>
         <issue severity="low">
           <problem>Reduced performance on battery power</problem>
           <solution>Connect to AC power or adjust Windows power plan to "High Performance"</solution>
@@ -68,11 +63,6 @@
       <fallback>D3D11 WARP</fallback>
       <notes>Intel Iris Xe graphics offer excellent integrated GPU performance. D3D11 is optimal for WebGL workloads.</notes>
       <issues>
-        <issue severity="info" context="cesium">
-          <problem>No known Cesium-specific issues</problem>
-          <solution>D3D11 works well for both standard and Cesium applications</solution>
-          <recommendedBackend>D3D11</recommendedBackend>
-        </issue>
         <issue severity="low">
           <problem>Occasional texture corruption in complex scenes</problem>
           <solution>Update to latest Intel graphics drivers. Clear browser cache and restart.</solution>
@@ -92,11 +82,6 @@
       <notes>NVIDIA RTX GPUs provide excellent WebGL performance with D3D11 backend. No known issues with line rendering.</notes>
       <driverLink>https://www.nvidia.com/Download/index.aspx</driverLink>
       <issues>
-        <issue severity="info" context="cesium">
-          <problem>No known Cesium-specific issues</problem>
-          <solution>Excellent performance with D3D11 for all WebGL applications</solution>
-          <recommendedBackend>D3D11</recommendedBackend>
-        </issue>
         <issue severity="low">
           <problem>WebGL shader compilation time</problem>
           <solution>Enable shader cache in browser settings. First load may be slower, subsequent loads will be faster.</solution>
@@ -117,11 +102,6 @@
       <notes>NVIDIA GTX GPUs work well with D3D11 backend. Ensure drivers are up to date for best performance.</notes>
       <driverLink>https://www.nvidia.com/Download/index.aspx</driverLink>
       <issues>
-        <issue severity="info" context="cesium">
-          <problem>No known Cesium-specific issues</problem>
-          <solution>Good performance with D3D11 for all WebGL applications</solution>
-          <recommendedBackend>D3D11</recommendedBackend>
-        </issue>
         <issue severity="low">
           <problem>Older GTX cards (600/700 series) may have reduced WebGL2 performance</problem>
           <solution>Use WebGL 1.0 contexts where possible. Update to latest Game Ready drivers.</solution>
@@ -141,11 +121,6 @@
       <notes>AMD Radeon GPUs perform well with D3D11 backend. Ensure Adrenalin drivers are up to date.</notes>
       <driverLink>https://www.amd.com/en/support</driverLink>
       <issues>
-        <issue severity="info" context="cesium">
-          <problem>No known Cesium-specific issues</problem>
-          <solution>D3D11 recommended for both standard and Cesium applications</solution>
-          <recommendedBackend>D3D11</recommendedBackend>
-        </issue>
         <issue severity="medium">
           <problem>Some Radeon RX 5000 series cards experience texture flickering</problem>
           <solution>Update to AMD Adrenalin 23.11.1 or newer. Disable Enhanced Sync in Radeon Settings.</solution>
