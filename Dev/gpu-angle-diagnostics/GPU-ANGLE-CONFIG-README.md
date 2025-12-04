@@ -20,10 +20,10 @@ This system provides automatic GPU detection and ANGLE backend configuration rec
 **How to Use:**
 ```bash
 # Open in browser
-start Dev/gpu-angle-config.html
+start Dev/gpu-angle-diagnostics/gpu-angle-config.html
 
 # Or from web server
-http://localhost/gpu-angle-config.html
+http://localhost/gpu-angle-diagnostics/gpu-angle-config.html
 ```
 
 ### 2. `gpu-angle-config.xml`
@@ -340,14 +340,14 @@ When backends are no longer recommended:
 **Solutions:**
 ```bash
 # Verify file location
-ls -la Dev/gpu-angle-config.xml
+ls -la Dev/gpu-angle-diagnostics/gpu-angle-config.xml
 
 # Check browser console for errors
 F12 -> Console tab -> Look for fetch/XML errors
 
 # Test from web server (not file://)
 python -m http.server 8000
-# Navigate to http://localhost:8000/Dev/gpu-angle-config.html
+# Navigate to http://localhost:8000/Dev/gpu-angle-diagnostics/gpu-angle-config.html
 ```
 
 ### Issue: GPU Not Detected
