@@ -196,7 +196,7 @@ reg export "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Con
 - Command-line parameter support for all proxy flags
 - Automatic validation rules enforce consistency
 - Creates backup before making changes
-- Increments version counter automatically
+- Preserves version counter (doesn't change in practice)
 - Shows before/after/verified settings
 - Supports `-WhatIf` for dry-run testing
 - Preserves current values when parameters not specified
@@ -1141,13 +1141,25 @@ $Data.DefaultConnectionSettings | Format-Hex
 
 ## Changelog
 
+### 2025-12-03 - Logic Fixes Based on Real Device Testing
+- **FIXED:** ProxyEnabled and AutoConfigEnabled now use OR logic
+  - ProxyEnabled = flag is set OR ProxyServer has a value
+  - AutoConfigEnabled = flag is set OR AutoConfigURL has a value
+  - This matches actual Windows behavior (checked vs unchecked state)
+- **FIXED:** Version counter no longer incremented (doesn't change in practice)
+  - Set-ProxySettings.ps1 now preserves the existing version value
+  - Updated all documentation to reflect version preservation
+- Updated Read-DefaultProxySettings.ps1 with final enabled state logic
+- Updated Set-ProxySettings.ps1 to preserve version counter
+- Updated all documentation (CLAUDE.md, SET-PROXY-SETTINGS.md) with corrections
+
 ### 2025-11-20 - New Scripts and Critical Fixes
 - **NEW SCRIPT:** Set-ProxySettings.ps1 (437 lines)
   - Parameter-based proxy configuration updater
   - Automatic validation rules (clears related fields when flags disabled)
   - Supports all proxy flags with individual parameters
   - Creates automatic backup before changes
-  - Increments version counter automatically
+  - Preserves version counter (doesn't change in practice)
   - Shows before/after/verified settings
   - Supports -WhatIf for dry-run testing
 - **NEW SCRIPT:** Read-ProxyRegistryFiles.ps1 (248 lines)

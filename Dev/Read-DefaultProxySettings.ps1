@@ -274,6 +274,17 @@ Function Decode-ConnectionSettings {
             $Offset += $ConfigLength
         } # end of auto config parsing
 
+        # Re-evaluate enabled states using OR logic:
+        # Enabled if flag is set OR value is present
+        $FlagProxyEnabled = ($Settings.Flags -band 0x02) -eq 0x02
+        $FlagAutoConfigEnabled = ($Settings.Flags -band 0x04) -eq 0x04
+
+        $Settings.ProxyEnabled = $FlagProxyEnabled -or (-not [string]::IsNullOrEmpty($Settings.ProxyServer))
+        $Settings.AutoConfigEnabled = $FlagAutoConfigEnabled -or (-not [string]::IsNullOrEmpty($Settings.AutoConfigURL))
+
+        Write-Detail -Message "Final ProxyEnabled: $($Settings.ProxyEnabled) (flag: $FlagProxyEnabled, has value: $(-not [string]::IsNullOrEmpty($Settings.ProxyServer)))" -Level Debug
+        Write-Detail -Message "Final AutoConfigEnabled: $($Settings.AutoConfigEnabled) (flag: $FlagAutoConfigEnabled, has value: $(-not [string]::IsNullOrEmpty($Settings.AutoConfigURL)))" -Level Debug
+
         return $Settings
 
     } catch {

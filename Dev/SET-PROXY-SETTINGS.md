@@ -9,7 +9,7 @@ The `Set-ProxySettings.ps1` script provides a parameter-based interface to updat
 - ✅ Command-line parameter support for all proxy configuration flags
 - ✅ Automatic validation rules enforce consistency
 - ✅ Creates backup before making changes
-- ✅ Increments version counter automatically
+- ✅ Preserves version counter (doesn't change in practice)
 - ✅ Shows before/after/verified settings
 - ✅ Supports `-WhatIf` for dry-run testing
 - ✅ Preserves current values when parameters not specified
@@ -184,7 +184,7 @@ Current proxy settings:
 ### 2. New Settings (Requested Changes)
 ```
 New settings to apply:
-  Version: 71 (incremented)
+  Version: 70 (preserved)
   Flags: 0x00000002
   Direct Connection: False
   Proxy Enabled: True
@@ -195,7 +195,7 @@ New settings to apply:
 ### 3. Verified Settings (After)
 ```
 Verified updated settings from registry:
-  Version: 71
+  Version: 70
   Flags: 0x00000002
   Direct Connection: False
   Proxy Enabled: True
@@ -271,7 +271,7 @@ The script encodes settings into the Windows `DefaultConnectionSettings` binary 
 ```
 Offset  Length  Type    Description
 ------  ------  ------  -----------
-0x00    4       DWORD   Version/Counter (increments on each change)
+0x00    4       DWORD   Version/Counter (preserved from current settings)
 0x04    4       DWORD   Connection Flags (bit field)
 0x08    4       DWORD   Unknown Field (varies 1-15, purpose unknown)
 0x0C    4       DWORD   Proxy Server String Length (bytes)
@@ -296,9 +296,9 @@ Bit     Hex     Description
 
 ### Version Counter
 
-The version/counter field increments with each modification:
-- Automatically incremented by the script (+1)
-- Used by Windows for change detection
+The version/counter field is preserved from the current settings:
+- Script preserves the existing version value (doesn't change in practice)
+- Purpose unknown (possibly used by Windows for change detection)
 - Typical values: 46-100 (varies by system)
 
 ## Version History
@@ -307,7 +307,7 @@ The version/counter field increments with each modification:
   - Parameter-based proxy configuration
   - Automatic validation rules
   - Backup creation before changes
-  - Version counter auto-increment
+  - Version counter preservation (doesn't change)
   - Before/after/verified display
   - -WhatIf support for dry-run testing
   - Preserves current values when parameters not specified
