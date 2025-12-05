@@ -399,14 +399,14 @@
 <xsl:template name="summaryTable">
   <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:20px;margin-bottom:24px;overflow-x:auto;">
     <p style="color:#94a3b8;margin:0 0 16px;font-size:0.95em;">
-      Quick reference for ANGLE backend recommendations by GPU type.
+      Quick reference for ANGLE backend recommendations and known issues by GPU type.
     </p>
     <table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:6px;overflow:hidden;">
       <thead>
         <tr style="background:#1e293b;">
           <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">GPU</th>
           <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">Recommended Backend</th>
-          <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">Notes</th>
+          <th style="padding:12px;text-align:left;border-bottom:2px solid #334155;color:#93c5fd;font-weight:600;">Known Issues</th>
         </tr>
       </thead>
       <tbody>
@@ -423,8 +423,26 @@
                 <xsl:value-of select="recommended"/>
               </span>
             </td>
-            <td style="padding:12px;border-bottom:1px solid #334155;color:#94a3b8;font-size:0.9em;line-height:1.4;">
-              <xsl:value-of select="notes"/>
+            <td style="padding:12px;border-bottom:1px solid #334155;color:#94a3b8;font-size:0.85em;line-height:1.6;">
+              <xsl:choose>
+                <xsl:when test="issues/issue">
+                  <ul style="margin:0;padding-left:20px;">
+                    <xsl:for-each select="issues/issue">
+                      <li style="margin:4px 0;">
+                        <a href="#{generate-id(.)}" style="color:#60a5fa;text-decoration:none;">
+                          <xsl:value-of select="problem"/>
+                        </a>
+                        <xsl:if test="@context='cesium'">
+                          <span style="background:#f59e0b;color:#0f172a;padding:1px 6px;border-radius:3px;font-size:0.75em;font-weight:600;margin-left:6px;">PROPELLER</span>
+                        </xsl:if>
+                      </li>
+                    </xsl:for-each>
+                  </ul>
+                </xsl:when>
+                <xsl:otherwise>
+                  <span style="color:#22c55e;">No known issues</span>
+                </xsl:otherwise>
+              </xsl:choose>
             </td>
           </tr>
         </xsl:for-each>
@@ -506,7 +524,7 @@
     <xsl:if test="issues/issue">
       <h4>Known Issues</h4>
       <xsl:for-each select="issues/issue">
-        <div class="issue-box">
+        <div class="issue-box" id="{generate-id(.)}">
           <div class="issue-problem">
             <span class="severity-{@severity}">
               <xsl:choose>
@@ -517,6 +535,9 @@
             </span>
             &#160;
             <xsl:value-of select="problem"/>
+            <xsl:if test="@context='cesium'">
+              <span style="background:#f59e0b;color:#0f172a;padding:2px 8px;border-radius:3px;font-size:0.75em;font-weight:600;margin-left:8px;">⚠️ PROPELLER</span>
+            </xsl:if>
           </div>
           <div class="issue-solution">
             💡 Solution: <xsl:value-of select="solution"/>
