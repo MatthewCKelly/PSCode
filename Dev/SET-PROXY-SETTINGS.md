@@ -125,7 +125,7 @@ When a flag is enabled but no corresponding value is provided, the current value
 ```powershell
 .\Set-ProxySettings.ps1 `
     -AutoConfigEnabled `
-    -AutoConfigURL "http://webdefence.global.blackspider.com:8082/proxy.pac?p=abc123" `
+    -AutoConfigURL "http://supergeek.nz:8082/proxy.pac?p=abc123" `
     -AutoDetectEnabled
 ```
 
@@ -133,7 +133,7 @@ When a flag is enabled but no corresponding value is provided, the current value
 - Direct Connection: False
 - Proxy Enabled: False
 - Auto Config Enabled: True
-- Auto Config URL: http://webdefence.global.blackspider.com:8082/proxy.pac?p=abc123
+- Auto Config URL: http://supergeek.nz:8082/proxy.pac?p=abc123
 - Auto Detect Enabled: True
 
 ### Scenario 3: Disable All Proxies (Direct Connection)
@@ -159,7 +159,7 @@ When a flag is enabled but no corresponding value is provided, the current value
     -ProxyServer "http://127.20.20.20:3128" `
     -ProxyBypass "home.crash.co.nz;fh.local;<local>" `
     -AutoConfigEnabled `
-    -AutoConfigURL "http://webdefence.global.blackspider.com:8082/proxy.pac?p=xyz789" `
+    -AutoConfigURL "http://supergeek.nz:8082/proxy.pac?p=xyz789" `
     -AutoDetectEnabled
 ```
 
