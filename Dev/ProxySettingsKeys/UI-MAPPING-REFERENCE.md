@@ -35,9 +35,9 @@ This document maps the Windows Proxy Settings UI elements to the corresponding r
 
 **PAC URL Configured:**
 - UI: ☑ Use automatic configuration script
-- UI: Address: `http://webdefence.global.blackspider.com:8082/proxy.pac?p=b9gwgvhs`
+- UI: Address: `http://config.company.com:8082/proxy.pac?p=PARAMS`
 - Registry: Flags bit `0x04` = 1, AutoConfigURL string field populated
-- Decoded: `AutoConfigEnabled = True`, `AutoConfigURL = "http://webdefence.global.blackspider.com:8082/proxy.pac?p=b9gwgvhs"`
+- Decoded: `AutoConfigEnabled = True`, `AutoConfigURL = "http://config.company.com:8082/proxy.pac?p=PARAMS"`
 
 ---
 

@@ -90,7 +90,7 @@ Each registry file is decoded to show:
 ```
 ProxyEnabled      : False
 AutoConfigEnabled : True
-AutoConfigURL     : http://supergeek.nz:8082/proxy.pac?p=b9gwgvhs
+AutoConfigURL     : http://config.company.com:8082/proxy.pac?p=PARAMS
 AutoDetectEnabled : True
 ```
 
@@ -100,7 +100,7 @@ ProxyEnabled      : True
 ProxyServer       : http://127.20.20.20:3128!
 ProxyBypass       : home.crash.co.nz;fh.local;<local>
 AutoConfigEnabled : True
-AutoConfigURL     : http://supergeek.nz:8082/proxy.pac?p=b9gwgvhs
+AutoConfigURL     : http://config.company.com:8082/proxy.pac?p=PARAMS
 AutoDetectEnabled : True
 ```
 
