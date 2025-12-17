@@ -349,7 +349,7 @@ Offset  Hex Data                            Decoded Value
 0x0C    00 00 00 00                        Proxy Length: 0
 0x10    00 00 00 00                        Bypass Length: 0
 0x14    42 00 00 00                        PAC URL Length: 66 bytes
-0x18    68 74 74 70 3A 2F 2F ...           "http://webdefence.global..."
+0x18    68 74 74 70 3A 2F 2F ...           "http://config.company.com..."
 ...     00 00 00 00 00 ... (32 bytes)      Padding
 ```
 

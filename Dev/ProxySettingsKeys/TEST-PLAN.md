@@ -87,7 +87,7 @@ HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections
 | TC-502 | PAC HTTPS URL | Address: `https://secure.company.com/wpad.dat` | `https://secure.company.com/wpad.dat` |
 | TC-503 | PAC with Port | Address: `http://config.local:8080/proxy.pac` | `http://config.local:8080/proxy.pac` |
 | TC-504 | PAC File URL | Address: `file:///C:/config/proxy.pac` | `file:///C:/config/proxy.pac` |
-| TC-505 | PAC with Query Params | Address: `http://webdefence.global.blackspider.com:8082/proxy.pac?p=b9gwgvhs` | `http://webdefence.global.blackspider.com:8082/proxy.pac?p=b9gwgvhs` |
+| TC-505 | PAC with Query Params | Address: `http://config.company.com:8082/proxy.pac?p=PARAMS` | `http://config.company.com:8082/proxy.pac?p=PARAMS` |
 | TC-506 | PAC + Manual Proxy | PAC URL configured<br>Manual proxy also set | AutoConfigURL set, ProxyServer set, both flags true |
 
 ---
