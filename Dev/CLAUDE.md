@@ -1142,14 +1142,14 @@ $Data.DefaultConnectionSettings | Format-Hex
 ## Changelog
 
 ### 2025-12-03 - Logic Fixes Based on Real Device Testing
-- **FIXED:** ProxyEnabled and AutoConfigEnabled now use OR logic
-  - ProxyEnabled = flag is set OR ProxyServer has a value
-  - AutoConfigEnabled = flag is set OR AutoConfigURL has a value
-  - This matches actual Windows behavior (checked vs unchecked state)
+- **FIXED:** ProxyEnabled and AutoConfigEnabled now read ONLY flag bits
+  - ProxyEnabled = flag bit 0x02 is set (regardless of ProxyServer value)
+  - AutoConfigEnabled = flag bit 0x04 is set (regardless of AutoConfigURL value)
+  - This matches actual Windows behavior (checkbox state, not configuration state)
 - **FIXED:** Version counter no longer incremented (doesn't change in practice)
   - Set-ProxySettings.ps1 now preserves the existing version value
   - Updated all documentation to reflect version preservation
-- Updated Read-DefaultProxySettings.ps1 with final enabled state logic
+- Updated Read-DefaultProxySettings.ps1 to only read flag bits for enabled states
 - Updated Set-ProxySettings.ps1 to preserve version counter
 - Updated all documentation (CLAUDE.md, SET-PROXY-SETTINGS.md) with corrections
 
