@@ -8,21 +8,24 @@ This guide explains how to use the automated test runners to execute all Windows
 
 ## Available Tools
 
-### 1. **Run-ProxyTests.ps1** (PowerShell - Recommended)
-Full-featured interactive test runner with progress tracking, batch processing, and automatic decoder execution.
+### 1. **Run-ProxyTests.cmd** (Batch File - Recommended)
+Full-featured interactive test runner that works without PowerShell execution policy changes. Includes progress tracking, batch processing, and automatic decoder execution.
 
-### 2. **run-single-test.cmd** (Batch File)
+### 2. **run-single-test.cmd** (Batch File - Simple)
 Simple batch file for running individual test cases one at a time.
+
+### 3. **Run-ProxyTests.ps1** (PowerShell - Alternative)
+PowerShell version with same features. Requires execution policy to be set.
 
 ---
 
 ## Quick Start
 
-### Option A: Run All Tests (PowerShell)
+### Option A: Run All Tests (Batch File - Recommended)
 
-```powershell
-cd Dev/ProxySettingsKeys
-.\Run-ProxyTests.ps1
+```cmd
+cd Dev\ProxySettingsKeys
+Run-ProxyTests.cmd
 ```
 
 This will:
@@ -31,14 +34,27 @@ This will:
 - ✅ Launch Internet Options automatically
 - ✅ Export registry after each configuration
 - ✅ Save all results to `TestResults` folder
-- ✅ Track progress in `test-progress.json`
+- ✅ Track progress in `test-progress.txt`
 - ✅ Optionally run decoder when complete
+- ✅ **No PowerShell execution policy required!**
 
 ### Option B: Run Single Test (Batch File)
 
 ```cmd
 cd Dev\ProxySettingsKeys
 run-single-test.cmd TC-101
+```
+
+### Option C: Run All Tests (PowerShell - Alternative)
+
+```powershell
+cd Dev/ProxySettingsKeys
+.\Run-ProxyTests.ps1
+```
+
+**Note:** Requires PowerShell execution policy to be set:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
 ---
