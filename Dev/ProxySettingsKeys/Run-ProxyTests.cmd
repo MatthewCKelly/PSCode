@@ -132,7 +132,7 @@ for /f "tokens=1-4 delims=|" %%A in ('powershell.exe -ExecutionPolicy Bypass -Fi
             echo.
             echo Skipped test !TEST_ID! - file exists
             set /a SKIPPED+=1
-            echo !TEST_ID!,Skipped (file exists),%DATE% %TIME% >> "%PROGRESS_FILE%"
+            echo !TEST_ID!,Skipped-FileExists,%DATE% %TIME% >> "%PROGRESS_FILE%"
             echo.
             echo Press any key to continue...
             pause >nul
@@ -194,7 +194,7 @@ for /f "tokens=1-4 delims=|" %%A in ('powershell.exe -ExecutionPolicy Bypass -Fi
             echo   [X] Export succeeded but file not found!
             echo.
             set /a FAILED+=1
-            echo !TEST_ID!,Failed (file not found),%DATE% %TIME% >> "%PROGRESS_FILE%"
+            echo !TEST_ID!,Failed-FileNotFound,%DATE% %TIME% >> "%PROGRESS_FILE%"
         )
     )
 
@@ -276,14 +276,28 @@ echo ===========================================================================
 echo.
 echo CONFIGURATION INSTRUCTIONS:
 echo.
-echo   !CONFIGURATION!
+REM Use call to safely echo variables with special characters
+call :SafeEcho "  " "!CONFIGURATION!"
 echo.
 echo ================================================================================
 echo.
 echo EXPECTED RESULT:
 echo.
-echo   !EXPECTED!
+call :SafeEcho "  " "!EXPECTED!"
 echo.
 echo ================================================================================
 echo.
+goto :EOF
+
+REM ============================================================================
+REM Subroutine: Safely echo text that may contain special characters
+REM ============================================================================
+:SafeEcho
+setlocal disabledelayedexpansion
+set "prefix=%~1"
+set "text=%~2"
+setlocal enabledelayedexpansion
+echo !prefix!!text!
+endlocal
+endlocal
 goto :EOF
