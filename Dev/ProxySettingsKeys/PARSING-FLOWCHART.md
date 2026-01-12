@@ -20,7 +20,7 @@ Value: DefaultConnectionSettings (REG_BINARY)
 └─────────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│ STEP 1: Read Fixed Header (24 bytes)                            │
+│ STEP 1: Read Fixed Header (28 bytes)                            │
 ├─────────────────────────────────────────────────────────────────┤
 │ Offset 0x00 (4 bytes) → Version Signature (usually 0x46)        │
 │ Offset 0x04 (4 bytes) → Version/Counter                         │
@@ -28,6 +28,7 @@ Value: DefaultConnectionSettings (REG_BINARY)
 │ Offset 0x0C (4 bytes) → Unknown/Reserved                        │
 │ Offset 0x10 (4 bytes) → ProxyServer Length (L1)                 │
 │ Offset 0x14 (4 bytes) → ProxyBypass Length (L2)                 │
+│ Offset 0x18 (4 bytes) → AutoConfigURL Length (L3)               │
 └─────────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -52,9 +53,9 @@ Value: DefaultConnectionSettings (REG_BINARY)
                 YES                     NO (Skip to Step 4)
                 ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│ STEP 3: Read Proxy Settings (Offset 0x18+)                      │
+│ STEP 3: Read Proxy Settings (Offset 0x1C+)                      │
 ├─────────────────────────────────────────────────────────────────┤
-│ Position = 0x18 (after header)                                  │
+│ Position = 0x1C (after 28-byte header)                          │
 │                                                                  │
 │ IF L1 > 0:                                                       │
 │   ├─ Read L1 bytes → ProxyServer string                         │
@@ -66,18 +67,16 @@ Value: DefaultConnectionSettings (REG_BINARY)
 └─────────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│ STEP 4: Check for AutoConfig URL                                │
+│ STEP 4: Read AutoConfig URL                                     │
 ├─────────────────────────────────────────────────────────────────┤
 │ IF Bit 2 SET (0x04) - AutoConfigEnabled:                        │
-│   ├─ Read 4 bytes at Position → AutoConfigURL Length (L3)       │
-│   ├─ Position += 4                                              │
+│   ├─ Length already read at 0x18 (L3)                           │
 │   ├─ IF L3 > 0:                                                 │
-│   │   ├─ Read L3 bytes → AutoConfigURL string                   │
-│   │   └─ Position += L3                                         │
+│   │   └─ Read L3 bytes at Position → AutoConfigURL string       │
 │   └─ ELSE: AutoConfigURL = empty                                │
 │                                                                  │
 │ IF Bit 2 CLEAR:                                                 │
-│   └─ AutoConfigURL = empty (skip reading)                       │
+│   └─ AutoConfigURL = empty (L3 may be 0)                        │
 └─────────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -256,8 +255,9 @@ FUNCTION ParseProxySettings(binaryData):
     unknown = ReadInt32(binaryData, offset=0x0C)
     proxyLength = ReadInt32(binaryData, offset=0x10)
     bypassLength = ReadInt32(binaryData, offset=0x14)
+    autoConfigLength = ReadInt32(binaryData, offset=0x18)
 
-    position = 0x18  // Start of variable data
+    position = 0x1C  // Start of variable data (after 28-byte header)
 
     // Step 2: Read proxy server if enabled
     proxyServer = ""
@@ -275,8 +275,6 @@ FUNCTION ParseProxySettings(binaryData):
     // Step 4: Read auto-config URL if enabled
     autoConfigURL = ""
     IF (flags & 0x04) != 0:  // Bit 2 set
-        autoConfigLength = ReadInt32(binaryData, position)
-        position += 4
         IF autoConfigLength > 0:
             autoConfigURL = ReadString(binaryData, position, autoConfigLength)
             position += autoConfigLength
@@ -310,7 +308,7 @@ END FUNCTION
 ### Rule 1: Always Read Header First
 ```
 ┌─────────────────────────────────────┐
-│ ALWAYS read first 24 bytes          │
+│ ALWAYS read first 28 bytes          │
 │ These contain lengths for all       │
 │ variable-length fields              │
 └─────────────────────────────────────┘
@@ -334,7 +332,7 @@ END FUNCTION
 
 ### Rule 3: Track Position Carefully
 ```
-Position starts at 0x18 (after 24-byte header)
+Position starts at 0x1C (after 28-byte header)
 
 After reading ProxyServer:
   position += proxyLength
@@ -342,10 +340,9 @@ After reading ProxyServer:
 After reading ProxyBypass:
   position += bypassLength
 
-Before reading AutoConfigURL:
-  Read length at current position
-  position += 4
-  Then read string at position
+AutoConfigURL:
+  Length already known from header (0x18)
+  Read string at current position
   position += autoConfigLength
 ```
 
@@ -386,8 +383,9 @@ Offset   Hex Data
 0x0C     00 00 00 00                 Unknown
 0x10     18 00 00 00                 ProxyLength = 24 bytes
 0x14     21 00 00 00                 BypassLength = 33 bytes
-0x18     31 39 32 2E 31 36 38...     "192.168.1.101:8080" (24 bytes)
-0x30     2A 2E 63 6F 6D 70 61...     "*.company.com;<local>" (33 bytes)
+0x18     00 00 00 00                 AutoConfigLength = 0 bytes
+0x1C     31 39 32 2E 31 36 38...     "192.168.1.101:8080" (24 bytes)
+0x34     2A 2E 63 6F 6D 70 61...     "*.company.com;<local>" (33 bytes)
 ```
 
 **Parsing Steps:**
@@ -400,14 +398,14 @@ Offset   Hex Data
 
 2. Bit 1 SET, so read proxy:
    ├─ ProxyLength at 0x10 = 24
-   └─ Read 24 bytes at 0x18 = "192.168.1.101:8080"
+   └─ Read 24 bytes at 0x1C = "192.168.1.101:8080"
 
 3. Read bypass:
    ├─ BypassLength at 0x14 = 33
-   └─ Read 33 bytes at 0x30 = "*.company.com;<local>"
+   └─ Read 33 bytes at 0x34 = "*.company.com;<local>"
 
 4. Bit 2 CLEAR, so skip AutoConfigURL
-   └─ Don't read any more data
+   └─ AutoConfigLength at 0x18 = 0 (confirms no data)
 
 5. Result:
    ├─ ProxyEnabled = TRUE
@@ -449,8 +447,8 @@ Offset   Hex Data
    └─ ProxyBypass = empty
 
 4. Bit 2 SET, so read AutoConfigURL:
-   ├─ Position = 0x18 (no proxy or bypass data)
-   ├─ Read length at 0x18 = 66
+   ├─ Position = 0x1C (no proxy or bypass data)
+   ├─ AutoConfigLength at 0x18 = 66
    └─ Read 66 bytes at 0x1C = "http://config.company.com:8082/proxy.pac?p=PARAMS"
 
 5. Result:
@@ -467,11 +465,11 @@ Offset   Hex Data
 ┌──────────────────────┬────────────────────┬────────────────────┐
 │ Flag Bit             │ Controls Reading   │ Location           │
 ├──────────────────────┼────────────────────┼────────────────────┤
-│ Bit 1 (0x02)         │ ProxyServer        │ Offset 0x18+       │
-│ ProxyEnabled         │ ProxyBypass        │ Offset 0x18+L1     │
+│ Bit 1 (0x02)         │ ProxyServer        │ Offset 0x1C+       │
+│ ProxyEnabled         │ ProxyBypass        │ Offset 0x1C+L1     │
 ├──────────────────────┼────────────────────┼────────────────────┤
-│ Bit 2 (0x04)         │ AutoConfigURL      │ After Proxy/Bypass │
-│ AutoConfigEnabled    │                    │ Read length first  │
+│ Bit 2 (0x04)         │ AutoConfigURL      │ Offset 0x1C+L1+L2  │
+│ AutoConfigEnabled    │ (length at 0x18)   │                    │
 ├──────────────────────┼────────────────────┼────────────────────┤
 │ Bit 0 (0x01)         │ (No data fields)   │ Flag only          │
 │ DirectConnection     │                    │                    │
@@ -513,13 +511,14 @@ IF flags has unexpected bits set (> 0x0F):
 
 When implementing a parser, verify:
 
-- [ ] Correctly reads 24-byte header
+- [ ] Correctly reads 28-byte header
 - [ ] Parses flags as 32-bit integer
+- [ ] Reads all three length fields (0x10, 0x14, 0x18)
 - [ ] Checks bit 1 before reading proxy
 - [ ] Handles zero-length proxy strings
 - [ ] Reads bypass list when present
-- [ ] Checks bit 2 before reading PAC URL
-- [ ] Tracks position correctly through variable fields
+- [ ] Reads AutoConfigURL when bit 2 set AND length > 0
+- [ ] Tracks position correctly through variable fields (starts at 0x1C)
 - [ ] Trims null characters from strings
 - [ ] Returns boolean flags correctly
 - [ ] Handles all flag combinations (0x00 to 0x0F)
