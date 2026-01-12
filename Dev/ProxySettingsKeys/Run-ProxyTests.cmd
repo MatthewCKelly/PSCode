@@ -184,8 +184,8 @@ for /f "tokens=1-4 delims=|" %%A in ('powershell.exe -ExecutionPolicy Bypass -Fi
         if exist "!OUTPUT_FILE!" (
             for %%F in ("!OUTPUT_FILE!") do set "FILE_SIZE=%%~zF"
             echo.
-            echo   [√] Registry exported successfully!
-            echo   [√] File size: !FILE_SIZE! bytes
+            echo   [OK] Registry exported successfully!
+            echo   [OK] File size: !FILE_SIZE! bytes
             echo.
             set /a COMPLETED+=1
             echo !TEST_ID!,Completed,%DATE% %TIME%,!OUTPUT_FILE! >> "%PROGRESS_FILE%"
