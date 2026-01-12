@@ -125,164 +125,108 @@ Function Decode-ConnectionSettings {
     $Settings = @{}
     
     try {
-        # Version/Counter (first 4 bytes as little-endian DWORD)
-        $Settings.Version = Read-UInt32FromBytes -Data $Data -Start 0
+        # Version Signature (bytes 0x00-0x03 as little-endian DWORD)
+        $Settings.VersionSignature = Read-UInt32FromBytes -Data $Data -Start 0
+        if ($null -eq $Settings.VersionSignature) {
+            Write-Detail -Message "Failed to read version signature" -Level Error
+            return $Settings
+        } # end of version signature check
+        Write-Detail -Message "Version Signature: $($Settings.VersionSignature)" -Level Debug
+
+        # Version/Counter (bytes 0x04-0x07 as little-endian DWORD)
+        $Settings.Version = Read-UInt32FromBytes -Data $Data -Start 4
         if ($null -eq $Settings.Version) {
-            Write-Detail -Message "Failed to read version field" -Level Error
+            Write-Detail -Message "Failed to read version/counter" -Level Error
             return $Settings
         } # end of version check
         Write-Detail -Message "Version/Counter: $($Settings.Version)" -Level Debug
 
-        # Connection flags (bytes 4-7 as little-endian DWORD)
-        $Settings.Flags = Read-UInt32FromBytes -Data $Data -Start 4
+        # Connection FLAGS (bytes 0x08-0x0B as little-endian DWORD)
+        $Settings.Flags = Read-UInt32FromBytes -Data $Data -Start 8
         if ($null -eq $Settings.Flags) {
             Write-Detail -Message "Failed to read flags field" -Level Error
             return $Settings
         } # end of flags check
         Write-Detail -Message "Connection flags: 0x$($Settings.Flags.ToString('X8'))" -Level Debug
-        
+
         # Decode individual flag bits
         $Settings.DirectConnection = ($Settings.Flags -band 0x01) -eq 0x01
         $Settings.ProxyEnabled = ($Settings.Flags -band 0x02) -eq 0x02
         $Settings.AutoConfigEnabled = ($Settings.Flags -band 0x04) -eq 0x04
         $Settings.AutoDetectEnabled = ($Settings.Flags -band 0x08) -eq 0x08
-        
+
         Write-Detail -Message "Direct Connection: $($Settings.DirectConnection)" -Level Info
         Write-Detail -Message "Proxy Enabled: $($Settings.ProxyEnabled)" -Level Info
         Write-Detail -Message "Auto Config Enabled: $($Settings.AutoConfigEnabled)" -Level Info
         Write-Detail -Message "Auto Detect Enabled: $($Settings.AutoDetectEnabled)" -Level Info
-        
-        # Parse data sections sequentially - always read length fields even if feature is disabled
-        $Offset = 8
-        Write-Detail -Message "Starting data parsing at offset $Offset (after version and flags)" -Level Debug
-        
-        # Proxy server section (always read length field)
-        if ($Data.Length -gt ($Offset + 3)) {
-            Write-Detail -Message "Reading proxy length from offset $Offset" -Level Debug
-            Write-Detail -Message "Proxy length bytes: 0x$($Data[$Offset].ToString('X2')) 0x$($Data[$Offset+1].ToString('X2')) 0x$($Data[$Offset+2].ToString('X2')) 0x$($Data[$Offset+3].ToString('X2'))" -Level Debug
-            $ProxyLength = Read-UInt32FromBytes -Data $Data -Start $Offset
-            Write-Detail -Message "Proxy server section: $ProxyLength bytes at offset $Offset" -Level Debug
-            $Offset += 4
-            
-            Write-Detail -Message "Proxy length value: $ProxyLength (type: $($ProxyLength.GetType().Name))" -Level Debug
-            Write-Detail -Message "Length check: ProxyLength -gt 0 = $($ProxyLength -gt 0)" -Level Debug
-            Write-Detail -Message "Bounds check: ($Offset + $ProxyLength) -le $($Data.Length) = $(($Offset + $ProxyLength) -le $Data.Length)" -Level Debug
-            Write-Detail -Message "Combined condition result: $(($ProxyLength -gt 0) -and (($Offset + $ProxyLength) -le $Data.Length))" -Level Debug
-            
-            if ($ProxyLength -gt 0 -and ($Offset + $ProxyLength) -le $Data.Length) {
-                Write-Detail -Message "ENTERING proxy string extraction block" -Level Debug
-                # Extract proxy server string only if length > 0
-                $ProxyBytes = $Data[$Offset..($Offset + $ProxyLength - 1)]
-                $Settings.ProxyServer = [System.Text.Encoding]::ASCII.GetString($ProxyBytes).TrimEnd([char]0)
-                Write-Detail -Message "Proxy Server: `"$($Settings.ProxyServer)`"" -Level Info
-            } else {
-                $Settings.ProxyServer = ""
-                if ($ProxyLength -eq 0) {
-                    Write-Detail -Message "Proxy Server: (none - length is 0)" -Level Info
-                } # end of zero length message
-            } # end of proxy string extraction
-           # $Offset += $ProxyLength
-            Write-Detail -Message "After proxy section, offset now: $Offset" -Level Debug
-        } # end of proxy parsing
-        
-        # Proxy bypass section (always read length field)
-        if ($Data.Length -gt ($Offset + 3)) {
-            Write-Detail -Message "Reading bypass length from offset $Offset" -Level Debug
-            Write-Detail -Message "Available bytes from offset: $($Data.Length - $Offset)" -Level Debug
-            Write-Detail -Message "Bypass length bytes: 0x$($Data[$Offset].ToString('X2')) 0x$($Data[$Offset+1].ToString('X2')) 0x$($Data[$Offset+2].ToString('X2')) 0x$($Data[$Offset+3].ToString('X2'))" -Level Debug
-            
-            # Safety check before conversion
-            if (($Offset + 4) -gt $Data.Length) {
-                Write-Detail -Message "ERROR: Not enough bytes to read bypass length at offset $Offset" -Level Error
-                $Settings.ProxyBypass = ""
-                return $Settings
-            } # end of bounds check
 
-            $BypassLength = Read-UInt32FromBytes -Data $Data -Start $Offset
-            Write-Detail -Message "Proxy bypass section: $BypassLength bytes at offset $Offset" -Level Debug
-            $Offset += 4
+        # Unknown/Reserved field (bytes 0x0C-0x0F)
+        $Settings.UnknownField = Read-UInt32FromBytes -Data $Data -Start 12
+        Write-Detail -Message "Unknown/Reserved (bytes 0x0C-0x0F): $($Settings.UnknownField)" -Level Debug
 
-            # Sanity check on bypass length
-            if ($BypassLength -gt 1000) {
-                Write-Detail -Message "WARNING: Bypass length $BypassLength seems unreasonable - possible parsing error at offset $Offset" -Level Warning
-                Write-Detail -Message "This suggests our offset tracking is incorrect" -Level Warning
-                $Settings.ProxyBypass = ""
-            } else {
-                if ($BypassLength -gt 0 -and ($Offset + $BypassLength) -le $Data.Length) {
-                    # Extract proxy bypass string only if length > 0
-                    $BypassBytes = $Data[$Offset..($Offset + $BypassLength - 1)]
-                    $Settings.ProxyBypass = [System.Text.Encoding]::ASCII.GetString($BypassBytes).TrimEnd([char]0)
-                    Write-Detail -Message "Proxy Bypass: $($Settings.ProxyBypass)" -Level Info
-                } else {
-                    $Settings.ProxyBypass = ""
-                    if ($BypassLength -eq 0) {
-                        Write-Detail -Message "Proxy Bypass: (none - length is 0)" -Level Info
-                    } # end of zero length message
-                } # end of bypass string extraction
-                $Offset += $BypassLength
-                Write-Detail -Message "After bypass section, offset now: $Offset" -Level Debug
-            } # end of sanity check
+        # Read all three length fields from header (28-byte fixed header)
+        # Bytes 0x10-0x13: ProxyServer Length (L1)
+        # Bytes 0x14-0x17: ProxyBypass Length (L2)
+        # Bytes 0x18-0x1B: AutoConfigURL Length (L3)
+        # Variable data starts at 0x1C (byte 28)
+
+        $ProxyLength = Read-UInt32FromBytes -Data $Data -Start 16
+        Write-Detail -Message "ProxyServer Length (0x10): $ProxyLength bytes" -Level Debug
+
+        $BypassLength = Read-UInt32FromBytes -Data $Data -Start 20
+        Write-Detail -Message "ProxyBypass Length (0x14): $BypassLength bytes" -Level Debug
+
+        $ConfigLength = Read-UInt32FromBytes -Data $Data -Start 24
+        Write-Detail -Message "AutoConfigURL Length (0x18): $ConfigLength bytes" -Level Debug
+
+        # Variable data starts at offset 0x1C (28 bytes)
+        $Offset = 28
+        Write-Detail -Message "Starting variable data parsing at offset $Offset (0x1C)" -Level Debug
+
+        # Proxy server string (using length from header)
+        if ($ProxyLength -gt 0 -and ($Offset + $ProxyLength) -le $Data.Length) {
+            Write-Detail -Message "Extracting ProxyServer string at offset $Offset, length $ProxyLength" -Level Debug
+            $ProxyBytes = $Data[$Offset..($Offset + $ProxyLength - 1)]
+            $Settings.ProxyServer = [System.Text.Encoding]::ASCII.GetString($ProxyBytes).TrimEnd([char]0)
+            Write-Detail -Message "Proxy Server: `"$($Settings.ProxyServer)`"" -Level Info
         } else {
-            Write-Detail -Message "Not enough bytes remaining to read bypass length" -Level Warning
+            $Settings.ProxyServer = ""
+            if ($ProxyLength -eq 0) {
+                Write-Detail -Message "Proxy Server: (none - length is 0)" -Level Info
+            } # end of zero length message
+        } # end of proxy string extraction
+        $Offset += $ProxyLength
+        Write-Detail -Message "After proxy section, offset now: $Offset" -Level Debug
+
+        # Proxy bypass string (using length from header)
+        if ($BypassLength -gt 0 -and ($Offset + $BypassLength) -le $Data.Length) {
+            Write-Detail -Message "Extracting ProxyBypass string at offset $Offset, length $BypassLength" -Level Debug
+            $BypassBytes = $Data[$Offset..($Offset + $BypassLength - 1)]
+            $Settings.ProxyBypass = [System.Text.Encoding]::ASCII.GetString($BypassBytes).TrimEnd([char]0)
+            Write-Detail -Message "Proxy Bypass: $($Settings.ProxyBypass)" -Level Info
+        } else {
             $Settings.ProxyBypass = ""
-        } # end of bypass parsing
+            if ($BypassLength -eq 0) {
+                Write-Detail -Message "Proxy Bypass: (none - length is 0)" -Level Info
+            } # end of zero length message
+        } # end of bypass string extraction
+        $Offset += $BypassLength
+        Write-Detail -Message "After bypass section, offset now: $Offset" -Level Debug
 
-        # Unknown field between bypass and auto config sections
-        # This field exists after bypass section and affects AutoConfig URL offset
-        if ($Data.Length -gt ($Offset + 3)) {
-            Write-Detail -Message "Reading unknown field at offset $Offset" -Level Debug
-            Write-Detail -Message "Unknown field bytes: 0x$($Data[$Offset].ToString('X2')) 0x$($Data[$Offset+1].ToString('X2')) 0x$($Data[$Offset+2].ToString('X2')) 0x$($Data[$Offset+3].ToString('X2'))" -Level Debug
-
-            $UnknownField = Read-UInt32FromBytes -Data $Data -Start $Offset
-            Write-Detail -Message "Unknown field value: $UnknownField" -Level Debug
-            $Settings.UnknownField = $UnknownField
-            $Offset += 4
-
-            # If unknown field is non-zero, skip 1 additional byte
-            # This pattern is seen in Sample 1 vs Sample 2
-            if ($UnknownField -ne 0) {
-                Write-Detail -Message "Unknown field is non-zero ($UnknownField), skipping 1 extra byte at offset $Offset" -Level Debug
-                if ($Offset -lt $Data.Length) {
-                    $ExtraByte = $Data[$Offset]
-                    Write-Detail -Message "Extra byte: 0x$($ExtraByte.ToString('X2'))" -Level Debug
-                    $Settings.UnknownExtraByte = $ExtraByte
-                    $Offset += 1
-                }
-            }
-            Write-Detail -Message "After unknown field section, offset now: $Offset" -Level Debug
-        } # end of unknown field parsing
-
-        # Auto config URL section (always read length field)
-        if ($Data.Length -gt ($Offset + 3)) {
-            Write-Detail -Message "Reading auto config length from offset $Offset, remaining bytes: $($Data.Length - $Offset)" -Level Debug
-            Write-Detail -Message "Next 4 bytes: 0x$($Data[$Offset].ToString('X2')) 0x$($Data[$Offset+1].ToString('X2')) 0x$($Data[$Offset+2].ToString('X2')) 0x$($Data[$Offset+3].ToString('X2'))" -Level Debug
-
-            $ConfigLength = Read-UInt32FromBytes -Data $Data -Start $Offset
-            Write-Detail -Message "Auto config URL section: $ConfigLength bytes at offset $Offset" -Level Debug
-            
-            # Sanity check - if length is unreasonably large, we have a parsing error
-            if ($ConfigLength -gt 1000) {
-                Write-Detail -Message "WARNING: Config length $ConfigLength seems too large - possible parsing error" -Level Warning
-                Write-Detail -Message "Data from offset $Offset onwards: $([System.BitConverter]::ToString($Data[$Offset..($Offset+15)]))" -Level Debug
-                $Settings.AutoConfigURL = ""
-                return $Settings
-            } # end of sanity check
-            
-            $Offset += 4
-            
-            if ($ConfigLength -gt 0 -and ($Offset + $ConfigLength) -le $Data.Length) {
-                # Extract auto config URL string only if length > 0
-                $ConfigBytes = $Data[$Offset..($Offset + $ConfigLength - 1)]
-                $Settings.AutoConfigURL = [System.Text.Encoding]::ASCII.GetString($ConfigBytes).TrimEnd([char]0)
-                Write-Detail -Message "Auto Config URL (stored): $($Settings.AutoConfigURL)" -Level Info
-            } else {
-                $Settings.AutoConfigURL = ""
-                if ($ConfigLength -eq 0) {
-                    Write-Detail -Message "Auto Config URL: (none - length is 0)" -Level Info
-                } # end of zero length message
-            } # end of config URL extraction
-            $Offset += $ConfigLength
-        } # end of auto config parsing
+        # Auto config URL string (using length from header)
+        if ($ConfigLength -gt 0 -and ($Offset + $ConfigLength) -le $Data.Length) {
+            Write-Detail -Message "Extracting AutoConfigURL string at offset $Offset, length $ConfigLength" -Level Debug
+            $ConfigBytes = $Data[$Offset..($Offset + $ConfigLength - 1)]
+            $Settings.AutoConfigURL = [System.Text.Encoding]::ASCII.GetString($ConfigBytes).TrimEnd([char]0)
+            Write-Detail -Message "Auto Config URL: $($Settings.AutoConfigURL)" -Level Info
+        } else {
+            $Settings.AutoConfigURL = ""
+            if ($ConfigLength -eq 0) {
+                Write-Detail -Message "Auto Config URL: (none - length is 0)" -Level Info
+            } # end of zero length message
+        } # end of config URL extraction
+        $Offset += $ConfigLength
+        Write-Detail -Message "After AutoConfig section, offset now: $Offset" -Level Debug
         
         return $Settings
         
@@ -299,73 +243,92 @@ Function Encode-ConnectionSettings {
     Write-Detail -Message "Encoding settings back to binary format" -Level Info
     
     try {
-        # Start with empty byte array
+        # Prepare string data first to calculate lengths
+        $ProxyStringBytes = @()
+        if ($Settings.ProxyEnabled -and $Settings.ProxyServer) {
+            $ProxyStringBytes = [System.Text.Encoding]::ASCII.GetBytes($Settings.ProxyServer + [char]0)
+        }
+        $ProxyLength = $ProxyStringBytes.Length
+
+        $BypassStringBytes = @()
+        if ($Settings.ProxyEnabled -and $Settings.ProxyBypass) {
+            $BypassStringBytes = [System.Text.Encoding]::ASCII.GetBytes($Settings.ProxyBypass + [char]0)
+        }
+        $BypassLength = $BypassStringBytes.Length
+
+        $ConfigStringBytes = @()
+        if ($Settings.AutoConfigEnabled -and $Settings.AutoConfigURL) {
+            $ConfigStringBytes = [System.Text.Encoding]::ASCII.GetBytes($Settings.AutoConfigURL + [char]0)
+        }
+        $ConfigLength = $ConfigStringBytes.Length
+
+        Write-Detail -Message "String lengths - Proxy: $ProxyLength, Bypass: $BypassLength, AutoConfig: $ConfigLength" -Level Debug
+
+        # Build 28-byte fixed header
         $ResultBytes = @()
-        
-        # Add version/counter (4 bytes little-endian)
-        $VersionBytes = [System.BitConverter]::GetBytes([uint32]$Settings.Version)
-        $ResultBytes += $VersionBytes
-        
-        # Build flags DWORD
+
+        # 0x00-0x03: Version Signature (use existing or default to 70)
+        $VersionSig = if ($Settings.ContainsKey('VersionSignature')) { $Settings.VersionSignature } else { 70 }
+        $ResultBytes += [System.BitConverter]::GetBytes([uint32]$VersionSig)
+        Write-Detail -Message "Added Version Signature at 0x00: $VersionSig" -Level Debug
+
+        # 0x04-0x07: Version/Counter
+        $ResultBytes += [System.BitConverter]::GetBytes([uint32]$Settings.Version)
+        Write-Detail -Message "Added Version/Counter at 0x04: $($Settings.Version)" -Level Debug
+
+        # 0x08-0x0B: FLAGS
         $FlagsValue = 0
         if ($Settings.DirectConnection) { $FlagsValue = $FlagsValue -bor 0x01 }
         if ($Settings.ProxyEnabled) { $FlagsValue = $FlagsValue -bor 0x02 }
         if ($Settings.AutoConfigEnabled) { $FlagsValue = $FlagsValue -bor 0x04 }
         if ($Settings.AutoDetectEnabled) { $FlagsValue = $FlagsValue -bor 0x08 }
-        
-        # Add flags (4 bytes little-endian)
-        $FlagsBytes = [System.BitConverter]::GetBytes([uint32]$FlagsValue)
-        $ResultBytes += $FlagsBytes
-        
-        # Add proxy server string if enabled
-        if ($Settings.ProxyEnabled -and $Settings.ProxyServer) {
-            $ProxyStringBytes = [System.Text.Encoding]::ASCII.GetBytes($Settings.ProxyServer + [char]0)
-            $ProxyLengthBytes = [System.BitConverter]::GetBytes([uint32]$ProxyStringBytes.Length)
-            $ResultBytes += $ProxyLengthBytes
+        $ResultBytes += [System.BitConverter]::GetBytes([uint32]$FlagsValue)
+        Write-Detail -Message "Added FLAGS at 0x08: 0x$($FlagsValue.ToString('X8'))" -Level Debug
+
+        # 0x0C-0x0F: Unknown/Reserved (default to 0)
+        $UnknownValue = if ($Settings.ContainsKey('UnknownField')) { $Settings.UnknownField } else { 0 }
+        $ResultBytes += [System.BitConverter]::GetBytes([uint32]$UnknownValue)
+        Write-Detail -Message "Added Unknown/Reserved at 0x0C: $UnknownValue" -Level Debug
+
+        # 0x10-0x13: ProxyServer Length
+        $ResultBytes += [System.BitConverter]::GetBytes([uint32]$ProxyLength)
+        Write-Detail -Message "Added ProxyServer Length at 0x10: $ProxyLength" -Level Debug
+
+        # 0x14-0x17: ProxyBypass Length
+        $ResultBytes += [System.BitConverter]::GetBytes([uint32]$BypassLength)
+        Write-Detail -Message "Added ProxyBypass Length at 0x14: $BypassLength" -Level Debug
+
+        # 0x18-0x1B: AutoConfigURL Length
+        $ResultBytes += [System.BitConverter]::GetBytes([uint32]$ConfigLength)
+        Write-Detail -Message "Added AutoConfigURL Length at 0x18: $ConfigLength" -Level Debug
+
+        # Header should now be 28 bytes (0x1C)
+        Write-Detail -Message "Header size: $($ResultBytes.Length) bytes (should be 28)" -Level Debug
+
+        # 0x1C+: Variable data
+        if ($ProxyLength -gt 0) {
             $ResultBytes += $ProxyStringBytes
-        } else {
-            # Add zero length for proxy server
-            $ResultBytes += [System.BitConverter]::GetBytes([uint32]0)
-        } # end of proxy server encoding
-        
-        # Add proxy bypass string if enabled
-        if ($Settings.ProxyEnabled -and $Settings.ProxyBypass) {
-            $BypassStringBytes = [System.Text.Encoding]::ASCII.GetBytes($Settings.ProxyBypass + [char]0)
-            $BypassLengthBytes = [System.BitConverter]::GetBytes([uint32]$BypassStringBytes.Length)
-            $ResultBytes += $BypassLengthBytes
-            $ResultBytes += $BypassStringBytes
-        } else {
-            # Add zero length for proxy bypass
-            $ResultBytes += [System.BitConverter]::GetBytes([uint32]0)
-        } # end of proxy bypass encoding
-
-        # Add unknown field (appears between bypass and auto config sections)
-        # Default to 0 if not present in settings
-        $UnknownFieldValue = if ($Settings.ContainsKey('UnknownField')) { $Settings.UnknownField } else { 0 }
-        $UnknownFieldBytes = [System.BitConverter]::GetBytes([uint32]$UnknownFieldValue)
-        $ResultBytes += $UnknownFieldBytes
-        Write-Detail -Message "Added unknown field: $UnknownFieldValue" -Level Debug
-
-        # Add extra byte if unknown field is non-zero
-        if ($UnknownFieldValue -ne 0) {
-            # Default to 0x20 (space) if not specified
-            $ExtraByte = if ($Settings.ContainsKey('UnknownExtraByte')) { $Settings.UnknownExtraByte } else { 0x20 }
-            $ResultBytes += $ExtraByte
-            Write-Detail -Message "Added extra byte after unknown field: 0x$($ExtraByte.ToString('X2'))" -Level Debug
+            Write-Detail -Message "Added ProxyServer string data: $ProxyLength bytes" -Level Debug
         }
 
-        # Add auto config URL if enabled
-        if ($Settings.AutoConfigEnabled -and $Settings.AutoConfigURL) {
-            $ConfigStringBytes = [System.Text.Encoding]::ASCII.GetBytes($Settings.AutoConfigURL + [char]0)
-            $ConfigLengthBytes = [System.BitConverter]::GetBytes([uint32]$ConfigStringBytes.Length)
-            $ResultBytes += $ConfigLengthBytes
+        if ($BypassLength -gt 0) {
+            $ResultBytes += $BypassStringBytes
+            Write-Detail -Message "Added ProxyBypass string data: $BypassLength bytes" -Level Debug
+        }
+
+        if ($ConfigLength -gt 0) {
             $ResultBytes += $ConfigStringBytes
-        } else {
-            # Add zero length for auto config URL
-            $ResultBytes += [System.BitConverter]::GetBytes([uint32]0)
-        } # end of auto config URL encoding
-        
-        Write-Detail -Message "Successfully encoded $($ResultBytes.Length) bytes" -Level Info
+            Write-Detail -Message "Added AutoConfigURL string data: $ConfigLength bytes" -Level Debug
+        }
+
+        # Add padding to reach minimum size (typically padded to specific boundaries)
+        # Most samples have 32 bytes of 0x00 padding at the end
+        $PaddingSize = 32
+        $Padding = New-Object byte[] $PaddingSize
+        $ResultBytes += $Padding
+        Write-Detail -Message "Added $PaddingSize bytes of padding" -Level Debug
+
+        Write-Detail -Message "Successfully encoded $($ResultBytes.Length) bytes total" -Level Info
         return $ResultBytes
         
     } catch {
@@ -469,12 +432,10 @@ Write-Detail -Message "========================================" -Level Info
 
 # Display current configuration summary
 Write-Detail -Message "CURRENT CONFIGURATION SUMMARY:" -Level Info
+Write-Detail -Message "Version Signature: $($CurrentSettings.VersionSignature)" -Level Info
 Write-Detail -Message "Version/Counter: $($CurrentSettings.Version)" -Level Info
 if ($CurrentSettings.ContainsKey('UnknownField')) {
-    Write-Detail -Message "Unknown Field (offset 16-19): $($CurrentSettings.UnknownField)" -Level Debug
-    if ($CurrentSettings.ContainsKey('UnknownExtraByte')) {
-        Write-Detail -Message "Unknown Extra Byte: 0x$($CurrentSettings.UnknownExtraByte.ToString('X2'))" -Level Debug
-    }
+    Write-Detail -Message "Unknown/Reserved (bytes 0x0C-0x0F): $($CurrentSettings.UnknownField)" -Level Debug
 }
 Write-Detail -Message "Direct Connection: $($CurrentSettings.DirectConnection)" -Level Info
 Write-Detail -Message "Proxy Enabled: $($CurrentSettings.ProxyEnabled)" -Level Info
