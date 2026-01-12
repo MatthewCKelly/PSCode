@@ -346,29 +346,32 @@ try {
     } # end of hex dump loop
 
     Write-Detail -Message "STRUCTURE BREAKDOWN:" -Level Info
-    Write-Detail -Message "Bytes 0-3   (Version):      $($Bytes[0].ToString('X2')) $($Bytes[1].ToString('X2')) $($Bytes[2].ToString('X2')) $($Bytes[3].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 0)))" -Level Info
-    Write-Detail -Message "Bytes 4-7   (Flags):        $($Bytes[4].ToString('X2')) $($Bytes[5].ToString('X2')) $($Bytes[6].ToString('X2')) $($Bytes[7].ToString('X2')) = 0x$(([System.BitConverter]::ToUInt32($Bytes, 4)).ToString('X8'))" -Level Info
-    Write-Detail -Message "Bytes 8-11  (Unknown):      $($Bytes[8].ToString('X2')) $($Bytes[9].ToString('X2')) $($Bytes[10].ToString('X2')) $($Bytes[11].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 8)))" -Level Info
-    Write-Detail -Message "Bytes 12-15 (Proxy Len):    $($Bytes[12].ToString('X2')) $($Bytes[13].ToString('X2')) $($Bytes[14].ToString('X2')) $($Bytes[15].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 12)))" -Level Info
-    if ($Bytes.Length -gt 19) {
-        Write-Detail -Message "Bytes 16-19 (Data/Len):     $($Bytes[16].ToString('X2')) $($Bytes[17].ToString('X2')) $($Bytes[18].ToString('X2')) $($Bytes[19].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 16)))" -Level Info
+    Write-Detail -Message "Bytes 0-3   (Ver Sig):      $($Bytes[0].ToString('X2')) $($Bytes[1].ToString('X2')) $($Bytes[2].ToString('X2')) $($Bytes[3].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 0)))" -Level Info
+    Write-Detail -Message "Bytes 4-7   (Ver/Cnt):      $($Bytes[4].ToString('X2')) $($Bytes[5].ToString('X2')) $($Bytes[6].ToString('X2')) $($Bytes[7].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 4)))" -Level Info
+    Write-Detail -Message "Bytes 8-11  (FLAGS):        $($Bytes[8].ToString('X2')) $($Bytes[9].ToString('X2')) $($Bytes[10].ToString('X2')) $($Bytes[11].ToString('X2')) = 0x$(([System.BitConverter]::ToUInt32($Bytes, 8)).ToString('X8'))" -Level Info
+    Write-Detail -Message "Bytes 12-15 (Unknown):      $($Bytes[12].ToString('X2')) $($Bytes[13].ToString('X2')) $($Bytes[14].ToString('X2')) $($Bytes[15].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 12)))" -Level Info
+    Write-Detail -Message "Bytes 16-19 (Proxy Len):    $($Bytes[16].ToString('X2')) $($Bytes[17].ToString('X2')) $($Bytes[18].ToString('X2')) $($Bytes[19].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 16)))" -Level Info
+    Write-Detail -Message "Bytes 20-23 (Bypass Len):   $($Bytes[20].ToString('X2')) $($Bytes[21].ToString('X2')) $($Bytes[22].ToString('X2')) $($Bytes[23].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 20)))" -Level Info
+    if ($Bytes.Length -gt 27) {
+        Write-Detail -Message "Bytes 24-27 (AutoCfg Len):  $($Bytes[24].ToString('X2')) $($Bytes[25].ToString('X2')) $($Bytes[26].ToString('X2')) $($Bytes[27].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 24)))" -Level Info
     }
-    if ($Bytes.Length -gt 23) {
-        Write-Detail -Message "Bytes 20-23 (Data/Len):     $($Bytes[20].ToString('X2')) $($Bytes[21].ToString('X2')) $($Bytes[22].ToString('X2')) $($Bytes[23].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 20)))" -Level Info
-    }
+    Write-Host ""
 
     # Structure documentation
-    Write-Detail -Message "STRUCTURE:" -Level Info
-    Write-Detail -Message "  Bytes 0-3:   Version/Counter (DWORD)" -Level Info
-    Write-Detail -Message "  Bytes 4-7:   Connection Flags (DWORD)" -Level Info
-    Write-Detail -Message "  Bytes 8-11:  Unknown Field (DWORD)" -Level Info
-    Write-Detail -Message "  Bytes 12-15: Proxy Server Length (DWORD)" -Level Info
-    Write-Detail -Message "  Bytes 16+:   Proxy Server String (if length > 0)" -Level Info
-    Write-Detail -Message "  Next 4:      Bypass Length (DWORD)" -Level Info
-    Write-Detail -Message "  Next bytes:  Bypass String (if length > 0)" -Level Info
-    Write-Detail -Message "  Next 4:      PAC URL Length (DWORD)" -Level Info
-    Write-Detail -Message "  Next bytes:  PAC URL String (if length > 0)" -Level Info
-    Write-Detail -Message "  Final 32:    Padding (0x00 bytes)" -Level Info
+    Write-Detail -Message "STRUCTURE (28-byte header + variable data):" -Level Info
+    Write-Detail -Message "  FIXED HEADER (28 bytes = 0x1C):" -Level Info
+    Write-Detail -Message "    Bytes 0x00-0x03:  Version Signature (DWORD)" -Level Info
+    Write-Detail -Message "    Bytes 0x04-0x07:  Version/Counter (DWORD)" -Level Info
+    Write-Detail -Message "    Bytes 0x08-0x0B:  Connection Flags (DWORD)" -Level Info
+    Write-Detail -Message "    Bytes 0x0C-0x0F:  Unknown/Reserved (DWORD)" -Level Info
+    Write-Detail -Message "    Bytes 0x10-0x13:  ProxyServer Length L1 (DWORD)" -Level Info
+    Write-Detail -Message "    Bytes 0x14-0x17:  ProxyBypass Length L2 (DWORD)" -Level Info
+    Write-Detail -Message "    Bytes 0x18-0x1B:  AutoConfigURL Length L3 (DWORD)" -Level Info
+    Write-Detail -Message "  VARIABLE DATA (starts at 0x1C):" -Level Info
+    Write-Detail -Message "    Bytes 0x1C+:      ProxyServer string (L1 bytes)" -Level Info
+    Write-Detail -Message "    Bytes 0x1C+L1:    ProxyBypass string (L2 bytes)" -Level Info
+    Write-Detail -Message "    Bytes 0x1C+L1+L2: AutoConfigURL string (L3 bytes)" -Level Info
+    Write-Detail -Message "    Remaining bytes:  Padding (typically 0x00)" -Level Info
     Write-Detail -Message "========================================" -Level Info
 
 } catch {
