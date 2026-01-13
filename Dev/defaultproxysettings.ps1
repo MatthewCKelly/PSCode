@@ -172,7 +172,7 @@ Function Decode-ConnectionSettings {
         # ProxyServer: Read length, then data
         if ($Data.Length -gt ($Offset + 3)) {
             $ProxyLength = Read-UInt32FromBytes -Data $Data -Start $Offset
-            Write-Detail -Message "ProxyServer Length at offset $Offset: $ProxyLength bytes" -Level Debug
+            Write-Detail -Message "ProxyServer Length at offset $($Offset): $ProxyLength bytes" -Level Debug
             $Offset += 4
 
             if ($ProxyLength -gt 0 -and ($Offset + $ProxyLength) -le $Data.Length) {
@@ -186,7 +186,7 @@ Function Decode-ConnectionSettings {
                     Write-Detail -Message "Proxy Server: (none - length is 0)" -Level Info
                 }
             }
-            Write-Detail -Message "After proxy section, offset now: $Offset" -Level Debug
+            Write-Detail -Message "After proxy section, offset now: $($Offset)" -Level Debug
         } else {
             $Settings.ProxyServer = ""
         }
@@ -194,7 +194,7 @@ Function Decode-ConnectionSettings {
         # ProxyBypass: Read length, then data
         if ($Data.Length -gt ($Offset + 3)) {
             $BypassLength = Read-UInt32FromBytes -Data $Data -Start $Offset
-            Write-Detail -Message "ProxyBypass Length at offset $Offset: $BypassLength bytes" -Level Debug
+            Write-Detail -Message "ProxyBypass Length at offset $($Offset): $BypassLength bytes" -Level Debug
             $Offset += 4
 
             if ($BypassLength -gt 0 -and ($Offset + $BypassLength) -le $Data.Length) {
@@ -208,7 +208,7 @@ Function Decode-ConnectionSettings {
                     Write-Detail -Message "Proxy Bypass: (none - length is 0)" -Level Info
                 }
             }
-            Write-Detail -Message "After bypass section, offset now: $Offset" -Level Debug
+            Write-Detail -Message "After bypass section, offset now: $($Offset)" -Level Debug
         } else {
             $Settings.ProxyBypass = ""
         }
@@ -216,7 +216,7 @@ Function Decode-ConnectionSettings {
         # AutoConfigURL: Read length, then data
         if ($Data.Length -gt ($Offset + 3)) {
             $ConfigLength = Read-UInt32FromBytes -Data $Data -Start $Offset
-            Write-Detail -Message "AutoConfigURL Length at offset $Offset: $ConfigLength bytes" -Level Debug
+            Write-Detail -Message "AutoConfigURL Length at offset $($Offset): $ConfigLength bytes" -Level Debug
             $Offset += 4
 
             if ($ConfigLength -gt 0 -and ($Offset + $ConfigLength) -le $Data.Length) {
@@ -230,11 +230,11 @@ Function Decode-ConnectionSettings {
                     Write-Detail -Message "Auto Config URL: (none - length is 0)" -Level Info
                 }
             }
-            Write-Detail -Message "After AutoConfig section, offset now: $Offset" -Level Debug
+            Write-Detail -Message "After AutoConfig section, offset now: $($Offset)" -Level Debug
         } else {
             $Settings.AutoConfigURL = ""
         }
-        
+
         return $Settings
         
     } catch {
@@ -408,22 +408,26 @@ try {
     }
 
     if ($Bytes.Length -gt ($NextOffset + 3)) {
-        Write-Detail -Message "Bytes $NextOffset-$($NextOffset+3) (Bypass Len):   $($Bytes[$NextOffset].ToString('X2')) $($Bytes[$NextOffset+1].ToString('X2')) $($Bytes[$NextOffset+2].ToString('X2')) $($Bytes[$NextOffset+3].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, $NextOffset)))" -Level Info
+        $BypassLenMsg = "Bytes {0}-{1} (Bypass Len):   {2} {3} {4} {5} = {6}" -f $NextOffset, ($NextOffset+3), $Bytes[$NextOffset].ToString('X2'), $Bytes[$NextOffset+1].ToString('X2'), $Bytes[$NextOffset+2].ToString('X2'), $Bytes[$NextOffset+3].ToString('X2'), ([System.BitConverter]::ToUInt32($Bytes, $NextOffset))
+        Write-Detail -Message $BypassLenMsg -Level Info
 
         $BypassLen = [System.BitConverter]::ToUInt32($Bytes, $NextOffset)
         $NextOffset += 4
         if ($BypassLen -gt 0 -and $Bytes.Length -gt ($NextOffset + $BypassLen)) {
-            Write-Detail -Message "Bytes $NextOffset-$($NextOffset+$BypassLen-1) (Bypass Data):  [$BypassLen bytes]" -Level Info
+            $BypassDataMsg = "Bytes {0}-{1} (Bypass Data):  [{2} bytes]" -f $NextOffset, ($NextOffset+$BypassLen-1), $BypassLen
+            Write-Detail -Message $BypassDataMsg -Level Info
             $NextOffset += $BypassLen
         }
 
         if ($Bytes.Length -gt ($NextOffset + 3)) {
-            Write-Detail -Message "Bytes $NextOffset-$($NextOffset+3) (AutoCfg Len): $($Bytes[$NextOffset].ToString('X2')) $($Bytes[$NextOffset+1].ToString('X2')) $($Bytes[$NextOffset+2].ToString('X2')) $($Bytes[$NextOffset+3].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, $NextOffset)))" -Level Info
+            $AutoCfgLenMsg = "Bytes {0}-{1} (AutoCfg Len): {2} {3} {4} {5} = {6}" -f $NextOffset, ($NextOffset+3), $Bytes[$NextOffset].ToString('X2'), $Bytes[$NextOffset+1].ToString('X2'), $Bytes[$NextOffset+2].ToString('X2'), $Bytes[$NextOffset+3].ToString('X2'), ([System.BitConverter]::ToUInt32($Bytes, $NextOffset))
+            Write-Detail -Message $AutoCfgLenMsg -Level Info
 
             $AutoCfgLen = [System.BitConverter]::ToUInt32($Bytes, $NextOffset)
             $NextOffset += 4
             if ($AutoCfgLen -gt 0 -and $Bytes.Length -gt ($NextOffset + $AutoCfgLen)) {
-                Write-Detail -Message "Bytes $NextOffset-$($NextOffset+$AutoCfgLen-1) (AutoCfg Data): [$AutoCfgLen bytes]" -Level Info
+                $AutoCfgDataMsg = "Bytes {0}-{1} (AutoCfg Data): [{2} bytes]" -f $NextOffset, ($NextOffset+$AutoCfgLen-1), $AutoCfgLen
+                Write-Detail -Message $AutoCfgDataMsg -Level Info
             }
         }
     }
