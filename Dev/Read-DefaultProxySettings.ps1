@@ -163,14 +163,10 @@ Function Decode-ConnectionSettings {
         Write-Detail -Message "Auto Config Enabled: $($Settings.AutoConfigEnabled)" -Level Info
         Write-Detail -Message "Auto Detect Enabled: $($Settings.AutoDetectEnabled)" -Level Info
 
-        # Unknown/Reserved field (bytes 0x0C-0x0F)
-        $Settings.UnknownField = Read-UInt32FromBytes -Data $Data -Start 12
-        Write-Detail -Message "Unknown/Reserved (bytes 0x0C-0x0F): $($Settings.UnknownField)" -Level Debug
-
-        # Structure: 16-byte header + interleaved length+data sections
-        # Starting at offset 0x10 (16): Length+Data, Length+Data, Length+Data
-        $Offset = 16
-        Write-Detail -Message "Starting variable sections at offset $Offset (0x10)" -Level Debug
+        # Structure: 12-byte header + interleaved length+data sections
+        # Starting at offset 0x0C (12): Length+Data, Length+Data, Length+Data
+        $Offset = 12
+        Write-Detail -Message "Starting variable sections at offset $Offset (0x0C)" -Level Debug
 
         # ProxyServer: Read length, then data
         if ($Data.Length -gt ($Offset + 3)) {
@@ -298,22 +294,21 @@ try {
         Write-Detail -Message "$($i.ToString('X4')): $HexRow | $AsciiRow" -Level Info
     } # end of hex dump loop
 
-    Write-Detail -Message "STRUCTURE BREAKDOWN (Fixed Header):" -Level Info
+    Write-Detail -Message "STRUCTURE BREAKDOWN (12-byte Fixed Header):" -Level Info
     Write-Detail -Message "Bytes  0-3  (Ver Sig):      $($Bytes[0].ToString('X2')) $($Bytes[1].ToString('X2')) $($Bytes[2].ToString('X2')) $($Bytes[3].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 0)))" -Level Info
     Write-Detail -Message "Bytes  4-7  (Ver/Cnt):      $($Bytes[4].ToString('X2')) $($Bytes[5].ToString('X2')) $($Bytes[6].ToString('X2')) $($Bytes[7].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 4)))" -Level Info
     Write-Detail -Message "Bytes  8-11 (FLAGS):        $($Bytes[8].ToString('X2')) $($Bytes[9].ToString('X2')) $($Bytes[10].ToString('X2')) $($Bytes[11].ToString('X2')) = 0x$(([System.BitConverter]::ToUInt32($Bytes, 8)).ToString('X8'))" -Level Info
-    Write-Detail -Message "Bytes 12-15 (Unknown):      $($Bytes[12].ToString('X2')) $($Bytes[13].ToString('X2')) $($Bytes[14].ToString('X2')) $($Bytes[15].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 12)))" -Level Info
     Write-Host ""
-    Write-Detail -Message "Variable Sections (Length + Data interleaved, starting at byte 16):" -Level Info
-    Write-Detail -Message "Bytes 16-19 (Proxy Len):    $($Bytes[16].ToString('X2')) $($Bytes[17].ToString('X2')) $($Bytes[18].ToString('X2')) $($Bytes[19].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 16)))" -Level Info
+    Write-Detail -Message "Variable Sections (Length + Data interleaved, starting at byte 12):" -Level Info
+    Write-Detail -Message "Bytes 12-15 (Proxy Len):    $($Bytes[12].ToString('X2')) $($Bytes[13].ToString('X2')) $($Bytes[14].ToString('X2')) $($Bytes[15].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 12)))" -Level Info
 
-    $ProxyLen = [System.BitConverter]::ToUInt32($Bytes, 16)
-    if ($ProxyLen -gt 0 -and $Bytes.Length -gt (20 + $ProxyLen)) {
-        $ProxyDataHex = ($Bytes[20..(19+$ProxyLen)] | ForEach-Object { $_.ToString('X2') }) -join ' '
-        Write-Detail -Message "Bytes 20-$(19+$ProxyLen) (Proxy Data):    $ProxyDataHex" -Level Info
-        $NextOffset = 20 + $ProxyLen
+    $ProxyLen = [System.BitConverter]::ToUInt32($Bytes, 12)
+    if ($ProxyLen -gt 0 -and $Bytes.Length -gt (16 + $ProxyLen)) {
+        $ProxyDataHex = ($Bytes[16..(15+$ProxyLen)] | ForEach-Object { $_.ToString('X2') }) -join ' '
+        Write-Detail -Message "Bytes 16-$(15+$ProxyLen) (Proxy Data):    $ProxyDataHex" -Level Info
+        $NextOffset = 16 + $ProxyLen
     } else {
-        $NextOffset = 20
+        $NextOffset = 16
     }
 
     if ($Bytes.Length -gt ($NextOffset + 3)) {
@@ -343,13 +338,12 @@ try {
     Write-Host ""
 
     # Structure documentation
-    Write-Detail -Message "STRUCTURE (16-byte header + variable length+data sections):" -Level Info
-    Write-Detail -Message "  FIXED HEADER (16 bytes):" -Level Info
+    Write-Detail -Message "STRUCTURE (12-byte header + variable length+data sections):" -Level Info
+    Write-Detail -Message "  FIXED HEADER (12 bytes):" -Level Info
     Write-Detail -Message "    Bytes 0x00-0x03:  Version Signature (DWORD)" -Level Info
     Write-Detail -Message "    Bytes 0x04-0x07:  Version/Counter (DWORD)" -Level Info
     Write-Detail -Message "    Bytes 0x08-0x0B:  Connection Flags (DWORD)" -Level Info
-    Write-Detail -Message "    Bytes 0x0C-0x0F:  Unknown/Reserved (DWORD)" -Level Info
-    Write-Detail -Message "  VARIABLE SECTIONS (starting at 0x10, interleaved length+data):" -Level Info
+    Write-Detail -Message "  VARIABLE SECTIONS (starting at 0x0C, interleaved length+data):" -Level Info
     Write-Detail -Message "    Section 1: ProxyServer Length (4 bytes) + ProxyServer Data (L1 bytes)" -Level Info
     Write-Detail -Message "    Section 2: ProxyBypass Length (4 bytes) + ProxyBypass Data (L2 bytes)" -Level Info
     Write-Detail -Message "    Section 3: AutoConfigURL Length (4 bytes) + AutoConfigURL Data (L3 bytes)" -Level Info
@@ -372,9 +366,6 @@ Write-Detail -Message "========================================" -Level Info
 Write-Detail -Message "CURRENT CONFIGURATION SUMMARY:" -Level Info
 Write-Detail -Message "Version Signature: $($CurrentSettings.VersionSignature)" -Level Info
 Write-Detail -Message "Version/Counter: $($CurrentSettings.Version)" -Level Info
-if ($CurrentSettings.ContainsKey('UnknownField')) {
-    Write-Detail -Message "Unknown/Reserved (bytes 0x0C-0x0F): $($CurrentSettings.UnknownField)" -Level Debug
-}
 Write-Detail -Message "Direct Connection: $($CurrentSettings.DirectConnection)" -Level Info
 Write-Detail -Message "Proxy Enabled: $($CurrentSettings.ProxyEnabled)" -Level Info
 if ($CurrentSettings.ProxyServer) {

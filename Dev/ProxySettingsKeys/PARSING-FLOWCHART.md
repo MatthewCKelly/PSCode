@@ -20,12 +20,11 @@ Value: DefaultConnectionSettings (REG_BINARY)
 └─────────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│ STEP 1: Read Fixed Header (16 bytes)                            │
+│ STEP 1: Read Fixed Header (12 bytes)                            │
 ├─────────────────────────────────────────────────────────────────┤
 │ Offset 0x00 (4 bytes) → Version Signature (usually 0x46)        │
 │ Offset 0x04 (4 bytes) → Version/Counter                         │
 │ Offset 0x08 (4 bytes) → FLAGS (CRITICAL - determines parsing)   │
-│ Offset 0x0C (4 bytes) → Unknown/Reserved                        │
 └─────────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -50,9 +49,9 @@ Value: DefaultConnectionSettings (REG_BINARY)
                 YES                     NO (Skip proxy data)
                 ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│ STEP 3: Read ProxyServer Section (Offset 0x10+)                 │
+│ STEP 3: Read ProxyServer Section (Offset 0x0C+)                 │
 ├─────────────────────────────────────────────────────────────────┤
-│ Position = 0x10 (after 16-byte header)                          │
+│ Position = 0x0C (after 12-byte header)                          │
 │                                                                  │
 │ 1. Read 4 bytes → ProxyServer Length (L1)                       │
 │    Position += 4                                                │
@@ -124,14 +123,13 @@ Value: DefaultConnectionSettings (REG_BINARY)
 
 ```
 FUNCTION ParseProxySettings(binaryData):
-    // Step 1: Read 16-byte fixed header
+    // Step 1: Read 12-byte fixed header
     versionSignature = ReadInt32(binaryData, offset=0x00)
     counter = ReadInt32(binaryData, offset=0x04)
     flags = ReadInt32(binaryData, offset=0x08)
-    unknown = ReadInt32(binaryData, offset=0x0C)
 
-    // Step 2: Start parsing variable sections at offset 0x10
-    position = 0x10  // After 16-byte header
+    // Step 2: Start parsing variable sections at offset 0x0C
+    position = 0x0C  // After 12-byte header
 
     // Step 3: Read ProxyServer section (Length + Data)
     proxyLength = ReadInt32(binaryData, position)
@@ -183,12 +181,12 @@ END FUNCTION
 
 ## Critical Parsing Rules
 
-### Rule 1: Structure is 16-byte Header + Interleaved Sections
+### Rule 1: Structure is 12-byte Header + Interleaved Sections
 ```
 ┌─────────────────────────────────────┐
-│ Fixed Header: 16 bytes (0x00-0x0F) │
+│ Fixed Header: 12 bytes (0x00-0x0B) │
 │                                     │
-│ Variable Sections (from 0x10):     │
+│ Variable Sections (from 0x0C):     │
 │   Section 1: Proxy Length + Data   │
 │   Section 2: Bypass Length + Data  │
 │   Section 3: AutoCfg Length + Data │
@@ -227,7 +225,7 @@ END FUNCTION
 
 ### Rule 4: Position Tracking
 ```
-Position starts at 0x10 (after 16-byte header)
+Position starts at 0x0C (after 12-byte header)
 
 After reading Proxy length:
   position += 4
@@ -249,57 +247,55 @@ After reading AutoConfig data (if length > 0):
 
 ## Example: Step-by-Step Parsing
 
-### Example 1: Auto-Config Only
+### Example 1: Manual Proxy with Auto-Config
 
 **Binary Data (hex):**
 ```
 Offset   Hex Data                       Description
 ───────  ─────────────────────────────  ─────────────────────────
 0x00     46 00 00 00                    VersionSig = 0x46 (70)
-0x04     4A 01 00 00                    Counter = 330
-0x08     01 00 00 00                    Flags = 0x01 (Direct only)
-0x0C     00 00 00 00                    Unknown = 0
-0x10     01 00 00 00                    ProxyServer Length = 1
-0x14     20                             ProxyServer Data = 0x20 (1 byte, space/null)
-0x15     42 00 00 00                    ProxyBypass Length = 66 (0x42)
-0x19     00 00 ... (66 bytes)           ProxyBypass Data (66 bytes)
-0x5B     42 00 00 00                    AutoConfigURL Length = 66
-0x5F     68 74 74 70 ...                "http://webdefence.global..." (66 bytes)
+0x04     05 00 00 00                    Counter = 5
+0x08     0F 00 00 00                    Flags = 0x0F (all enabled)
+0x0C     18 00 00 00                    ProxyServer Length = 24 bytes (0x18)
+0x10     68 74 74 70 3a 2f 2f ...       "http://127.20.20.20:3128!" (24 bytes)
+0x28     2A 00 00 00                    ProxyBypass Length = 42 bytes (0x2A)
+0x2C     68 6f 6d 65 2e 63 ...          "home.crash.co.nz;fh.local;<local>" (42 bytes)
+0x56     42 00 00 00                    AutoConfigURL Length = 66 bytes (0x42)
+0x5A     68 74 74 70 3a 2f 2f ...       "http://webdefence.global..." (66 bytes)
 ```
 
 **Parsing Steps:**
 ```
-1. Read 16-byte header:
-   ├─ VersionSignature = 0x46
-   ├─ Counter = 330
-   ├─ Flags = 0x01 (Direct connection only)
-   └─ Unknown = 0
+1. Read 12-byte header:
+   ├─ VersionSignature = 0x46 (70)
+   ├─ Counter = 5
+   └─ Flags = 0x0F (Direct=1, Proxy=1, AutoConfig=1, AutoDetect=1)
 
-2. Position = 0x10 (16 decimal)
+2. Position = 0x0C (12 decimal)
 
 3. Read ProxyServer section:
-   ├─ Read length at 0x10 = 1 byte
-   ├─ Position = 0x14 (20 decimal)
-   ├─ Read 1 byte at 0x14 = 0x20 (space/null)
-   └─ Position = 0x15 (21 decimal)
+   ├─ Read length at 0x0C = 24 bytes (0x18)
+   ├─ Position = 0x10 (16 decimal)
+   ├─ Read 24 bytes at 0x10 = "http://127.20.20.20:3128!"
+   └─ Position = 0x28 (40 decimal)
 
 4. Read ProxyBypass section:
-   ├─ Read length at 0x15 = 66 bytes (0x42)
-   ├─ Position = 0x19 (25 decimal)
-   ├─ Read 66 bytes at 0x19
-   └─ Position = 0x5B (91 decimal)
+   ├─ Read length at 0x28 = 42 bytes (0x2A)
+   ├─ Position = 0x2C (44 decimal)
+   ├─ Read 42 bytes at 0x2C = "home.crash.co.nz;fh.local;<local>"
+   └─ Position = 0x56 (86 decimal)
 
 5. Read AutoConfigURL section:
-   ├─ Read length at 0x5B = 66 bytes (0x42)
-   ├─ Position = 0x5F (95 decimal)
-   └─ Read 66 bytes at 0x5F = "http://webdefence.global.blackspider.com..."
+   ├─ Read length at 0x56 = 66 bytes (0x42)
+   ├─ Position = 0x5A (90 decimal)
+   └─ Read 66 bytes at 0x5A = "http://webdefence.global.blackspider.com..."
 
 6. Result:
-   ├─ ProxyEnabled = FALSE (Bit 1 clear)
-   ├─ ProxyServer = " " (ignored due to flag)
-   ├─ ProxyBypass = (66 bytes, but ignored)
-   ├─ AutoConfigEnabled = FALSE (Bit 2 clear)
-   └─ AutoConfigURL = "http://..." (data present but flag says not enabled)
+   ├─ ProxyEnabled = TRUE (Bit 1 set)
+   ├─ ProxyServer = "http://127.20.20.20:3128!"
+   ├─ ProxyBypass = "home.crash.co.nz;fh.local;<local>"
+   ├─ AutoConfigEnabled = TRUE (Bit 2 set)
+   └─ AutoConfigURL = "http://webdefence.global..."
 ```
 
 ---
@@ -314,11 +310,11 @@ Example: 0x0000000F = 0000 0000 0000 0000 0000 0000 0000 1111
 
 Bit Position:  ...  7  6  5  4  3  2  1  0
 Hex Mask:          80 40 20 10 08 04 02 01
-                                 ↑  ↑  ↑  ↑
-                                 │  │  │  └─ Bit 0: Direct Connection
-                                 │  │  └──── Bit 1: Proxy Enabled
-                                 │  └─────── Bit 2: Auto Config (PAC)
-                                 └────────── Bit 3: Auto Detect (WPAD)
+                                ↑  ↑  ↑  ↑
+                                │  │  │  └─ Bit 0: Direct Connection
+                                │  │  └──── Bit 1: Proxy Enabled
+                                │  └─────── Bit 2: Auto Config (PAC)
+                                └────────── Bit 3: Auto Detect (WPAD)
 ```
 
 ### Bit Check Logic
@@ -379,9 +375,9 @@ IF flags has unexpected bits set (> 0x0F):
 
 When implementing a parser, verify:
 
-- [ ] Correctly reads 16-byte fixed header
+- [ ] Correctly reads 12-byte fixed header
 - [ ] Parses flags as 32-bit integer at offset 0x08
-- [ ] Starts variable sections at offset 0x10
+- [ ] Starts variable sections at offset 0x0C
 - [ ] Reads ProxyServer length+data sequentially
 - [ ] Advances position after each length and data read
 - [ ] Reads ProxyBypass length+data at correct offset
