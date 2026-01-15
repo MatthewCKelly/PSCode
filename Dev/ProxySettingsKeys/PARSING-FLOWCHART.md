@@ -22,8 +22,8 @@ Value: DefaultConnectionSettings (REG_BINARY)
 ┌─────────────────────────────────────────────────────────────────┐
 │ STEP 1: Read Fixed Header (12 bytes)                            │
 ├─────────────────────────────────────────────────────────────────┤
-│ Offset 0x00 (4 bytes) → Version Signature (usually 0x46)        │
-│ Offset 0x04 (4 bytes) → Version/Counter                         │
+│ Offset 0x00 (4 bytes) → Version Signature (always 0x46 = 70)    │
+│ Offset 0x04 (4 bytes) → Change Counter (auto-increments)        │
 │ Offset 0x08 (4 bytes) → FLAGS (CRITICAL - determines parsing)   │
 └─────────────────────────────────────────────────────────────────┘
                             ↓
@@ -104,8 +104,8 @@ Value: DefaultConnectionSettings (REG_BINARY)
 ┌─────────────────────────────────────────────────────────────────┐
 │ DONE: Return Decoded Settings                                   │
 ├─────────────────────────────────────────────────────────────────┤
-│ - VersionSignature                                               │
-│ - Version/Counter                                                │
+│ - VersionSignature (0x46)                                        │
+│ - Change Counter (auto-increments)                              │
 │ - Flags (hex value)                                             │
 │ - DirectConnection (bool)                                       │
 │ - ProxyEnabled (bool)                                           │
@@ -124,9 +124,9 @@ Value: DefaultConnectionSettings (REG_BINARY)
 ```
 FUNCTION ParseProxySettings(binaryData):
     // Step 1: Read 12-byte fixed header
-    versionSignature = ReadInt32(binaryData, offset=0x00)
-    counter = ReadInt32(binaryData, offset=0x04)
-    flags = ReadInt32(binaryData, offset=0x08)
+    versionSignature = ReadInt32(binaryData, offset=0x00)  // Always 0x46 (70)
+    changeCounter = ReadInt32(binaryData, offset=0x04)     // Auto-increments with each change
+    flags = ReadInt32(binaryData, offset=0x08)             // Bit flags for proxy settings
 
     // Step 2: Start parsing variable sections at offset 0x0C
     position = 0x0C  // After 12-byte header
@@ -164,7 +164,7 @@ FUNCTION ParseProxySettings(binaryData):
     // Return parsed settings
     RETURN {
         versionSignature: versionSignature,
-        version: counter,
+        changeCounter: changeCounter,
         flags: flags,
         directConnection: directConnection,
         proxyEnabled: proxyEnabled,
@@ -183,17 +183,20 @@ END FUNCTION
 
 ### Rule 1: Structure is 12-byte Header + Interleaved Sections
 ```
-┌─────────────────────────────────────┐
-│ Fixed Header: 12 bytes (0x00-0x0B) │
-│                                     │
-│ Variable Sections (from 0x0C):     │
-│   Section 1: Proxy Length + Data   │
-│   Section 2: Bypass Length + Data  │
-│   Section 3: AutoCfg Length + Data │
-│                                     │
-│ NOT all lengths then all data!     │
-│ Each section is Length+Data pair   │
-└─────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│ Fixed Header: 12 bytes (0x00-0x0B)      │
+│   0x00-0x03: Version Sig (0x46)         │
+│   0x04-0x07: Change Counter (auto-inc)  │
+│   0x08-0x0B: Flags (bit flags)          │
+│                                          │
+│ Variable Sections (from 0x0C):          │
+│   Section 1: Proxy Length + Data        │
+│   Section 2: Bypass Length + Data       │
+│   Section 3: AutoCfg Length + Data      │
+│                                          │
+│ NOT all lengths then all data!          │
+│ Each section is Length+Data pair        │
+└──────────────────────────────────────────┘
 ```
 
 ### Rule 2: Read Length+Data Sequentially
@@ -254,7 +257,7 @@ After reading AutoConfig data (if length > 0):
 Offset   Hex Data                       Description
 ───────  ─────────────────────────────  ─────────────────────────
 0x00     46 00 00 00                    VersionSig = 0x46 (70)
-0x04     05 00 00 00                    Counter = 5
+0x04     05 00 00 00                    Change Counter = 5 (increments with each change)
 0x08     0F 00 00 00                    Flags = 0x0F (all enabled)
 0x0C     18 00 00 00                    ProxyServer Length = 24 bytes (0x18)
 0x10     68 74 74 70 3a 2f 2f ...       "http://127.20.20.20:3128!" (24 bytes)
@@ -267,8 +270,8 @@ Offset   Hex Data                       Description
 **Parsing Steps:**
 ```
 1. Read 12-byte header:
-   ├─ VersionSignature = 0x46 (70)
-   ├─ Counter = 5
+   ├─ VersionSignature = 0x46 (70) [constant]
+   ├─ Change Counter = 5 [auto-incremented by Windows on each change]
    └─ Flags = 0x0F (Direct=1, Proxy=1, AutoConfig=1, AutoDetect=1)
 
 2. Position = 0x0C (12 decimal)
@@ -351,7 +354,10 @@ Flags  Binary         Meaning
 
 ```
 IF versionSignature != 0x46:
-    WARN: Unexpected version signature
+    WARN: Unexpected version signature (should always be 70/0x46)
+
+IF changeCounter is suspiciously large (> 1000000):
+    WARN: Counter value seems unreasonable (possible corruption)
 
 IF proxyLength > 1000:
     ERROR: ProxyServer length unreasonable

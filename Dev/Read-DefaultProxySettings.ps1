@@ -137,12 +137,13 @@ Function Decode-ConnectionSettings {
         Write-Detail -Message "Version Signature: $($Settings.VersionSignature)" -Level Debug
 
         # Version/Counter (bytes 0x04-0x07 as little-endian DWORD)
+        # This is an auto-incrementing change counter - Windows increments it with each proxy setting modification
         $Settings.Version = Read-UInt32FromBytes -Data $Data -Start 4
         if ($null -eq $Settings.Version) {
             Write-Detail -Message "Failed to read version/counter" -Level Error
             return $Settings
         } # end of version check
-        Write-Detail -Message "Version/Counter: $($Settings.Version)" -Level Debug
+        Write-Detail -Message "Version/Counter (Change #): $($Settings.Version)" -Level Debug
 
         # Connection FLAGS (bytes 0x08-0x0B as little-endian DWORD)
         $Settings.Flags = Read-UInt32FromBytes -Data $Data -Start 8
@@ -296,7 +297,7 @@ try {
 
     Write-Detail -Message "STRUCTURE BREAKDOWN (12-byte Fixed Header):" -Level Info
     Write-Detail -Message "Bytes  0-3  (Ver Sig):      $($Bytes[0].ToString('X2')) $($Bytes[1].ToString('X2')) $($Bytes[2].ToString('X2')) $($Bytes[3].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 0)))" -Level Info
-    Write-Detail -Message "Bytes  4-7  (Ver/Cnt):      $($Bytes[4].ToString('X2')) $($Bytes[5].ToString('X2')) $($Bytes[6].ToString('X2')) $($Bytes[7].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 4)))" -Level Info
+    Write-Detail -Message "Bytes  4-7  (Chg Count):    $($Bytes[4].ToString('X2')) $($Bytes[5].ToString('X2')) $($Bytes[6].ToString('X2')) $($Bytes[7].ToString('X2')) = $(([System.BitConverter]::ToUInt32($Bytes, 4))) (auto-increments)" -Level Info
     Write-Detail -Message "Bytes  8-11 (FLAGS):        $($Bytes[8].ToString('X2')) $($Bytes[9].ToString('X2')) $($Bytes[10].ToString('X2')) $($Bytes[11].ToString('X2')) = 0x$(([System.BitConverter]::ToUInt32($Bytes, 8)).ToString('X8'))" -Level Info
     Write-Host ""
     Write-Detail -Message "Variable Sections (Length + Data interleaved, starting at byte 12):" -Level Info
@@ -340,9 +341,9 @@ try {
     # Structure documentation
     Write-Detail -Message "STRUCTURE (12-byte header + variable length+data sections):" -Level Info
     Write-Detail -Message "  FIXED HEADER (12 bytes):" -Level Info
-    Write-Detail -Message "    Bytes 0x00-0x03:  Version Signature (DWORD)" -Level Info
-    Write-Detail -Message "    Bytes 0x04-0x07:  Version/Counter (DWORD)" -Level Info
-    Write-Detail -Message "    Bytes 0x08-0x0B:  Connection Flags (DWORD)" -Level Info
+    Write-Detail -Message "    Bytes 0x00-0x03:  Version Signature (DWORD, always 0x46=70)" -Level Info
+    Write-Detail -Message "    Bytes 0x04-0x07:  Change Counter (DWORD, auto-increments with each modification)" -Level Info
+    Write-Detail -Message "    Bytes 0x08-0x0B:  Connection Flags (DWORD, bit flags for proxy/auto-config/etc)" -Level Info
     Write-Detail -Message "  VARIABLE SECTIONS (starting at 0x0C, interleaved length+data):" -Level Info
     Write-Detail -Message "    Section 1: ProxyServer Length (4 bytes) + ProxyServer Data (L1 bytes)" -Level Info
     Write-Detail -Message "    Section 2: ProxyBypass Length (4 bytes) + ProxyBypass Data (L2 bytes)" -Level Info
@@ -365,7 +366,7 @@ Write-Detail -Message "========================================" -Level Info
 # Display current configuration summary
 Write-Detail -Message "CURRENT CONFIGURATION SUMMARY:" -Level Info
 Write-Detail -Message "Version Signature: $($CurrentSettings.VersionSignature)" -Level Info
-Write-Detail -Message "Version/Counter: $($CurrentSettings.Version)" -Level Info
+Write-Detail -Message "Change Counter: $($CurrentSettings.Version) (increments with each setting modification)" -Level Info
 Write-Detail -Message "Direct Connection: $($CurrentSettings.DirectConnection)" -Level Info
 Write-Detail -Message "Proxy Enabled: $($CurrentSettings.ProxyEnabled)" -Level Info
 if ($CurrentSettings.ProxyServer) {
