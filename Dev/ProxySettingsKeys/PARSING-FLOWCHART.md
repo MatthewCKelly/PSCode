@@ -264,7 +264,7 @@ Offset   Hex Data                       Description
 0x28     2A 00 00 00                    ProxyBypass Length = 42 bytes (0x2A)
 0x2C     68 6f 6d 65 2e 63 ...          "home.crash.co.nz;fh.local;<local>" (42 bytes)
 0x56     42 00 00 00                    AutoConfigURL Length = 66 bytes (0x42)
-0x5A     68 74 74 70 3a 2f 2f ...       "http://webdefence.global..." (66 bytes)
+0x5A     68 74 74 70 3a 2f 2f ...       "http://proxy.company.local/proxy.pac" (66 bytes)
 ```
 
 **Parsing Steps:**
@@ -291,14 +291,14 @@ Offset   Hex Data                       Description
 5. Read AutoConfigURL section:
    ├─ Read length at 0x56 = 66 bytes (0x42)
    ├─ Position = 0x5A (90 decimal)
-   └─ Read 66 bytes at 0x5A = "http://webdefence.global.blackspider.com..."
+   └─ Read 66 bytes at 0x5A = "http://proxy.company.local/proxy.pac"
 
 6. Result:
    ├─ ProxyEnabled = TRUE (Bit 1 set)
    ├─ ProxyServer = "http://127.20.20.20:3128!"
    ├─ ProxyBypass = "home.crash.co.nz;fh.local;<local>"
    ├─ AutoConfigEnabled = TRUE (Bit 2 set)
-   └─ AutoConfigURL = "http://webdefence.global..."
+   └─ AutoConfigURL = "http://proxy.company.local/proxy.pac"
 ```
 
 ---
