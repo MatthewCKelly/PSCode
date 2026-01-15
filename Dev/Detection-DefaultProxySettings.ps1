@@ -10,28 +10,34 @@
         Returns 0 (Compliant) if pattern is not found
 
     .PARAMETER ProxyPattern
-        Pattern to search for in ProxyServer field (default: "*webdefence.global.blackspider.com*")
+        Pattern to search for in ProxyServer field (e.g., "*proxy.company.com*")
+        Supports wildcard matching. Leave empty to skip ProxyServer check.
 
     .PARAMETER AutoConfigPattern
-        Pattern to search for in AutoConfigURL field (default: "*webdefence.global.blackspider.com*")
+        Pattern to search for in AutoConfigURL field (e.g., "*/proxy.pac*")
+        Supports wildcard matching. Leave empty to skip AutoConfigURL check.
 
     .EXAMPLE
-        .\Detection-DefaultProxySettings.ps1
-        Checks for default pattern "*webdefence.global.blackspider.com*"
+        .\Detection-DefaultProxySettings.ps1 -ProxyPattern "*badproxy.company.com*"
+        Checks for specific proxy pattern
 
     .EXAMPLE
-        .\Detection-DefaultProxySettings.ps1 -ProxyPattern "*proxy.company.com*"
-        Checks for custom proxy pattern
+        .\Detection-DefaultProxySettings.ps1 -AutoConfigPattern "*unwanted.pac*"
+        Checks for specific auto-config URL pattern
+
+    .EXAMPLE
+        .\Detection-DefaultProxySettings.ps1 -ProxyPattern "*proxy1*" -AutoConfigPattern "*proxy2*"
+        Checks both ProxyServer and AutoConfigURL for different patterns
 
 #>
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [string]$ProxyPattern = "*webdefence.global.blackspider.com*",
+    [string]$ProxyPattern = "",
 
     [Parameter(Mandatory = $false)]
-    [string]$AutoConfigPattern = "*webdefence.global.blackspider.com*"
+    [string]$AutoConfigPattern = ""
 )
 
 #region Helper Functions
@@ -344,10 +350,23 @@ If (-not (Test-Path -Path 'variable:LogTimeZoneBias')) {
 
 #endregion
 
-Write-CMLog -Message "Starting Detection Rule - DefaultConnectionSettings - v1.0.0.1" -Severity Note -Component 'PreChecks' -LogFile $logFile
+Write-CMLog -Message "Starting Detection Rule - DefaultConnectionSettings - v1.0.0.2" -Severity Note -Component 'PreChecks' -LogFile $logFile
 Write-CMLog -Message "Executing script `"$scriptPath`"" -Component 'ScriptName'
-Write-CMLog -Message "ProxyPattern: `"$ProxyPattern`"" -Component 'Parameters'
-Write-CMLog -Message "AutoConfigPattern: `"$AutoConfigPattern`"" -Component 'Parameters'
+
+# Validate that at least one pattern is specified
+if ([string]::IsNullOrEmpty($ProxyPattern) -and [string]::IsNullOrEmpty($AutoConfigPattern)) {
+    Write-CMLog -Message "ERROR: At least one pattern (ProxyPattern or AutoConfigPattern) must be specified" -Severity Error -Component 'Parameters'
+    Write-Host "ERROR: You must specify at least one pattern to search for."
+    Write-Host "Usage: Detection-DefaultProxySettings.ps1 -ProxyPattern `"*pattern*`" -AutoConfigPattern `"*pattern*`""
+    Return 1
+}
+
+if (-not [string]::IsNullOrEmpty($ProxyPattern)) {
+    Write-CMLog -Message "ProxyPattern: `"$ProxyPattern`"" -Component 'Parameters'
+}
+if (-not [string]::IsNullOrEmpty($AutoConfigPattern)) {
+    Write-CMLog -Message "AutoConfigPattern: `"$AutoConfigPattern`"" -Component 'Parameters'
+}
 
 # Check if registry path exists
 If (Test-Path $RegistryPath) {
@@ -374,16 +393,26 @@ If (Test-Path $RegistryPath) {
             Write-CMLog "Decoded Settings - AutoConfigEnabled: $($Settings.AutoConfigEnabled)" -Component 'DecodedSettings'
             Write-CMLog "Decoded Settings - AutoConfigURL: `"$($Settings.AutoConfigURL)`"" -Component 'DecodedSettings'
 
-            # Check ProxyServer against pattern
-            If ($Settings.ProxyServer -and ($Settings.ProxyServer -ilike $ProxyPattern)) {
-                Write-CMLog "MATCH FOUND: ProxyServer `"$($Settings.ProxyServer)`" matches pattern `"$ProxyPattern`"" -Severity Warning -Component 'DetectionRule'
-                $foundPattern = $true
+            # Check ProxyServer against pattern (if pattern specified)
+            If (-not [string]::IsNullOrEmpty($ProxyPattern)) {
+                If ($Settings.ProxyServer -and ($Settings.ProxyServer -ilike $ProxyPattern)) {
+                    Write-CMLog "MATCH FOUND: ProxyServer `"$($Settings.ProxyServer)`" matches pattern `"$ProxyPattern`"" -Severity Warning -Component 'DetectionRule'
+                    $foundPattern = $true
+                }
+                else {
+                    Write-CMLog "No match: ProxyServer does not match pattern `"$ProxyPattern`"" -Component 'DetectionRule'
+                }
             }
 
-            # Check AutoConfigURL against pattern
-            If ($Settings.AutoConfigURL -and ($Settings.AutoConfigURL -ilike $AutoConfigPattern)) {
-                Write-CMLog "MATCH FOUND: AutoConfigURL `"$($Settings.AutoConfigURL)`" matches pattern `"$AutoConfigPattern`"" -Severity Warning -Component 'DetectionRule'
-                $foundPattern = $true
+            # Check AutoConfigURL against pattern (if pattern specified)
+            If (-not [string]::IsNullOrEmpty($AutoConfigPattern)) {
+                If ($Settings.AutoConfigURL -and ($Settings.AutoConfigURL -ilike $AutoConfigPattern)) {
+                    Write-CMLog "MATCH FOUND: AutoConfigURL `"$($Settings.AutoConfigURL)`" matches pattern `"$AutoConfigPattern`"" -Severity Warning -Component 'DetectionRule'
+                    $foundPattern = $true
+                }
+                else {
+                    Write-CMLog "No match: AutoConfigURL does not match pattern `"$AutoConfigPattern`"" -Component 'DetectionRule'
+                }
             }
 
             # Additional logging if patterns found
