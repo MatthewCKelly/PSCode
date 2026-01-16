@@ -365,7 +365,7 @@ Offset  Hex Data                            Decoded Value
 0x28    21 00 00 00                        Bypass Length: 33 bytes
 0x2C    68 6F 6D 65 2E 63 72 61 73 68...   "home.crash.co.nz;fh.local;..."
 0x4D    42 00 00 00                        PAC URL Length: 66 bytes
-0x51    68 74 74 70 3A 2F 2F ...           "http://webdefence..."
+0x51    68 74 74 70 3A 2F 2F ...           "http://proxy.company.local/proxy.pac"
 ...     00 00 00 00 00 ... (32 bytes)      Padding
 ```
 
