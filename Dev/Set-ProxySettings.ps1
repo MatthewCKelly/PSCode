@@ -1,91 +1,183 @@
-﻿<#
-.SYNOPSIS
-    Sets Windows DefaultConnectionSettings registry proxy configuration
-.DESCRIPTION
-    This script updates the DefaultConnectionSettings binary registry value
-    that controls Internet Explorer and Windows proxy settings. It includes
-    automatic validation to ensure consistency (e.g., clearing URLs when features are disabled).
-.PARAMETER DirectConnection
-    Enable direct connection (no proxy)
-.PARAMETER ProxyEnabled
-    Enable manual proxy server configuration
-.PARAMETER ProxyServer
-    Proxy server address and port (e.g., "proxy.example.com:8080")
-.PARAMETER ProxyBypass
-    Semicolon-separated list of addresses to bypass proxy (e.g., "localhost;*.local")
-.PARAMETER AutoConfigEnabled
-    Enable automatic configuration script (PAC file)
-.PARAMETER AutoConfigURL
-    URL to the PAC file (e.g., "http://proxy.example.com/proxy.pac")
-.PARAMETER AutoDetectEnabled
-    Enable automatic proxy detection (WPAD)
-.PARAMETER WhatIf
-    Show what would be changed without making actual changes
-.EXAMPLE
-    .\Set-ProxySettings.ps1 -ProxyEnabled -ProxyServer "proxy.corp.com:8080" -ProxyBypass "localhost;*.corp.com"
-    Enables manual proxy with bypass list
-.EXAMPLE
-    .\Set-ProxySettings.ps1 -AutoConfigEnabled -AutoConfigURL "http://proxy.corp.com/proxy.pac"
-    Enables automatic configuration with PAC file
-.EXAMPLE
-    .\Set-ProxySettings.ps1 -DirectConnection
-    Disables all proxy settings, enables direct connection only
-.NOTES
-    Requires administrative privileges for registry write operations
-    Creates automatic backup before making changes
-    Version: 1.0
-    Created: 2025-11-20
+<#
+    .SYNOPSIS
+        Remediation Script: Removes unwanted proxy configuration from DefaultConnectionSettings
+
+    .DESCRIPTION
+        Reads the DefaultConnectionSettings binary registry value, removes specified
+        proxy configuration elements (AutoConfigURL, ProxyServer, ProxyBypass), and
+        writes the updated configuration back to the registry.
+
+        This script automatically increments the change counter to simulate Windows
+        behavior when modifying proxy settings.
+
+    .PARAMETER RemoveAutoConfig
+        Remove the AutoConfigURL and disable AutoConfig flag (default: $true)
+
+    .PARAMETER RemoveProxyServer
+        Remove the ProxyServer and ProxyBypass settings and disable Proxy flag (default: $false)
+
+    .PARAMETER EnableDirectConnection
+        Ensure DirectConnection flag is enabled (default: $true)
+
+    .PARAMETER CreateBackup
+        Create registry backup before making changes (default: $true)
+
+    .EXAMPLE
+        .\Set-ProxySettings.ps1
+        Removes AutoConfigURL, keeps proxy settings intact
+
+    .EXAMPLE
+        .\Set-ProxySettings.ps1 -RemoveAutoConfig $true -RemoveProxyServer $true
+        Removes both AutoConfigURL and ProxyServer settings
+
+    .EXAMPLE
+        .\Set-ProxySettings.ps1 -RemoveAutoConfig $false -RemoveProxyServer $true
+        Removes only ProxyServer, keeps AutoConfigURL
+
+    .NOTES
+        Requires elevated privileges to modify HKCU registry
+        Creates backup by default before making changes
+        Version: 2.0.0.1 - Remediation-focused with 12-byte header support
 #>
 
-[CmdletBinding(SupportsShouldProcess = $true)]
+[CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [switch]$DirectConnection,
+    [bool]$RemoveAutoConfig = $true,
 
     [Parameter(Mandatory = $false)]
-    [switch]$ProxyEnabled,
+    [bool]$RemoveProxyServer = $false,
 
     [Parameter(Mandatory = $false)]
-    [string]$ProxyServer = "",
+    [bool]$EnableDirectConnection = $true,
 
     [Parameter(Mandatory = $false)]
-    [string]$ProxyBypass = "",
-
-    [Parameter(Mandatory = $false)]
-    [switch]$AutoConfigEnabled,
-
-    [Parameter(Mandatory = $false)]
-    [string]$AutoConfigURL = "",
-
-    [Parameter(Mandatory = $false)]
-    [switch]$AutoDetectEnabled
+    [bool]$CreateBackup = $true
 )
 
 #region Helper Functions
 
+##########################################################################################
+#                                   Helper Functions
+##########################################################################################
+
 Function Write-Detail {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Message,
-        [ValidateSet('Info', 'Warning', 'Error', 'Debug', 'Success')]
-        [string]$Level = 'Info'
+<#
+    .SYNOPSIS
+        Writes to host formatted
+    .DESCRIPTION
+        "Write-Detail"
+    .PARAMETER message
+    .INPUTS
+        [String]
+    .OUTPUTS
+        [Standard Out]
+    .EXAMPLE
+        Write-Detail -message "This is my message for the log file."
+#>
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, HelpMessage = "Please Enter string to display.")]
+        [string]
+        [ValidateNotNullOrEmpty()]
+        $message
     )
-
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $caller = (Get-PSCallStack)[1]
-    $lineNumber = $caller.ScriptLineNumber
-
-    $logEntry = "[{0}] {1,-7} {2,4} {3}" -f $timestamp, $Level, $lineNumber, $Message
-
-    switch ($Level) {
-        'Error'   { Write-Host $logEntry -ForegroundColor Red }
-        'Warning' { Write-Host $logEntry -ForegroundColor Yellow }
-        'Success' { Write-Host $logEntry -ForegroundColor Green }
-        'Debug'   { Write-Host $logEntry -ForegroundColor DarkGray }
-        default   { Write-Host $logEntry -ForegroundColor Gray }
-    }
+    Write-Host "$(Get-Date -Format s)`t$($MyInvocation.ScriptLineNumber) `t- $message" -Verbose
 }
 
+function Write-CMLog {
+    <#
+    .Synopsis
+       Writes an entry to a log file
+    .DESCRIPTION
+       This function writes an entry to a log file, using System Center 2012's log
+       format.  This format is easiest to read if viewed by CMTrace.exe (provided with
+       the SCCM 2012 Admin client) or Trace32.exe (provided with the SCCM 2007 Toolkit).
+       To override this behavior, pass the -AsPlainText switch.
+
+       It is recommended to define a scriptwide variable, $script:logFile, for use with
+       this function.  This will remove the need to pass the -LogFile parameter each
+       time the function is called.
+
+       This function will also write the log message to the Verbose output stream.
+
+       This function does not provide support for pipeline input.
+    #>
+    [CmdletBinding()]
+    param(
+        # The message to be displayed in the log file
+        [Parameter(Mandatory = $true, Position = 0)]
+        [String] $Message,
+
+        # The severity of the log entry (optional, default is 'Note')
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('Note', 'Warning', 'Error')]
+        [String] $Severity = 'Note',
+
+        # The component or module name to record for this log entry (optional)
+        [Parameter(Mandatory = $false)]
+        [String] $Component = $script:scriptName,
+
+        # The line number to reference for this log entry (optional)
+        [Parameter(Mandatory = $false)]
+        [String] $LineNumber,
+
+        # The path of the log file to use (optional if $script:logFile is specified)
+        [Parameter(Mandatory = $false)]
+        [String] $LogFile = $script:logFile,
+
+        [Parameter(Mandatory = $false)]
+        [Alias('AsText', 'a')]
+        [Switch] $AsPlainText
+    )
+
+    if (-not ($LogFile)) {
+        Write-Error "You must either define a log file in the variable `$script:logFile or pass the -LogFile argument."
+        return
+    }
+
+    $date = Get-Date -Format "MM-dd-yyyy"
+    $time = Get-Date -Format "hh:mm:ss.fff"
+
+    if ($AsPlainText) {
+        $logText = "$date $time [$Severity] - $Message"
+    }
+    else {
+        if ($Severity -eq 'Warning') {
+            $s = 2
+        }
+        elseif ($Severity -eq 'Error') {
+            $s = 3
+        }
+        else {
+            $s = 1 #default case
+        }
+
+        if ($script:timezoneBias -eq $null) {
+            [int] $script:timezoneBias = Get-WmiObject -Class Win32_TimeZone | Select-Object -ExpandProperty Bias
+        }
+
+        $timeString = "$time$script:timezoneBias"
+
+        if ($LineNumber) {
+            $fileName = "${script:scriptName}:$LineNumber"
+        }
+        else {
+            $fileName = $script:scriptName
+        }
+
+        $logText = "<![LOG[$($MyInvocation.ScriptLineNumber) `t$Message]LOG]!><time=`"$timeString`" date=`"$date`" component=`"$Component`" context=`"`" type=`"$s`" thread=`"$PID`" file=`"$fileName`">"
+    }
+
+    if (-not (Test-Path $LogFile)) {
+        New-Item -Path $LogFile -ItemType File -Force | Out-Null
+    }
+
+    Out-File -InputObject $logText -FilePath $LogFile -Encoding default -Append -NoClobber
+    Write-Verbose $Message
+}
+
+# Helper function to safely read a 32-bit integer from byte array
 Function Read-UInt32FromBytes {
     param(
         [byte[]]$Data,
@@ -93,351 +185,367 @@ Function Read-UInt32FromBytes {
         [int]$Length = 4
     )
 
+    # Validate we have enough bytes
     if (($Start + $Length) -gt $Data.Length) {
-        Write-Detail "ERROR: Cannot read UInt32 at position $Start - not enough bytes" -Level Error
+        Write-CMLog "ERROR: Cannot read UInt32 at position $Start - not enough bytes" -Severity Error -Component 'BinaryParser'
         return $null
     }
 
+    # Extract subset and convert
     try {
         $SubsetBytes = $Data[$Start..($Start + $Length - 1)]
         $Value = [System.BitConverter]::ToUInt32($SubsetBytes, 0)
         return $Value
     }
     catch {
-        Write-Detail "ERROR: Failed to read UInt32 at position $Start : $($_.Exception.Message)" -Level Error
+        Write-CMLog "ERROR: Failed to read UInt32 at position ${Start}: $($_.Exception.Message)" -Severity Error -Component 'BinaryParser'
         return $null
     }
 }
 
+# Function to decode the binary data structure (12-byte header)
 Function Decode-ConnectionSettings {
     param([byte[]]$Data)
 
+    Write-CMLog "Decoding DefaultConnectionSettings binary structure" -Component 'Decoder'
+
+    # Create hashtable to store decoded values
     $Settings = @{}
 
     try {
-        $Settings.Version = Read-UInt32FromBytes -Data $Data -Start 0
-        $Settings.Flags = Read-UInt32FromBytes -Data $Data -Start 4
-        $Settings.UnknownField = Read-UInt32FromBytes -Data $Data -Start 8
+        # Version Signature (bytes 0x00-0x03)
+        $Settings.VersionSignature = Read-UInt32FromBytes -Data $Data -Start 0
+        if ($null -eq $Settings.VersionSignature) {
+            Write-CMLog "Failed to read version signature" -Severity Error -Component 'Decoder'
+            return $Settings
+        }
 
-        # Decode flags
+        # Change Counter (bytes 0x04-0x07)
+        $Settings.Version = Read-UInt32FromBytes -Data $Data -Start 4
+        if ($null -eq $Settings.Version) {
+            Write-CMLog "Failed to read change counter" -Severity Error -Component 'Decoder'
+            return $Settings
+        }
+
+        # Connection FLAGS (bytes 0x08-0x0B)
+        $Settings.Flags = Read-UInt32FromBytes -Data $Data -Start 8
+        if ($null -eq $Settings.Flags) {
+            Write-CMLog "Failed to read flags field" -Severity Error -Component 'Decoder'
+            return $Settings
+        }
+
+        # Decode individual flag bits
         $Settings.DirectConnection = ($Settings.Flags -band 0x01) -eq 0x01
         $Settings.ProxyEnabled = ($Settings.Flags -band 0x02) -eq 0x02
         $Settings.AutoConfigEnabled = ($Settings.Flags -band 0x04) -eq 0x04
         $Settings.AutoDetectEnabled = ($Settings.Flags -band 0x08) -eq 0x08
 
-        # Parse variable-length sections starting at offset 12
+        # Structure: 12-byte header + interleaved length+data sections
         $Offset = 12
 
-        # Proxy server
-        $ProxyLength = Read-UInt32FromBytes -Data $Data -Start $Offset
-        $Offset += 4
-        if ($ProxyLength -gt 0 -and ($Offset + $ProxyLength) -le $Data.Length) {
-            $ProxyBytes = $Data[$Offset..($Offset + $ProxyLength - 1)]
-            $Settings.ProxyServer = [System.Text.Encoding]::ASCII.GetString($ProxyBytes).TrimEnd([char]0)
-        } else {
+        # ProxyServer: Read length, then data
+        if ($Data.Length -gt ($Offset + 3)) {
+            $ProxyLength = Read-UInt32FromBytes -Data $Data -Start $Offset
+            $Offset += 4
+
+            if ($ProxyLength -gt 0 -and ($Offset + $ProxyLength) -le $Data.Length) {
+                $ProxyBytes = $Data[$Offset..($Offset + $ProxyLength - 1)]
+                $Settings.ProxyServer = [System.Text.Encoding]::ASCII.GetString($ProxyBytes).TrimEnd([char]0)
+                $Offset += $ProxyLength
+            }
+            else {
+                $Settings.ProxyServer = ""
+            }
+        }
+        else {
             $Settings.ProxyServer = ""
         }
-        $Offset += $ProxyLength
 
-        # Proxy bypass
-        $BypassLength = Read-UInt32FromBytes -Data $Data -Start $Offset
-        $Offset += 4
-        if ($BypassLength -gt 0 -and ($Offset + $BypassLength) -le $Data.Length) {
-            $BypassBytes = $Data[$Offset..($Offset + $BypassLength - 1)]
-            $Settings.ProxyBypass = [System.Text.Encoding]::ASCII.GetString($BypassBytes).TrimEnd([char]0)
-        } else {
+        # ProxyBypass: Read length, then data
+        if ($Data.Length -gt ($Offset + 3)) {
+            $BypassLength = Read-UInt32FromBytes -Data $Data -Start $Offset
+            $Offset += 4
+
+            if ($BypassLength -gt 0 -and ($Offset + $BypassLength) -le $Data.Length) {
+                $BypassBytes = $Data[$Offset..($Offset + $BypassLength - 1)]
+                $Settings.ProxyBypass = [System.Text.Encoding]::ASCII.GetString($BypassBytes).TrimEnd([char]0)
+                $Offset += $BypassLength
+            }
+            else {
+                $Settings.ProxyBypass = ""
+            }
+        }
+        else {
             $Settings.ProxyBypass = ""
         }
-        $Offset += $BypassLength
 
-        # Auto config URL
-        $ConfigLength = Read-UInt32FromBytes -Data $Data -Start $Offset
-        $Offset += 4
-        if ($ConfigLength -gt 0 -and ($Offset + $ConfigLength) -le $Data.Length) {
-            $ConfigBytes = $Data[$Offset..($Offset + $ConfigLength - 1)]
-            $Settings.AutoConfigURL = [System.Text.Encoding]::ASCII.GetString($ConfigBytes).TrimEnd([char]0)
-        } else {
+        # AutoConfigURL: Read length, then data
+        if ($Data.Length -gt ($Offset + 3)) {
+            $ConfigLength = Read-UInt32FromBytes -Data $Data -Start $Offset
+            $Offset += 4
+
+            if ($ConfigLength -gt 0 -and ($Offset + $ConfigLength) -le $Data.Length) {
+                $ConfigBytes = $Data[$Offset..($Offset + $ConfigLength - 1)]
+                $Settings.AutoConfigURL = [System.Text.Encoding]::ASCII.GetString($ConfigBytes).TrimEnd([char]0)
+                $Offset += $ConfigLength
+            }
+            else {
+                $Settings.AutoConfigURL = ""
+            }
+        }
+        else {
             $Settings.AutoConfigURL = ""
         }
 
         return $Settings
+
     }
     catch {
-        Write-Detail "Error decoding binary data: $($_.Exception.Message)" -Level Error
+        Write-CMLog "Error decoding binary data: $($_.Exception.Message)" -Severity Error -Component 'Decoder'
         throw
     }
 }
 
+# Function to encode settings back to binary format (12-byte header)
 Function Encode-ConnectionSettings {
     param([hashtable]$Settings)
 
+    Write-CMLog "Encoding settings back to binary format" -Component 'Encoder'
+
     try {
-        $BinaryData = @()
-
-        # Version (preserve from current)
-        $VersionBytes = [System.BitConverter]::GetBytes([uint32]$Settings.Version)
-        $BinaryData += $VersionBytes
-
-        # Flags
-        $FlagsValue = 0
-        if ($Settings.DirectConnection)   { $FlagsValue = $FlagsValue -bor 0x01 }
-        if ($Settings.ProxyEnabled)       { $FlagsValue = $FlagsValue -bor 0x02 }
-        if ($Settings.AutoConfigEnabled)  { $FlagsValue = $FlagsValue -bor 0x04 }
-        if ($Settings.AutoDetectEnabled)  { $FlagsValue = $FlagsValue -bor 0x08 }
-        $FlagsBytes = [System.BitConverter]::GetBytes([uint32]$FlagsValue)
-        $BinaryData += $FlagsBytes
-
-        # Unknown field (preserve from original)
-        $UnknownBytes = [System.BitConverter]::GetBytes([uint32]$Settings.UnknownField)
-        $BinaryData += $UnknownBytes
-
-        # Proxy server section
-        if ($Settings.ProxyEnabled -and -not [string]::IsNullOrEmpty($Settings.ProxyServer)) {
+        # Prepare string data
+        $ProxyStringBytes = @()
+        if ($Settings.ProxyEnabled -and $Settings.ProxyServer) {
             $ProxyStringBytes = [System.Text.Encoding]::ASCII.GetBytes($Settings.ProxyServer + [char]0)
-            $ProxyLengthBytes = [System.BitConverter]::GetBytes([uint32]$ProxyStringBytes.Length)
-            $BinaryData += $ProxyLengthBytes
-            $BinaryData += $ProxyStringBytes
-        } else {
-            $BinaryData += [System.BitConverter]::GetBytes([uint32]0)
         }
 
-        # Proxy bypass section
-        if ($Settings.ProxyEnabled -and -not [string]::IsNullOrEmpty($Settings.ProxyBypass)) {
+        $BypassStringBytes = @()
+        if ($Settings.ProxyEnabled -and $Settings.ProxyBypass) {
             $BypassStringBytes = [System.Text.Encoding]::ASCII.GetBytes($Settings.ProxyBypass + [char]0)
-            $BypassLengthBytes = [System.BitConverter]::GetBytes([uint32]$BypassStringBytes.Length)
-            $BinaryData += $BypassLengthBytes
-            $BinaryData += $BypassStringBytes
-        } else {
-            $BinaryData += [System.BitConverter]::GetBytes([uint32]0)
         }
 
-        # Auto config URL section
-        if ($Settings.AutoConfigEnabled -and -not [string]::IsNullOrEmpty($Settings.AutoConfigURL)) {
+        $ConfigStringBytes = @()
+        if ($Settings.AutoConfigEnabled -and $Settings.AutoConfigURL) {
             $ConfigStringBytes = [System.Text.Encoding]::ASCII.GetBytes($Settings.AutoConfigURL + [char]0)
-            $ConfigLengthBytes = [System.BitConverter]::GetBytes([uint32]$ConfigStringBytes.Length)
-            $BinaryData += $ConfigLengthBytes
-            $BinaryData += $ConfigStringBytes
-        } else {
-            $BinaryData += [System.BitConverter]::GetBytes([uint32]0)
         }
 
-        # Add 32 bytes of padding
-        $BinaryData += ,0x00 * 32
+        Write-CMLog "String lengths - Proxy: $($ProxyStringBytes.Length), Bypass: $($BypassStringBytes.Length), AutoConfig: $($ConfigStringBytes.Length)" -Component 'Encoder'
 
-        return [byte[]]$BinaryData
+        # Build 12-byte fixed header
+        $ResultBytes = @()
+
+        # 0x00-0x03: Version Signature (use existing or default to 70)
+        $VersionSig = if ($Settings.ContainsKey('VersionSignature')) { $Settings.VersionSignature } else { 70 }
+        $ResultBytes += [System.BitConverter]::GetBytes([uint32]$VersionSig)
+
+        # 0x04-0x07: Change Counter
+        $ResultBytes += [System.BitConverter]::GetBytes([uint32]$Settings.Version)
+
+        # 0x08-0x0B: FLAGS
+        $FlagsValue = 0
+        if ($Settings.DirectConnection) { $FlagsValue = $FlagsValue -bor 0x01 }
+        if ($Settings.ProxyEnabled) { $FlagsValue = $FlagsValue -bor 0x02 }
+        if ($Settings.AutoConfigEnabled) { $FlagsValue = $FlagsValue -bor 0x04 }
+        if ($Settings.AutoDetectEnabled) { $FlagsValue = $FlagsValue -bor 0x08 }
+        $ResultBytes += [System.BitConverter]::GetBytes([uint32]$FlagsValue)
+
+        Write-CMLog "Header built - Version: $VersionSig, Counter: $($Settings.Version), Flags: 0x$($FlagsValue.ToString('X8'))" -Component 'Encoder'
+
+        # Add interleaved length+data sections starting at 0x0C
+        # Section 1: ProxyServer Length + Data
+        $ResultBytes += [System.BitConverter]::GetBytes([uint32]$ProxyStringBytes.Length)
+        if ($ProxyStringBytes.Length -gt 0) {
+            $ResultBytes += $ProxyStringBytes
+        }
+
+        # Section 2: ProxyBypass Length + Data
+        $ResultBytes += [System.BitConverter]::GetBytes([uint32]$BypassStringBytes.Length)
+        if ($BypassStringBytes.Length -gt 0) {
+            $ResultBytes += $BypassStringBytes
+        }
+
+        # Section 3: AutoConfigURL Length + Data
+        $ResultBytes += [System.BitConverter]::GetBytes([uint32]$ConfigStringBytes.Length)
+        if ($ConfigStringBytes.Length -gt 0) {
+            $ResultBytes += $ConfigStringBytes
+        }
+
+        # Add padding (typically 32 bytes of 0x00)
+        $PaddingSize = 32
+        $Padding = New-Object byte[] $PaddingSize
+        $ResultBytes += $Padding
+
+        Write-CMLog "Successfully encoded $($ResultBytes.Length) bytes total" -Component 'Encoder'
+        return $ResultBytes
+
     }
     catch {
-        Write-Detail "Error encoding settings: $($_.Exception.Message)" -Level Error
+        Write-CMLog "Error encoding settings: $($_.Exception.Message)" -Severity Error -Component 'Encoder'
         throw
     }
 }
 
 #endregion
 
-#region Main Execution
+#region Global Variables
+## Variables: Script Name and Script Paths
+[string]$scriptPath     = $MyInvocation.MyCommand.Definition
+[string]$scriptName     = [System.IO.Path]::GetFileNameWithoutExtension($scriptPath)
+[string]$scriptFileName = Split-Path -Path $scriptPath -Leaf
+[string]$scriptRoot     = Split-Path -Path $scriptPath -Parent
 
-Write-Detail "Windows Proxy Settings Updater" -Level Info
-Write-Detail ("=" * 80) -Level Info
+[string]$LogFileTime    = Get-Date -Format "yyyyMMdd"
+$logFile                = Join-Path 'C:\Windows\Logs' -ChildPath "Remediation-ProxySettings-$LogFileTime.log"
+$ErrorActionPreference  = "Stop"
+$RegistryPath           = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections"
+$ValueName              = "DefaultConnectionSettings"
+[STRING]$thisScriptPara = ''
 
-# Registry path
-$RegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections"
-$ValueName = "DefaultConnectionSettings"
-
-# Read current settings
-Write-Detail "Reading current proxy settings..." -Level Info
-
-try {
-    $CurrentData = Get-ItemProperty -Path $RegistryPath -Name $ValueName -ErrorAction Stop
-    $CurrentBytes = $CurrentData.$ValueName
-    $CurrentSettings = Decode-ConnectionSettings -Data $CurrentBytes
-    Write-Detail "Current settings loaded successfully" -Level Success
-}
-catch {
-    Write-Detail "Failed to read current settings: $($_.Exception.Message)" -Level Error
-    exit 1
+# Capture any parameters
+foreach ($key in $MyInvocation.BoundParameters.keys) {
+    $thisScriptPara += "-$($key) $($MyInvocation.BoundParameters[$key])`r`n"
 }
 
-Write-Host ""
-Write-Detail "CURRENT SETTINGS:" -Level Info
-Write-Detail "  Version/Counter : $($CurrentSettings.Version)" -Level Info
-Write-Detail "  Direct Connect  : $($CurrentSettings.DirectConnection)" -Level Info
-Write-Detail "  Proxy Enabled   : $($CurrentSettings.ProxyEnabled)" -Level Info
-if ($CurrentSettings.ProxyServer) {
-    Write-Detail "  Proxy Server    : $($CurrentSettings.ProxyServer)" -Level Info
+# Test Timezone
+If (-not (Test-Path -Path 'variable:LogTimeZoneBias')) {
+    [int32]$script:LogTimeZoneBias = [System.TimeZone]::CurrentTimeZone.GetUtcOffset([datetime]::Now).TotalMinutes
 }
-if ($CurrentSettings.ProxyBypass) {
-    Write-Detail "  Proxy Bypass    : $($CurrentSettings.ProxyBypass)" -Level Info
-}
-Write-Detail "  Auto Config     : $($CurrentSettings.AutoConfigEnabled)" -Level Info
-if ($CurrentSettings.AutoConfigURL) {
-    Write-Detail "  Config URL      : $($CurrentSettings.AutoConfigURL)" -Level Info
-}
-Write-Detail "  Auto Detect     : $($CurrentSettings.AutoDetectEnabled)" -Level Info
-
-# Build new settings
-$NewSettings = @{
-    Version = $CurrentSettings.Version  # Preserve version (doesn't change in practice)
-    UnknownField = $CurrentSettings.UnknownField
-    DirectConnection = $DirectConnection.IsPresent
-    ProxyEnabled = $ProxyEnabled.IsPresent
-    ProxyServer = $ProxyServer
-    ProxyBypass = $ProxyBypass
-    AutoConfigEnabled = $AutoConfigEnabled.IsPresent
-    AutoConfigURL = $AutoConfigURL
-    AutoDetectEnabled = $AutoDetectEnabled.IsPresent
-}
-
-# If no parameters specified, keep current settings
-if (-not ($PSBoundParameters.ContainsKey('DirectConnection') -or
-          $PSBoundParameters.ContainsKey('ProxyEnabled') -or
-          $PSBoundParameters.ContainsKey('AutoConfigEnabled') -or
-          $PSBoundParameters.ContainsKey('AutoDetectEnabled'))) {
-    Write-Detail "No flags specified - preserving current flag settings" -Level Warning
-    $NewSettings.DirectConnection = $CurrentSettings.DirectConnection
-    $NewSettings.ProxyEnabled = $CurrentSettings.ProxyEnabled
-    $NewSettings.AutoConfigEnabled = $CurrentSettings.AutoConfigEnabled
-    $NewSettings.AutoDetectEnabled = $CurrentSettings.AutoDetectEnabled
-}
-
-# Validation Rule 1: If ProxyEnabled is False, clear proxy server and bypass
-if (-not $NewSettings.ProxyEnabled) {
-    if ($NewSettings.ProxyServer -or $NewSettings.ProxyBypass) {
-        Write-Detail "Proxy disabled - clearing proxy server and bypass list" -Level Warning
-    }
-    $NewSettings.ProxyServer = ""
-    $NewSettings.ProxyBypass = ""
-}
-
-# Validation Rule 2: If AutoConfigEnabled is False, clear auto config URL
-if (-not $NewSettings.AutoConfigEnabled) {
-    if ($NewSettings.AutoConfigURL) {
-        Write-Detail "Auto config disabled - clearing auto config URL" -Level Warning
-    }
-    $NewSettings.AutoConfigURL = ""
-}
-
-# Validation Rule 3: If ProxyEnabled but no server specified, keep current
-if ($NewSettings.ProxyEnabled -and [string]::IsNullOrEmpty($NewSettings.ProxyServer)) {
-    if (-not [string]::IsNullOrEmpty($CurrentSettings.ProxyServer)) {
-        Write-Detail "Proxy enabled without server - keeping current server" -Level Info
-        $NewSettings.ProxyServer = $CurrentSettings.ProxyServer
-    }
-}
-
-# Validation Rule 4: If no bypass specified but proxy enabled, keep current
-if ($NewSettings.ProxyEnabled -and [string]::IsNullOrEmpty($NewSettings.ProxyBypass)) {
-    if (-not [string]::IsNullOrEmpty($CurrentSettings.ProxyBypass)) {
-        Write-Detail "No bypass list specified - keeping current bypass list" -Level Info
-        $NewSettings.ProxyBypass = $CurrentSettings.ProxyBypass
-    }
-}
-
-# Validation Rule 5: If AutoConfigEnabled but no URL specified, keep current
-if ($NewSettings.AutoConfigEnabled -and [string]::IsNullOrEmpty($NewSettings.AutoConfigURL)) {
-    if (-not [string]::IsNullOrEmpty($CurrentSettings.AutoConfigURL)) {
-        Write-Detail "Auto config enabled without URL - keeping current URL" -Level Info
-        $NewSettings.AutoConfigURL = $CurrentSettings.AutoConfigURL
-    }
-}
-
-Write-Host ""
-Write-Detail "NEW SETTINGS:" -Level Info
-Write-Detail "  Version/Counter : $($NewSettings.Version)" -Level Info
-Write-Detail "  Direct Connect  : $($NewSettings.DirectConnection)" -Level Info
-Write-Detail "  Proxy Enabled   : $($NewSettings.ProxyEnabled)" -Level Info
-if ($NewSettings.ProxyServer) {
-    Write-Detail "  Proxy Server    : $($NewSettings.ProxyServer)" -Level Info
-}
-if ($NewSettings.ProxyBypass) {
-    Write-Detail "  Proxy Bypass    : $($NewSettings.ProxyBypass)" -Level Info
-}
-Write-Detail "  Auto Config     : $($NewSettings.AutoConfigEnabled)" -Level Info
-if ($NewSettings.AutoConfigURL) {
-    Write-Detail "  Config URL      : $($NewSettings.AutoConfigURL)" -Level Info
-}
-Write-Detail "  Auto Detect     : $($NewSettings.AutoDetectEnabled)" -Level Info
-
-# Encode new settings
-Write-Host ""
-Write-Detail "Encoding new settings..." -Level Info
-
-try {
-    $NewBytes = Encode-ConnectionSettings -Settings $NewSettings
-    Write-Detail "Settings encoded successfully ($($NewBytes.Length) bytes)" -Level Success
-}
-catch {
-    Write-Detail "Failed to encode settings: $($_.Exception.Message)" -Level Error
-    exit 1
-}
-
-# Create backup before writing
-if ($PSCmdlet.ShouldProcess($RegistryPath, "Update proxy settings")) {
-    Write-Host ""
-    Write-Detail "Creating registry backup..." -Level Info
-
-    $BackupFile = "DefaultConnectionSettings_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss').reg"
-    $ExportCommand = "reg export `"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections`" `"$BackupFile`" /y"
-
-    try {
-        $null = Invoke-Expression $ExportCommand 2>&1
-        Write-Detail "Backup created: $BackupFile" -Level Success
-    }
-    catch {
-        Write-Detail "Warning: Could not create backup: $($_.Exception.Message)" -Level Warning
-    }
-
-    # Write new settings to registry
-    Write-Detail "Writing new settings to registry..." -Level Info
-
-    try {
-        Set-ItemProperty -Path $RegistryPath -Name $ValueName -Value $NewBytes -Type Binary -ErrorAction Stop
-        Write-Detail "Registry updated successfully!" -Level Success
-    }
-    catch {
-        Write-Detail "Failed to write to registry: $($_.Exception.Message)" -Level Error
-        exit 1
-    }
-
-    # Verify the write
-    Write-Host ""
-    Write-Detail "Verifying changes..." -Level Info
-
-    try {
-        $VerifyData = Get-ItemProperty -Path $RegistryPath -Name $ValueName -ErrorAction Stop
-        $VerifyBytes = $VerifyData.$ValueName
-        $VerifySettings = Decode-ConnectionSettings -Data $VerifyBytes
-
-        Write-Host ""
-        Write-Detail "VERIFIED SETTINGS:" -Level Success
-        Write-Detail "  Version/Counter : $($VerifySettings.Version)" -Level Info
-        Write-Detail "  Direct Connect  : $($VerifySettings.DirectConnection)" -Level Info
-        Write-Detail "  Proxy Enabled   : $($VerifySettings.ProxyEnabled)" -Level Info
-        if ($VerifySettings.ProxyServer) {
-            Write-Detail "  Proxy Server    : $($VerifySettings.ProxyServer)" -Level Info
-        }
-        if ($VerifySettings.ProxyBypass) {
-            Write-Detail "  Proxy Bypass    : $($VerifySettings.ProxyBypass)" -Level Info
-        }
-        Write-Detail "  Auto Config     : $($VerifySettings.AutoConfigEnabled)" -Level Info
-        if ($VerifySettings.AutoConfigURL) {
-            Write-Detail "  Config URL      : $($VerifySettings.AutoConfigURL)" -Level Info
-        }
-        Write-Detail "  Auto Detect     : $($VerifySettings.AutoDetectEnabled)" -Level Info
-    }
-    catch {
-        Write-Detail "Warning: Could not verify changes: $($_.Exception.Message)" -Level Warning
-    }
-}
-else {
-    Write-Host ""
-    Write-Detail "WhatIf: Would update registry with new settings" -Level Info
-}
-
-Write-Host ""
-Write-Detail ("=" * 80) -Level Info
-Write-Detail "Proxy settings update completed" -Level Success
-Write-Detail ("=" * 80) -Level Info
-
-exit 0
 
 #endregion
+
+Write-CMLog -Message "Starting Remediation Script - Set-ProxySettings - v2.0.0.1" -Severity Note -Component 'PreChecks' -LogFile $logFile
+Write-CMLog -Message "Executing script `"$scriptPath`"" -Component 'ScriptName'
+Write-CMLog -Message "RemoveAutoConfig: $RemoveAutoConfig" -Component 'Parameters'
+Write-CMLog -Message "RemoveProxyServer: $RemoveProxyServer" -Component 'Parameters'
+Write-CMLog -Message "EnableDirectConnection: $EnableDirectConnection" -Component 'Parameters'
+Write-CMLog -Message "CreateBackup: $CreateBackup" -Component 'Parameters'
+
+# Validate that at least one remediation action is specified
+if (-not $RemoveAutoConfig -and -not $RemoveProxyServer) {
+    Write-CMLog -Message "WARNING: No remediation actions specified - script will make no changes" -Severity Warning -Component 'Parameters'
+    Write-Host "WARNING: No remediation actions specified. Use -RemoveAutoConfig or -RemoveProxyServer"
+    Return 0
+}
+
+# Check if registry path exists
+If (-not (Test-Path $RegistryPath)) {
+    Write-CMLog "Registry path not found: $RegistryPath" -Severity Error -Component 'RegistryCheck'
+    Write-Host "ERROR: Registry path not found"
+    Return 1
+}
+
+Try {
+    # Read the binary registry value
+    Write-CMLog "Reading registry value from $RegistryPath" -Component 'RegistryRead'
+    $BinaryData = Get-ItemProperty -Path $RegistryPath -Name $ValueName -ErrorAction Stop
+    $Bytes = $BinaryData.$ValueName
+
+    if ($null -eq $Bytes -or $Bytes.Length -eq 0) {
+        Write-CMLog "Registry value is empty or null" -Severity Error -Component 'RegistryRead'
+        Return 1
+    }
+
+    Write-CMLog "Successfully read $($Bytes.Length) bytes from registry" -Component 'RegistryRead'
+
+    # Decode current settings
+    $CurrentSettings = Decode-ConnectionSettings -Data $Bytes
+
+    # Log current settings
+    Write-CMLog "CURRENT Settings - Change Counter: $($CurrentSettings.Version)" -Component 'CurrentSettings'
+    Write-CMLog "CURRENT Settings - ProxyEnabled: $($CurrentSettings.ProxyEnabled)" -Component 'CurrentSettings'
+    Write-CMLog "CURRENT Settings - ProxyServer: `"$($CurrentSettings.ProxyServer)`"" -Component 'CurrentSettings'
+    Write-CMLog "CURRENT Settings - AutoConfigEnabled: $($CurrentSettings.AutoConfigEnabled)" -Component 'CurrentSettings'
+    Write-CMLog "CURRENT Settings - AutoConfigURL: `"$($CurrentSettings.AutoConfigURL)`"" -Component 'CurrentSettings'
+
+    # Create backup if requested
+    if ($CreateBackup) {
+        Write-CMLog "Creating registry backup" -Component 'Backup'
+        $BackupFile = Join-Path $env:TEMP "DefaultConnectionSettings_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss').reg"
+        $ExportCommand = "reg export `"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections`" `"$BackupFile`" /y"
+
+        try {
+            Invoke-Expression $ExportCommand | Out-Null
+            Write-CMLog "Registry backup created: $BackupFile" -Component 'Backup'
+        }
+        catch {
+            Write-CMLog "WARNING: Failed to create backup: $($_.Exception.Message)" -Severity Warning -Component 'Backup'
+        }
+    }
+
+    # Create modified settings
+    $NewSettings = $CurrentSettings.Clone()
+
+    # Increment change counter
+    $NewSettings.Version = $NewSettings.Version + 1
+    Write-CMLog "Incremented change counter from $($CurrentSettings.Version) to $($NewSettings.Version)" -Component 'Modification'
+
+    # Apply remediation actions
+    $ChangesMade = $false
+
+    if ($RemoveAutoConfig) {
+        if ($CurrentSettings.AutoConfigEnabled -or -not [string]::IsNullOrEmpty($CurrentSettings.AutoConfigURL)) {
+            Write-CMLog "REMEDIATION: Removing AutoConfigURL and disabling AutoConfig flag" -Severity Note -Component 'Remediation'
+            $NewSettings.AutoConfigEnabled = $false
+            $NewSettings.AutoConfigURL = ""
+            $ChangesMade = $true
+        }
+        else {
+            Write-CMLog "AutoConfig already disabled/empty - no action needed" -Component 'Remediation'
+        }
+    }
+
+    if ($RemoveProxyServer) {
+        if ($CurrentSettings.ProxyEnabled -or -not [string]::IsNullOrEmpty($CurrentSettings.ProxyServer)) {
+            Write-CMLog "REMEDIATION: Removing ProxyServer/ProxyBypass and disabling Proxy flag" -Severity Note -Component 'Remediation'
+            $NewSettings.ProxyEnabled = $false
+            $NewSettings.ProxyServer = ""
+            $NewSettings.ProxyBypass = ""
+            $ChangesMade = $true
+        }
+        else {
+            Write-CMLog "Proxy already disabled/empty - no action needed" -Component 'Remediation'
+        }
+    }
+
+    if ($EnableDirectConnection) {
+        if (-not $CurrentSettings.DirectConnection) {
+            Write-CMLog "REMEDIATION: Enabling DirectConnection flag" -Severity Note -Component 'Remediation'
+            $NewSettings.DirectConnection = $true
+            $ChangesMade = $true
+        }
+        else {
+            Write-CMLog "DirectConnection already enabled - no action needed" -Component 'Remediation'
+        }
+    }
+
+    if (-not $ChangesMade) {
+        Write-CMLog "No changes needed - settings already compliant" -Component 'Remediation'
+        Return 0
+    }
+
+    # Encode new settings
+    Write-CMLog "Encoding modified settings to binary format" -Component 'Encoding'
+    $NewBinaryData = Encode-ConnectionSettings -Settings $NewSettings
+
+    # Write back to registry
+    Write-CMLog "Writing modified settings to registry" -Severity Note -Component 'RegistryWrite'
+    Set-ItemProperty -Path $RegistryPath -Name $ValueName -Value $NewBinaryData -Type Binary
+
+    # Log new settings
+    Write-CMLog "NEW Settings - Change Counter: $($NewSettings.Version)" -Component 'NewSettings'
+    Write-CMLog "NEW Settings - ProxyEnabled: $($NewSettings.ProxyEnabled)" -Component 'NewSettings'
+    Write-CMLog "NEW Settings - ProxyServer: `"$($NewSettings.ProxyServer)`"" -Component 'NewSettings'
+    Write-CMLog "NEW Settings - AutoConfigEnabled: $($NewSettings.AutoConfigEnabled)" -Component 'NewSettings'
+    Write-CMLog "NEW Settings - AutoConfigURL: `"$($NewSettings.AutoConfigURL)`"" -Component 'NewSettings'
+    Write-CMLog "NEW Settings - DirectConnection: $($NewSettings.DirectConnection)" -Component 'NewSettings'
+
+    Write-CMLog "Registry updated successfully" -Severity Note -Component 'Success'
+    Write-CMLog "Changes will take effect after restarting applications or rebooting" -Severity Warning -Component 'Success'
+
+    Return 0
+}
+Catch {
+    Write-CMLog "Error during remediation: $($_.Exception.Message)" -Severity Error -Component 'Error'
+    Write-CMLog "Stack trace: $($_.ScriptStackTrace)" -Severity Error -Component 'Error'
+    Return 1
+}
