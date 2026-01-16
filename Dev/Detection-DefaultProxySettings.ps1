@@ -29,6 +29,11 @@
         .\Detection-DefaultProxySettings.ps1 -ProxyPattern "*proxy1*" -AutoConfigPattern "*proxy2*"
         Checks both ProxyServer and AutoConfigURL for different patterns
 
+    .NOTES
+        Returns 0 (Compliant) or 1 (Non-Compliant)
+        Log file: C:\Windows\Logs (if writable) or %TEMP% (fallback)
+        Version: 1.0.0.3 - Detection rule with dynamic log path selection
+
 #>
 
 [CmdletBinding()]
@@ -331,8 +336,29 @@ Function Decode-ConnectionSettings {
 [string]$scriptRoot     = Split-Path -Path $scriptPath -Parent
 
 [string]$LogFileTime    = Get-Date -Format "yyyyMMdd"
-$logFile                = Join-Path 'C:\Windows\Logs' -ChildPath "Detection-DefaultProxySettings-$LogFileTime.log"
 $ErrorActionPreference  = "Stop"
+
+# Test if C:\Windows\Logs is writable, otherwise use $env:TEMP
+$PrimaryLogPath = 'C:\Windows\Logs'
+$LogFileName = "Detection-DefaultProxySettings-$LogFileTime.log"
+
+if (Test-Path $PrimaryLogPath) {
+    # Test write access by attempting to create a temp file
+    $TestFile = Join-Path $PrimaryLogPath "write_test_$PID.tmp"
+    try {
+        [System.IO.File]::WriteAllText($TestFile, "test")
+        Remove-Item $TestFile -Force -ErrorAction SilentlyContinue
+        $logFile = Join-Path $PrimaryLogPath $LogFileName
+    }
+    catch {
+        # Not writable, fall back to temp
+        $logFile = Join-Path $env:TEMP $LogFileName
+    }
+}
+else {
+    # Directory doesn't exist, use temp
+    $logFile = Join-Path $env:TEMP $LogFileName
+}
 $RegistryPath           = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections"
 $ValueName              = "DefaultConnectionSettings"
 $foundPattern           = $false
@@ -350,7 +376,8 @@ If (-not (Test-Path -Path 'variable:LogTimeZoneBias')) {
 
 #endregion
 
-Write-CMLog -Message "Starting Detection Rule - DefaultConnectionSettings - v1.0.0.2" -Severity Note -Component 'PreChecks' -LogFile $logFile
+Write-CMLog -Message "Starting Detection Rule - DefaultConnectionSettings - v1.0.0.3" -Severity Note -Component 'PreChecks' -LogFile $logFile
+Write-CMLog -Message "Log file location: $logFile" -Component 'PreChecks'
 Write-CMLog -Message "Executing script `"$scriptPath`"" -Component 'ScriptName'
 
 # Validate that at least one pattern is specified
