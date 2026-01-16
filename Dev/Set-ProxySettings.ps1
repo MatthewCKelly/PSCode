@@ -39,7 +39,8 @@
         Requires elevated privileges to modify HKCU registry
         Creates backup by default before making changes
         Updates both DefaultConnectionSettings and SavedLegacySettings
-        Version: 2.1.0.1 - Remediation-focused with SavedLegacySettings synchronization
+        Log file: C:\Windows\Logs (if writable) or %TEMP% (fallback)
+        Version: 2.1.0.2 - Remediation-focused with dynamic log path selection
 #>
 
 [CmdletBinding()]
@@ -397,8 +398,29 @@ Function Encode-ConnectionSettings {
 [string]$scriptRoot     = Split-Path -Path $scriptPath -Parent
 
 [string]$LogFileTime    = Get-Date -Format "yyyyMMdd"
-$logFile                = Join-Path 'C:\Windows\Logs' -ChildPath "Remediation-ProxySettings-$LogFileTime.log"
 $ErrorActionPreference  = "Stop"
+
+# Test if C:\Windows\Logs is writable, otherwise use $env:TEMP
+$PrimaryLogPath = 'C:\Windows\Logs'
+$LogFileName = "Remediation-ProxySettings-$LogFileTime.log"
+
+if (Test-Path $PrimaryLogPath) {
+    # Test write access by attempting to create a temp file
+    $TestFile = Join-Path $PrimaryLogPath "write_test_$PID.tmp"
+    try {
+        [System.IO.File]::WriteAllText($TestFile, "test")
+        Remove-Item $TestFile -Force -ErrorAction SilentlyContinue
+        $logFile = Join-Path $PrimaryLogPath $LogFileName
+    }
+    catch {
+        # Not writable, fall back to temp
+        $logFile = Join-Path $env:TEMP $LogFileName
+    }
+}
+else {
+    # Directory doesn't exist, use temp
+    $logFile = Join-Path $env:TEMP $LogFileName
+}
 $RegistryPath           = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections"
 $ValueName              = "DefaultConnectionSettings"
 [STRING]$thisScriptPara = ''
@@ -415,7 +437,8 @@ If (-not (Test-Path -Path 'variable:LogTimeZoneBias')) {
 
 #endregion
 
-Write-CMLog -Message "Starting Remediation Script - Set-ProxySettings - v2.1.0.1" -Severity Note -Component 'PreChecks' -LogFile $logFile
+Write-CMLog -Message "Starting Remediation Script - Set-ProxySettings - v2.1.0.2" -Severity Note -Component 'PreChecks' -LogFile $logFile
+Write-CMLog -Message "Log file location: $logFile" -Component 'PreChecks'
 Write-CMLog -Message "Executing script `"$scriptPath`"" -Component 'ScriptName'
 Write-CMLog -Message "RemoveAutoConfig: $RemoveAutoConfig" -Component 'Parameters'
 Write-CMLog -Message "RemoveProxyServer: $RemoveProxyServer" -Component 'Parameters'
