@@ -5,10 +5,11 @@
     .DESCRIPTION
         Reads the DefaultConnectionSettings binary registry value, removes specified
         proxy configuration elements (AutoConfigURL, ProxyServer, ProxyBypass), and
-        writes the updated configuration back to the registry.
+        writes the updated configuration back to both DefaultConnectionSettings and
+        SavedLegacySettings registry values.
 
         This script automatically increments the change counter to simulate Windows
-        behavior when modifying proxy settings.
+        behavior when modifying proxy settings and keeps both registry values synchronized.
 
     .PARAMETER RemoveAutoConfig
         Remove the AutoConfigURL and disable AutoConfig flag (default: $true)
@@ -37,7 +38,9 @@
     .NOTES
         Requires elevated privileges to modify HKCU registry
         Creates backup by default before making changes
-        Version: 2.0.0.1 - Remediation-focused with 12-byte header support
+        Updates both DefaultConnectionSettings and SavedLegacySettings
+        Log file: C:\Windows\Logs (if writable) or %TEMP% (fallback)
+        Version: 2.1.0.2 - Remediation-focused with dynamic log path selection
 #>
 
 [CmdletBinding()]
@@ -395,8 +398,29 @@ Function Encode-ConnectionSettings {
 [string]$scriptRoot     = Split-Path -Path $scriptPath -Parent
 
 [string]$LogFileTime    = Get-Date -Format "yyyyMMdd"
-$logFile                = Join-Path 'C:\Windows\Logs' -ChildPath "Remediation-ProxySettings-$LogFileTime.log"
 $ErrorActionPreference  = "Stop"
+
+# Test if C:\Windows\Logs is writable, otherwise use $env:TEMP
+$PrimaryLogPath = 'C:\Windows\Logs'
+$LogFileName = "Remediation-ProxySettings-$LogFileTime.log"
+
+if (Test-Path $PrimaryLogPath) {
+    # Test write access by attempting to create a temp file
+    $TestFile = Join-Path $PrimaryLogPath "write_test_$PID.tmp"
+    try {
+        [System.IO.File]::WriteAllText($TestFile, "test")
+        Remove-Item $TestFile -Force -ErrorAction SilentlyContinue
+        $logFile = Join-Path $PrimaryLogPath $LogFileName
+    }
+    catch {
+        # Not writable, fall back to temp
+        $logFile = Join-Path $env:TEMP $LogFileName
+    }
+}
+else {
+    # Directory doesn't exist, use temp
+    $logFile = Join-Path $env:TEMP $LogFileName
+}
 $RegistryPath           = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections"
 $ValueName              = "DefaultConnectionSettings"
 [STRING]$thisScriptPara = ''
@@ -413,7 +437,8 @@ If (-not (Test-Path -Path 'variable:LogTimeZoneBias')) {
 
 #endregion
 
-Write-CMLog -Message "Starting Remediation Script - Set-ProxySettings - v2.0.0.1" -Severity Note -Component 'PreChecks' -LogFile $logFile
+Write-CMLog -Message "Starting Remediation Script - Set-ProxySettings - v2.1.0.2" -Severity Note -Component 'PreChecks' -LogFile $logFile
+Write-CMLog -Message "Log file location: $logFile" -Component 'PreChecks'
 Write-CMLog -Message "Executing script `"$scriptPath`"" -Component 'ScriptName'
 Write-CMLog -Message "RemoveAutoConfig: $RemoveAutoConfig" -Component 'Parameters'
 Write-CMLog -Message "RemoveProxyServer: $RemoveProxyServer" -Component 'Parameters'
@@ -527,9 +552,30 @@ Try {
     Write-CMLog "Encoding modified settings to binary format" -Component 'Encoding'
     $NewBinaryData = Encode-ConnectionSettings -Settings $NewSettings
 
-    # Write back to registry
-    Write-CMLog "Writing modified settings to registry" -Severity Note -Component 'RegistryWrite'
+    # Write back to registry - DefaultConnectionSettings
+    Write-CMLog "Writing modified settings to DefaultConnectionSettings" -Severity Note -Component 'RegistryWrite'
     Set-ItemProperty -Path $RegistryPath -Name $ValueName -Value $NewBinaryData -Type Binary
+
+    # Also update SavedLegacySettings to match DefaultConnectionSettings
+    Write-CMLog "Updating SavedLegacySettings to match DefaultConnectionSettings" -Component 'RegistryWrite'
+    try {
+        # Check if SavedLegacySettings exists
+        $LegacyValue = Get-ItemProperty -Path $RegistryPath -Name "SavedLegacySettings" -ErrorAction SilentlyContinue
+
+        if ($null -ne $LegacyValue) {
+            # Update SavedLegacySettings with the same data
+            Set-ItemProperty -Path $RegistryPath -Name "SavedLegacySettings" -Value $NewBinaryData -Type Binary
+            Write-CMLog "SavedLegacySettings updated successfully" -Component 'RegistryWrite'
+        }
+        else {
+            Write-CMLog "SavedLegacySettings not found - creating new value" -Component 'RegistryWrite'
+            New-ItemProperty -Path $RegistryPath -Name "SavedLegacySettings" -Value $NewBinaryData -PropertyType Binary -Force | Out-Null
+            Write-CMLog "SavedLegacySettings created successfully" -Component 'RegistryWrite'
+        }
+    }
+    catch {
+        Write-CMLog "WARNING: Failed to update SavedLegacySettings: $($_.Exception.Message)" -Severity Warning -Component 'RegistryWrite'
+    }
 
     # Log new settings
     Write-CMLog "NEW Settings - Change Counter: $($NewSettings.Version)" -Component 'NewSettings'
@@ -539,7 +585,7 @@ Try {
     Write-CMLog "NEW Settings - AutoConfigURL: `"$($NewSettings.AutoConfigURL)`"" -Component 'NewSettings'
     Write-CMLog "NEW Settings - DirectConnection: $($NewSettings.DirectConnection)" -Component 'NewSettings'
 
-    Write-CMLog "Registry updated successfully" -Severity Note -Component 'Success'
+    Write-CMLog "Registry updated successfully (DefaultConnectionSettings + SavedLegacySettings)" -Severity Note -Component 'Success'
     Write-CMLog "Changes will take effect after restarting applications or rebooting" -Severity Warning -Component 'Success'
 
     Return 0
