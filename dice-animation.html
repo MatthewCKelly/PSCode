@@ -37,17 +37,23 @@
 
         .die {
             cursor: pointer;
+            transition: transform 0.3s ease;
+        }
+
+        .die:hover {
+            transform: translateY(-5px);
         }
 
         .die.rolling {
-            animation: roll 0.6s ease-in-out;
+            animation: roll3d 0.8s ease-in-out;
         }
 
-        @keyframes roll {
-            0%, 100% { transform: rotate(0deg); }
-            25% { transform: rotate(90deg) scale(1.1); }
-            50% { transform: rotate(180deg) scale(0.9); }
-            75% { transform: rotate(270deg) scale(1.1); }
+        @keyframes roll3d {
+            0% { transform: rotateX(0deg) rotateY(0deg) scale(1); }
+            25% { transform: rotateX(180deg) rotateY(90deg) scale(1.1); }
+            50% { transform: rotateX(360deg) rotateY(180deg) scale(0.95); }
+            75% { transform: rotateX(540deg) rotateY(270deg) scale(1.1); }
+            100% { transform: rotateX(720deg) rotateY(360deg) scale(1); }
         }
 
         .shuffle-btn {
@@ -133,51 +139,183 @@
         const numberOfDice = 4;
         let currentResults = [];
 
-        // Create SVG dice
+        // Create 3D SVG dice
         function createDie(index) {
             const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#f9ca24'];
-            const color = colors[index % colors.length];
+            const baseColor = colors[index % colors.length];
 
             const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-            svg.setAttribute("width", "100");
-            svg.setAttribute("height", "100");
-            svg.setAttribute("viewBox", "0 0 100 100");
+            svg.setAttribute("width", "120");
+            svg.setAttribute("height", "120");
+            svg.setAttribute("viewBox", "0 0 120 120");
             svg.classList.add("die");
             svg.dataset.index = index;
 
-            // Dice background (rounded rectangle)
-            const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-            rect.setAttribute("x", "5");
-            rect.setAttribute("y", "5");
-            rect.setAttribute("width", "90");
-            rect.setAttribute("height", "90");
-            rect.setAttribute("rx", "15");
-            rect.setAttribute("ry", "15");
-            rect.setAttribute("fill", color);
-            rect.setAttribute("stroke", "white");
-            rect.setAttribute("stroke-width", "3");
-            rect.setAttribute("filter", "drop-shadow(0 4px 6px rgba(0,0,0,0.3))");
+            // Define gradients for 3D effect
+            const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
 
-            // Letter text
-            const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-            text.setAttribute("x", "50");
-            text.setAttribute("y", "50");
-            text.setAttribute("text-anchor", "middle");
-            text.setAttribute("dominant-baseline", "central");
-            text.setAttribute("fill", "white");
-            text.setAttribute("font-size", "40");
-            text.setAttribute("font-weight", "bold");
-            text.setAttribute("font-family", "Arial, sans-serif");
-            text.classList.add("die-letter");
-            text.textContent = getRandomLetter();
+            // Gradient for top face (lightest)
+            const topGradient = document.createElementNS("http://www.w3.org/2000/svg", "linearGradient");
+            topGradient.setAttribute("id", `topGrad${index}`);
+            topGradient.setAttribute("x1", "0%");
+            topGradient.setAttribute("y1", "0%");
+            topGradient.setAttribute("x2", "100%");
+            topGradient.setAttribute("y2", "100%");
 
-            svg.appendChild(rect);
-            svg.appendChild(text);
+            const topStop1 = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+            topStop1.setAttribute("offset", "0%");
+            topStop1.setAttribute("style", `stop-color:${lightenColor(baseColor, 40)};stop-opacity:1`);
+            const topStop2 = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+            topStop2.setAttribute("offset", "100%");
+            topStop2.setAttribute("style", `stop-color:${lightenColor(baseColor, 20)};stop-opacity:1`);
+            topGradient.appendChild(topStop1);
+            topGradient.appendChild(topStop2);
+
+            // Gradient for front face (medium)
+            const frontGradient = document.createElementNS("http://www.w3.org/2000/svg", "linearGradient");
+            frontGradient.setAttribute("id", `frontGrad${index}`);
+            frontGradient.setAttribute("x1", "0%");
+            frontGradient.setAttribute("y1", "0%");
+            frontGradient.setAttribute("x2", "0%");
+            frontGradient.setAttribute("y2", "100%");
+
+            const frontStop1 = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+            frontStop1.setAttribute("offset", "0%");
+            frontStop1.setAttribute("style", `stop-color:${baseColor};stop-opacity:1`);
+            const frontStop2 = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+            frontStop2.setAttribute("offset", "100%");
+            frontStop2.setAttribute("style", `stop-color:${darkenColor(baseColor, 10)};stop-opacity:1`);
+            frontGradient.appendChild(frontStop1);
+            frontGradient.appendChild(frontStop2);
+
+            // Gradient for right face (darkest)
+            const rightGradient = document.createElementNS("http://www.w3.org/2000/svg", "linearGradient");
+            rightGradient.setAttribute("id", `rightGrad${index}`);
+            rightGradient.setAttribute("x1", "0%");
+            rightGradient.setAttribute("y1", "0%");
+            rightGradient.setAttribute("x2", "100%");
+            rightGradient.setAttribute("y2", "0%");
+
+            const rightStop1 = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+            rightStop1.setAttribute("offset", "0%");
+            rightStop1.setAttribute("style", `stop-color:${darkenColor(baseColor, 20)};stop-opacity:1`);
+            const rightStop2 = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+            rightStop2.setAttribute("offset", "100%");
+            rightStop2.setAttribute("style", `stop-color:${darkenColor(baseColor, 35)};stop-opacity:1`);
+            rightGradient.appendChild(rightStop1);
+            rightGradient.appendChild(rightStop2);
+
+            defs.appendChild(topGradient);
+            defs.appendChild(frontGradient);
+            defs.appendChild(rightGradient);
+            svg.appendChild(defs);
+
+            // Create 3D isometric cube
+            const cubeGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            cubeGroup.setAttribute("transform", "translate(10, 20)");
+
+            // Top face (isometric parallelogram)
+            const topFace = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            topFace.setAttribute("d", "M 35,0 L 85,0 L 100,15 L 50,15 Z");
+            topFace.setAttribute("fill", `url(#topGrad${index})`);
+            topFace.setAttribute("stroke", "rgba(255,255,255,0.5)");
+            topFace.setAttribute("stroke-width", "1.5");
+            cubeGroup.appendChild(topFace);
+
+            // Front face (square with perspective)
+            const frontFace = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            frontFace.setAttribute("d", "M 35,0 L 50,15 L 50,65 L 35,80 Z");
+            frontFace.setAttribute("fill", `url(#frontGrad${index})`);
+            frontFace.setAttribute("stroke", "rgba(255,255,255,0.5)");
+            frontFace.setAttribute("stroke-width", "1.5");
+            cubeGroup.appendChild(frontFace);
+
+            // Right face (side parallelogram)
+            const rightFace = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            rightFace.setAttribute("d", "M 50,15 L 100,15 L 100,65 L 50,65 Z");
+            rightFace.setAttribute("fill", `url(#rightGrad${index})`);
+            rightFace.setAttribute("stroke", "rgba(255,255,255,0.5)");
+            rightFace.setAttribute("stroke-width", "1.5");
+            cubeGroup.appendChild(rightFace);
+
+            // Letter on front face
+            const frontText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            frontText.setAttribute("x", "42");
+            frontText.setAttribute("y", "48");
+            frontText.setAttribute("text-anchor", "middle");
+            frontText.setAttribute("dominant-baseline", "central");
+            frontText.setAttribute("fill", "white");
+            frontText.setAttribute("font-size", "32");
+            frontText.setAttribute("font-weight", "bold");
+            frontText.setAttribute("font-family", "Arial, sans-serif");
+            frontText.classList.add("die-letter-front");
+            frontText.textContent = getRandomLetter();
+            cubeGroup.appendChild(frontText);
+
+            // Letter on right face
+            const rightText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            rightText.setAttribute("x", "75");
+            rightText.setAttribute("y", "40");
+            rightText.setAttribute("text-anchor", "middle");
+            rightText.setAttribute("dominant-baseline", "central");
+            rightText.setAttribute("fill", "rgba(255,255,255,0.7)");
+            rightText.setAttribute("font-size", "28");
+            rightText.setAttribute("font-weight", "bold");
+            rightText.setAttribute("font-family", "Arial, sans-serif");
+            rightText.classList.add("die-letter-right");
+            rightText.textContent = getRandomLetter();
+            cubeGroup.appendChild(rightText);
+
+            // Letter on top face
+            const topText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            topText.setAttribute("x", "67");
+            topText.setAttribute("y", "8");
+            topText.setAttribute("text-anchor", "middle");
+            topText.setAttribute("dominant-baseline", "central");
+            topText.setAttribute("fill", "rgba(255,255,255,0.9)");
+            topText.setAttribute("font-size", "12");
+            topText.setAttribute("font-weight", "bold");
+            topText.setAttribute("font-family", "Arial, sans-serif");
+            topText.setAttribute("transform", "skewX(-30)");
+            topText.classList.add("die-letter-top");
+            topText.textContent = getRandomLetter();
+            cubeGroup.appendChild(topText);
+
+            // Shadow
+            const shadow = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
+            shadow.setAttribute("cx", "67");
+            shadow.setAttribute("cy", "95");
+            shadow.setAttribute("rx", "35");
+            shadow.setAttribute("ry", "8");
+            shadow.setAttribute("fill", "rgba(0,0,0,0.3)");
+            shadow.setAttribute("filter", "blur(3px)");
+            cubeGroup.appendChild(shadow);
+
+            svg.appendChild(cubeGroup);
 
             // Add click handler for individual die
             svg.addEventListener('click', () => rollSingleDie(index));
 
             return svg;
+        }
+
+        // Helper functions to lighten/darken colors
+        function lightenColor(color, percent) {
+            const num = parseInt(color.replace("#",""), 16);
+            const amt = Math.round(2.55 * percent);
+            const R = Math.min(255, (num >> 16) + amt);
+            const G = Math.min(255, (num >> 8 & 0x00FF) + amt);
+            const B = Math.min(255, (num & 0x0000FF) + amt);
+            return "#" + (0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1);
+        }
+
+        function darkenColor(color, percent) {
+            const num = parseInt(color.replace("#",""), 16);
+            const amt = Math.round(2.55 * percent);
+            const R = Math.max(0, (num >> 16) - amt);
+            const G = Math.max(0, (num >> 8 & 0x00FF) - amt);
+            const B = Math.max(0, (num & 0x0000FF) - amt);
+            return "#" + (0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1);
         }
 
         // Get random letter
@@ -188,17 +326,21 @@
         // Roll a single die
         function rollSingleDie(index) {
             const die = document.querySelector(`[data-index="${index}"]`);
-            const letterElement = die.querySelector('.die-letter');
+            const frontLetter = die.querySelector('.die-letter-front');
+            const rightLetter = die.querySelector('.die-letter-right');
+            const topLetter = die.querySelector('.die-letter-top');
 
             die.classList.add('rolling');
 
             setTimeout(() => {
                 const newLetter = getRandomLetter();
-                letterElement.textContent = newLetter;
+                frontLetter.textContent = newLetter;
+                rightLetter.textContent = getRandomLetter();
+                topLetter.textContent = getRandomLetter();
                 currentResults[index] = newLetter;
                 updateResults();
                 die.classList.remove('rolling');
-            }, 600);
+            }, 800);
         }
 
         // Shuffle all dice
@@ -206,12 +348,16 @@
             const allDice = document.querySelectorAll('.die');
 
             allDice.forEach((die, index) => {
-                const letterElement = die.querySelector('.die-letter');
+                const frontLetter = die.querySelector('.die-letter-front');
+                const rightLetter = die.querySelector('.die-letter-right');
+                const topLetter = die.querySelector('.die-letter-top');
                 die.classList.add('rolling');
 
                 setTimeout(() => {
                     const newLetter = getRandomLetter();
-                    letterElement.textContent = newLetter;
+                    frontLetter.textContent = newLetter;
+                    rightLetter.textContent = getRandomLetter();
+                    topLetter.textContent = getRandomLetter();
                     currentResults[index] = newLetter;
 
                     if (index === allDice.length - 1) {
@@ -219,7 +365,7 @@
                     }
 
                     die.classList.remove('rolling');
-                }, 600 + (index * 100)); // Stagger the animation
+                }, 800 + (index * 150)); // Stagger the animation
             });
         }
 
@@ -259,8 +405,8 @@
                 const die = createDie(i);
                 diceContainer.appendChild(die);
 
-                // Get initial letter
-                const letterElement = die.querySelector('.die-letter');
+                // Get initial letter from front face
+                const letterElement = die.querySelector('.die-letter-front');
                 currentResults[i] = letterElement.textContent;
             }
 
