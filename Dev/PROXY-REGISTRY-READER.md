@@ -98,7 +98,7 @@ AutoDetectEnabled : True
 ```
 ProxyEnabled      : True
 ProxyServer       : http://127.20.20.20:3128!
-ProxyBypass       : home.crash.co.nz;fh.local;<local>
+ProxyBypass       : home.crash.co.nz;crash.local;<local>
 AutoConfigEnabled : True
 AutoConfigURL     : http://config.company.com:8082/proxy.pac?p=PARAMS
 AutoDetectEnabled : True

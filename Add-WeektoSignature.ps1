@@ -607,7 +607,7 @@ Function New-StatusTableHTML {
     
     [void]$html.AppendLine('<table border="1" cellpadding="4" cellspacing="0" style="border-collapse: collapse; font-family: Calibri, Arial, sans-serif; font-size: 10pt; max-width: 400px; width: 100%;">')
     
-    # Header row with Fulton Hogan orange
+    # Header row with brand orange
     [void]$html.AppendLine('  <tr style="background-color: #FF6600; color: white; font-weight: bold;">')
     
     # Get sorted day keys
@@ -873,7 +873,7 @@ $titleLabel.Location = New-Object System.Drawing.Point(10, 10)
 $titleLabel.Size = New-Object System.Drawing.Size(560, 25)
 $titleLabel.Text = "Configure Your Weekly Status"
 $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
-$titleLabel.ForeColor = [System.Drawing.Color]::FromArgb(255, 102, 0) # Fulton Hogan Orange
+$titleLabel.ForeColor = [System.Drawing.Color]::FromArgb(255, 102, 0) # Brand Orange
 $form.Controls.Add($titleLabel)
 
 # Current signature label
@@ -1641,7 +1641,7 @@ $applyButton = New-Object System.Windows.Forms.Button
 $applyButton.Location = New-Object System.Drawing.Point(380, $intButtonTop)
 $applyButton.Size = New-Object System.Drawing.Size(100, 35)
 $applyButton.Text = "Apply"
-$applyButton.BackColor = [System.Drawing.Color]::FromArgb(255, 102, 0) # Fulton Hogan Orange
+$applyButton.BackColor = [System.Drawing.Color]::FromArgb(255, 102, 0) # Brand Orange
 $applyButton.ForeColor = [System.Drawing.Color]::White
 $applyButton.FlatStyle = "Flat"
 $applyButton.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)

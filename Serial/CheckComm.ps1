@@ -1,6 +1,6 @@
 ﻿
 <#
-&'D:\oneDrive\OneDrive - Fulton Hogan Limited\gSync\_scripts\Powershell\Dev\Serial\CheckComm.ps1' -comport COM5
+&'.\Serial\CheckComm.ps1' -comport COM5
 
 
 https://en.wikipedia.org/wiki/NMEA_0183
