@@ -148,9 +148,9 @@ This document maps the Windows Proxy Settings UI elements to the corresponding r
 
 **Example 3: Complex Bypass List**
 - UI: ☑ Bypass proxy server for local addresses (CHECKED)
-- UI: Exceptions: `home.crash.co.nz;fh.local;<local>`
-- Registry: `ProxyBypass = "home.crash.co.nz;fh.local;<local>"`
-- Decoded: `ProxyBypass = "home.crash.co.nz;fh.local;<local>"`
+- UI: Exceptions: `home.crash.co.nz;crash.local;<local>`
+- Registry: `ProxyBypass = "home.crash.co.nz;crash.local;<local>"`
+- Decoded: `ProxyBypass = "home.crash.co.nz;crash.local;<local>"`
 
 **Note:** If user manually types `<local>` in the exceptions field AND checks the "Bypass local" checkbox, `<local>` might appear twice. The decoder should handle this gracefully.
 

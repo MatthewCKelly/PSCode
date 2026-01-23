@@ -262,7 +262,7 @@ Offset   Hex Data                       Description
 0x0C     18 00 00 00                    ProxyServer Length = 24 bytes (0x18)
 0x10     68 74 74 70 3a 2f 2f ...       "http://127.20.20.20:3128!" (24 bytes)
 0x28     2A 00 00 00                    ProxyBypass Length = 42 bytes (0x2A)
-0x2C     68 6f 6d 65 2e 63 ...          "home.crash.co.nz;fh.local;<local>" (42 bytes)
+0x2C     68 6f 6d 65 2e 63 ...          "home.crash.co.nz;crash.local;<local>" (42 bytes)
 0x56     42 00 00 00                    AutoConfigURL Length = 66 bytes (0x42)
 0x5A     68 74 74 70 3a 2f 2f ...       "http://proxy.company.local/proxy.pac" (66 bytes)
 ```
@@ -285,7 +285,7 @@ Offset   Hex Data                       Description
 4. Read ProxyBypass section:
    ├─ Read length at 0x28 = 42 bytes (0x2A)
    ├─ Position = 0x2C (44 decimal)
-   ├─ Read 42 bytes at 0x2C = "home.crash.co.nz;fh.local;<local>"
+   ├─ Read 42 bytes at 0x2C = "home.crash.co.nz;crash.local;<local>"
    └─ Position = 0x56 (86 decimal)
 
 5. Read AutoConfigURL section:
@@ -296,7 +296,7 @@ Offset   Hex Data                       Description
 6. Result:
    ├─ ProxyEnabled = TRUE (Bit 1 set)
    ├─ ProxyServer = "http://127.20.20.20:3128!"
-   ├─ ProxyBypass = "home.crash.co.nz;fh.local;<local>"
+   ├─ ProxyBypass = "home.crash.co.nz;crash.local;<local>"
    ├─ AutoConfigEnabled = TRUE (Bit 2 set)
    └─ AutoConfigURL = "http://proxy.company.local/proxy.pac"
 ```

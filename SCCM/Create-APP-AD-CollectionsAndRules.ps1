@@ -1167,7 +1167,7 @@ foreach ($bndCol in $UpdatedCollections) {
 
                 if( $AddQueryToCollection -and  ($ColID -like  "$($gCMSourceSite)?????") ) {
 
-                    # Add-SCCMCollectionRule -Server $myServer -collectionID $ColID -queryExpression "select SMS_R_SYSTEM.ResourceID from SMS_R_System where SMS_R_System.SecurityGroupName like `"FHNZ\\EPT_EOL_$dateVal`"" -queryRuleName "Members of ad Group FHNZ\\EPT_EOL_$dateVal" -Verbose
+                    # Add-SCCMCollectionRule -Server $myServer -collectionID $ColID -queryExpression "select SMS_R_SYSTEM.ResourceID from SMS_R_System where SMS_R_System.SecurityGroupName like `"DOMAIN\\PROJ_EOL_$dateVal`"" -queryRuleName "Members of ad Group DOMAIN\\PROJ_EOL_$dateVal" -Verbose
 
                     if ([string]::IsNullOrEmpty($colRuleQry)  -eq $True) {
                         Write-Detail "No Rule for collection."
