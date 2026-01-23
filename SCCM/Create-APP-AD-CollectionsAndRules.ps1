@@ -1,3 +1,9 @@
+# Version 1.2 - 2026-01-23
+# - Fixed collection name deduplication to prevent creating multiple collections with same name
+# - Updated Get-SCCMCollectionFolders to show full folder path from root
+# - Added duplicate collection detection and reporting
+# - Folders now sorted by full path for better readability
+#
 # Version 1.1 - 2025-11-24
 # - Added folder selection for SCCM collections
 # - Added collection name validation (length and invalid characters)
@@ -583,13 +589,18 @@ Function Get-SCCMCollectionFolders {
     .SYNOPSIS
     Retrieves SCCM collection folders for user selection
     .DESCRIPTION
-    Gets all collection folders from SCCM and returns them for user selection
+    Gets all collection folders from SCCM and returns them for user selection.
+    Builds full hierarchical path from root for each folder to distinguish folders
+    with the same name in different locations.
     .PARAMETER SccmServer
     The SCCM server object
     .PARAMETER Credential
     Optional credentials for SCCM access
     .OUTPUTS
-    Array of folder objects with ContainerNodeID, Name, and Path
+    Array of folder objects with ContainerNodeID, Name, ParentContainerNodeID, and Path (full path from root)
+    .EXAMPLE
+    Get-SCCMCollectionFolders -SccmServer $myServer
+    Returns folders with paths like "\Applications\Adobe" or "\Workstations\Sales"
 #>
     [CmdletBinding()]
     PARAM (
@@ -610,19 +621,59 @@ Function Get-SCCMCollectionFolders {
                 $folders = Get-WmiObject -Class SMS_ObjectContainerNode -Namespace $SccmServer.Namespace -ComputerName $SccmServer.Machine -Filter $Filter -Credential $credential
             }
 
-            # Build folder path for each folder
+            # Create hashtable for quick folder lookup by ID
+            $folderHash = @{}
+            foreach ($folder in $folders) {
+                $folderHash[$folder.ContainerNodeID] = $folder
+            }
+
+            # Helper function to build full path from root
+            function Get-FolderPath {
+                param(
+                    [int]$FolderID,
+                    [hashtable]$FolderLookup
+                )
+
+                if ($FolderID -eq 0) {
+                    return "\"
+                }
+
+                $pathParts = @()
+                $currentID = $FolderID
+
+                # Walk up the parent chain
+                while ($currentID -ne 0 -and $FolderLookup.ContainsKey($currentID)) {
+                    $currentFolder = $FolderLookup[$currentID]
+                    $pathParts = @($currentFolder.Name) + $pathParts
+                    $currentID = $currentFolder.ParentContainerNodeID
+                }
+
+                # Build the full path
+                if ($pathParts.Count -gt 0) {
+                    return "\" + ($pathParts -join "\")
+                } else {
+                    return "\"
+                }
+            }
+
+            # Build folder list with full paths
             $folderList = @()
             foreach ($folder in $folders) {
+                $fullPath = Get-FolderPath -FolderID $folder.ContainerNodeID -FolderLookup $folderHash
+
                 $folderObj = New-Object PSObject -Property @{
                     ContainerNodeID = $folder.ContainerNodeID
                     Name = $folder.Name
                     ParentContainerNodeID = $folder.ParentContainerNodeID
-                    Path = $folder.Name
+                    Path = $fullPath
                 }
                 $folderList += $folderObj
             }
 
-            # Add root folder option
+            # Sort by path for better readability
+            $folderList = $folderList | Sort-Object Path
+
+            # Add root folder option at the beginning
             $rootFolder = New-Object PSObject -Property @{
                 ContainerNodeID = 0
                 Name = "Root (No Folder)"
@@ -952,9 +1003,42 @@ $CollectionsToCreate = $SQLdataTable | Out-GridView -Title "Select only the coll
         $nameIssues | Out-GridView -Title "Collection Name Issues - Review Sanitized Names" -Wait
     }
 
-    $UpdatedCollections = $validatedCollections | Sort-Object Name | Out-GridView  -Title "Select only the collections you wish to create" -PassThru 
+    $UpdatedCollections = $validatedCollections | Sort-Object Name | Out-GridView  -Title "Select only the collections you wish to create" -PassThru
 
+    # Deduplicate collections by name
+    Write-Host ""
+    Write-Detail "Checking for duplicate collection names..."
+    $beforeCount = $UpdatedCollections.Count
+    $duplicates = @()
+    $seenNames = @{}
+    $deduplicatedCollections = @()
 
+    foreach ($col in $UpdatedCollections) {
+        if ($seenNames.ContainsKey($col.Name)) {
+            # This is a duplicate
+            $duplicates += [PSCustomObject]@{
+                Name = $col.Name
+                RuleName = $col.RuleName
+            }
+            Write-Detail "  Skipping duplicate: `"$($col.Name)`""
+        } else {
+            # First occurrence, keep it
+            $seenNames[$col.Name] = $true
+            $deduplicatedCollections += $col
+        }
+    }
+
+    if ($duplicates.Count -gt 0) {
+        Write-Host ""
+        Write-Detail "WARNING: Found $($duplicates.Count) duplicate collection name(s) that were removed"
+        Write-Detail "Original count: $beforeCount | Deduplicated count: $($deduplicatedCollections.Count)"
+        $duplicates | Out-GridView -Title "Duplicate Collections Removed" -Wait
+    } else {
+        Write-Detail "No duplicate collection names found"
+    }
+
+    # Update the collection list with deduplicated version
+    $UpdatedCollections = $deduplicatedCollections
 
 
 
