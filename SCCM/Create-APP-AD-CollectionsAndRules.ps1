@@ -1,3 +1,8 @@
+# Version 1.2.2 - 2026-01-27
+# - Fixed folder path building with proper UINT32 type casting
+# - ContainerNodeID hashtable lookups now use correct type to match WMI data
+# - Updated folder display to show full path instead of just name
+#
 # Version 1.2.1 - 2026-01-27
 # - Optimized folder retrieval by sorting by ParentContainerNodeID and ContainerNodeID
 # - Improved hierarchical folder processing efficiency
@@ -637,7 +642,7 @@ Function Get-SCCMCollectionFolders {
             # Helper function to build full path from root
             function Get-FolderPath {
                 param(
-                    [int]$FolderID,
+                    [UINT32]$FolderID,
                     [hashtable]$FolderLookup
                 )
 
@@ -646,11 +651,11 @@ Function Get-SCCMCollectionFolders {
                 }
 
                 $pathParts = @()
-                $currentID = $FolderID
+                [UINT32]$currentID = $FolderID
 
                 # Walk up the parent chain
-                while ($currentID -ne 0 -and $FolderLookup.ContainsKey($currentID)) {
-                    $currentFolder = $FolderLookup[$currentID]
+                while ($currentID -ne 0 -and $FolderLookup.ContainsKey([UINT32]$currentID)) {
+                    $currentFolder = $FolderLookup[[UINT32]$currentID]
                     $pathParts = @($currentFolder.Name) + $pathParts
                     $currentID = $currentFolder.ParentContainerNodeID
                 }
@@ -1067,7 +1072,7 @@ if ($null -eq $selectedFolder) {
     Write-Detail "No folder selected, using root folder"
     $selectedFolder = $availableFolders | Where-Object { $_.ContainerNodeID -eq 0 }
 } else {
-    Write-Detail "Selected folder: $($selectedFolder.Name) [ID: $($selectedFolder.ContainerNodeID)]"
+    Write-Detail "Selected folder: $($selectedFolder.Path) [ID: $($selectedFolder.ContainerNodeID)]"
 }
 
 # Initialize tracking variables for summary
@@ -1278,7 +1283,7 @@ Write-Detail "                            OPERATION SUMMARY                     
 Write-Detail "================================================================================"
 Write-Host ""
 
-Write-Detail "Selected Folder: $($selectedFolder.Name) [ID: $($selectedFolder.ContainerNodeID)]"
+Write-Detail "Selected Folder: $($selectedFolder.Path) [ID: $($selectedFolder.ContainerNodeID)]"
 Write-Host ""
 
 if ($createdCollections.Count -gt 0) {
