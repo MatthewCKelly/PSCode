@@ -1,3 +1,7 @@
+# Version 1.2.1 - 2026-01-27
+# - Optimized folder retrieval by sorting by ParentContainerNodeID and ContainerNodeID
+# - Improved hierarchical folder processing efficiency
+#
 # Version 1.2 - 2026-01-23
 # - Fixed collection name deduplication to prevent creating multiple collections with same name
 # - Updated Get-SCCMCollectionFolders to show full folder path from root
@@ -620,6 +624,9 @@ Function Get-SCCMCollectionFolders {
             } else {
                 $folders = Get-WmiObject -Class SMS_ObjectContainerNode -Namespace $SccmServer.Namespace -ComputerName $SccmServer.Machine -Filter $Filter -Credential $credential
             }
+
+            # Sort folders by parent-child relationship for efficient processing
+            $folders = $folders | Sort-Object -Property ParentContainerNodeID, ContainerNodeID
 
             # Create hashtable for quick folder lookup by ID
             $folderHash = @{}
