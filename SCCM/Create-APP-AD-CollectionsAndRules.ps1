@@ -1,3 +1,10 @@
+# Version 1.3.0 - 2026-01-28
+# - Added optional -Manufacturer parameter to pre-filter by publisher
+# - Added optional -Product parameter to pre-filter products by name
+# - Both parameters support SQL LIKE wildcards (%)
+# - Script now supports non-interactive execution when parameters provided
+# - Added comprehensive help documentation with examples
+#
 # Version 1.2.2 - 2026-01-27
 # - Fixed folder path building with proper UINT32 type casting
 # - ContainerNodeID hashtable lookups now use correct type to match WMI data
@@ -20,6 +27,44 @@
 # - Added comprehensive operation summary at end
 # - Added error handling and tracking
 # - Improved logging throughout script
+
+<#
+.SYNOPSIS
+    Creates SCCM collections and rules based on installed software inventory.
+
+.DESCRIPTION
+    Queries SCCM database for installed applications, allows selection of products,
+    and creates collections with query-based membership rules for software deployment.
+
+.PARAMETER Manufacturer
+    Optional. Specify the application manufacturer/publisher to filter results.
+    If not provided, script will display all manufacturers for selection.
+
+.PARAMETER Product
+    Optional. Specify the product name to filter results.
+    If not provided, script will display all products from selected manufacturer(s).
+
+.EXAMPLE
+    .\Create-APP-AD-CollectionsAndRules.ps1
+    Runs interactively, prompting for manufacturer and product selection.
+
+.EXAMPLE
+    .\Create-APP-AD-CollectionsAndRules.ps1 -Manufacturer "Adobe%"
+    Pre-filters to Adobe products, then prompts for product selection.
+
+.EXAMPLE
+    .\Create-APP-AD-CollectionsAndRules.ps1 -Manufacturer "Dell Inc." -Product "Dell Optimizer"
+    Pre-filters to specific manufacturer and product.
+#>
+
+[CmdletBinding()]
+Param(
+    [Parameter(Mandatory=$false, HelpMessage="Application manufacturer/publisher (supports SQL LIKE wildcards %)")]
+    [String]$Manufacturer,
+
+    [Parameter(Mandatory=$false, HelpMessage="Product name (supports SQL LIKE wildcards %)")]
+    [String]$Product
+)
 
 [STRING]$gCMSourceSite = "XXX";                           # SCCM Sitename
 [STRING]$gCMSite  =      "ROOT\SMS\site_$gCMSourceSite"   # WMI path
@@ -900,28 +945,38 @@ $csvdelimiter = ",";
 #Action of connecting to the Database and executing the query and returning results if there were any.
 $ConnectionString = "Server={0};Database={1};Integrated Security=True;Connect Timeout={2}" -f $ServerName,$DatabaseName,$ConnectionTimeout
 
-$SQLQuery = get-AppPublisher;
+# Check if Manufacturer parameter was provided
+if ([string]::IsNullOrEmpty($Manufacturer)) {
+    # No manufacturer specified - show interactive selection
+    Write-Detail "No manufacturer specified, retrieving all publishers for selection..."
 
-$dataAdapter = New-Object System.Data.SqlClient.SqlDataAdapter($SQLQuery, $ConnectionString)
-$SQLdataTable       = New-object “System.Data.DataTable”
-$dataAdapter.Fill($SQLdataTable);
-$dataAdapter.Dispose()
+    $SQLQuery = get-AppPublisher;
 
-$MyAppPublisher = $SQLdataTable | Out-GridView -Title "Choose a application publisher..." -PassThru
+    $dataAdapter = New-Object System.Data.SqlClient.SqlDataAdapter($SQLQuery, $ConnectionString)
+    $SQLdataTable = New-object "System.Data.DataTable"
+    $dataAdapter.Fill($SQLdataTable);
+    $dataAdapter.Dispose()
 
-Write-Detail "Looking products associated with the following publisher(s) '$($MyAppPublisher.Publisher -join "', '")' [$($MyAppPublisher.Publisher.count)]"
+    $MyAppPublisher = $SQLdataTable | Out-GridView -Title "Choose a application publisher..." -PassThru
 
-if ($MyAppPublisher.Publisher.Count -gt 0 ) {
-    # Continue
-    Write-Detail "Looking products associated with the following publisher(s) '$($MyAppPublisher.Publisher -join "', '")' "
+    if ($MyAppPublisher.Publisher.Count -gt 0 ) {
+        Write-Detail "Looking products associated with the following publisher(s) '$($MyAppPublisher.Publisher -join "', '")' [$($MyAppPublisher.Publisher.count)]"
     } else {
-    
-    Write-detail "Nothing selected..."
-
-    throw "Nothing selected, no Publisher selected"
-    Stop-Transcript
-
+        Write-detail "Nothing selected..."
+        throw "Nothing selected, no Publisher selected"
+        Stop-Transcript
     }
+} else {
+    # Manufacturer parameter provided - use it directly
+    Write-Detail "Using specified manufacturer: '$Manufacturer'"
+
+    # Create publisher object to match expected format
+    $MyAppPublisher = @([PSCustomObject]@{
+        Publisher = $Manufacturer
+    })
+
+    Write-Detail "Looking products associated with manufacturer: '$Manufacturer'"
+}
 
 
 # 
@@ -955,10 +1010,27 @@ if( $SQLdataTable.Rows.Count -ge 1 ) {
 } else {
 
     Write-Detail "No product found.."
+    Stop-Transcript
     Exit
 }
 
-$CollectionsToCreate = $SQLdataTable | Out-GridView -Title "Select only the collections you wish to create" -PassThru
+# Filter by Product parameter if provided
+if (-not [string]::IsNullOrEmpty($Product)) {
+    Write-Detail "Filtering products by: '$Product'"
+    $filteredTable = $SQLdataTable | Where-Object { $_.'Display Name' -like $Product }
+
+    if ($filteredTable.Count -eq 0) {
+        Write-Detail "WARNING: No products matched filter '$Product'"
+        Write-Detail "Showing all $($SQLdataTable.Rows.Count) products for selection..."
+        $CollectionsToCreate = $SQLdataTable | Out-GridView -Title "No matches for '$Product' - Select products to create collections for" -PassThru
+    } else {
+        Write-Detail "Found $($filteredTable.Count) product(s) matching filter"
+        $CollectionsToCreate = $filteredTable | Out-GridView -Title "Products matching '$Product' - Select collections to create" -PassThru
+    }
+} else {
+    # No product filter - show all
+    $CollectionsToCreate = $SQLdataTable | Out-GridView -Title "Select only the collections you wish to create" -PassThru
+}
 
 
 
