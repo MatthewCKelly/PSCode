@@ -1,7 +1,12 @@
+# Version 1.3.1 - 2026-01-28
+# - Fixed -Manufacturer parameter to properly resolve wildcards to actual publisher names
+# - Manufacturer wildcards now query database first and show matches for confirmation
+# - Changed wildcard syntax from SQL (%) to PowerShell (* and ?)
+# - Prevents SQL IN clause errors when wildcards are used
+#
 # Version 1.3.0 - 2026-01-28
 # - Added optional -Manufacturer parameter to pre-filter by publisher
 # - Added optional -Product parameter to pre-filter products by name
-# - Both parameters support SQL LIKE wildcards (%)
 # - Script now supports non-interactive execution when parameters provided
 # - Added comprehensive help documentation with examples
 #
@@ -38,10 +43,12 @@
 
 .PARAMETER Manufacturer
     Optional. Specify the application manufacturer/publisher to filter results.
+    Supports PowerShell wildcards (* and ?). Matched publishers will be shown for confirmation.
     If not provided, script will display all manufacturers for selection.
 
 .PARAMETER Product
     Optional. Specify the product name to filter results.
+    Supports PowerShell wildcards (* and ?). Filters the product GridView display.
     If not provided, script will display all products from selected manufacturer(s).
 
 .EXAMPLE
@@ -49,20 +56,21 @@
     Runs interactively, prompting for manufacturer and product selection.
 
 .EXAMPLE
-    .\Create-APP-AD-CollectionsAndRules.ps1 -Manufacturer "Adobe%"
-    Pre-filters to Adobe products, then prompts for product selection.
+    .\Create-APP-AD-CollectionsAndRules.ps1 -Manufacturer "Adobe*"
+    Finds all publishers matching "Adobe*" (e.g., "Adobe Systems", "Adobe Inc."),
+    shows them for confirmation, then prompts for product selection.
 
 .EXAMPLE
-    .\Create-APP-AD-CollectionsAndRules.ps1 -Manufacturer "Dell Inc." -Product "Dell Optimizer"
-    Pre-filters to specific manufacturer and product.
+    .\Create-APP-AD-CollectionsAndRules.ps1 -Manufacturer "Dell Inc." -Product "Dell Optimizer*"
+    Uses exact manufacturer "Dell Inc.", filters products starting with "Dell Optimizer".
 #>
 
 [CmdletBinding()]
 Param(
-    [Parameter(Mandatory=$false, HelpMessage="Application manufacturer/publisher (supports SQL LIKE wildcards %)")]
+    [Parameter(Mandatory=$false, HelpMessage="Application manufacturer/publisher (supports wildcards * and ?)")]
     [String]$Manufacturer,
 
-    [Parameter(Mandatory=$false, HelpMessage="Product name (supports SQL LIKE wildcards %)")]
+    [Parameter(Mandatory=$false, HelpMessage="Product name (supports wildcards * and ?)")]
     [String]$Product
 )
 
@@ -967,15 +975,49 @@ if ([string]::IsNullOrEmpty($Manufacturer)) {
         Stop-Transcript
     }
 } else {
-    # Manufacturer parameter provided - use it directly
-    Write-Detail "Using specified manufacturer: '$Manufacturer'"
+    # Manufacturer parameter provided - resolve wildcards to actual publisher names
+    Write-Detail "Manufacturer parameter specified: '$Manufacturer'"
+    Write-Detail "Querying database to resolve manufacturer name(s)..."
 
-    # Create publisher object to match expected format
-    $MyAppPublisher = @([PSCustomObject]@{
-        Publisher = $Manufacturer
-    })
+    # Query all publishers from database
+    $SQLQuery = get-AppPublisher;
+    $dataAdapter = New-Object System.Data.SqlClient.SqlDataAdapter($SQLQuery, $ConnectionString)
+    $SQLdataTable = New-object "System.Data.DataTable"
+    $dataAdapter.Fill($SQLdataTable);
+    $dataAdapter.Dispose()
 
-    Write-Detail "Looking products associated with manufacturer: '$Manufacturer'"
+    # Filter publishers using the manufacturer parameter (supports wildcards)
+    $matchedPublishers = $SQLdataTable | Where-Object { $_.Publisher -like $Manufacturer }
+
+    if ($matchedPublishers.Count -eq 0) {
+        Write-Detail "ERROR: No publishers matched '$Manufacturer'"
+        Write-Detail "Available publishers will be shown for selection..."
+
+        # Show all for selection as fallback
+        $MyAppPublisher = $SQLdataTable | Out-GridView -Title "No matches for '$Manufacturer' - Choose publisher(s)..." -PassThru
+
+        if ($MyAppPublisher.Publisher.Count -eq 0) {
+            Write-detail "Nothing selected..."
+            throw "Nothing selected, no Publisher selected"
+            Stop-Transcript
+        }
+    } else {
+        Write-Detail "Found $($matchedPublishers.Count) matching publisher(s):"
+        foreach ($pub in $matchedPublishers) {
+            Write-Detail "  - $($pub.Publisher)"
+        }
+
+        # Show matched publishers for confirmation
+        $MyAppPublisher = $matchedPublishers | Out-GridView -Title "Confirm publisher(s) matching '$Manufacturer'..." -PassThru
+
+        if ($MyAppPublisher.Publisher.Count -eq 0) {
+            Write-detail "Nothing selected..."
+            throw "Nothing selected, no Publisher selected"
+            Stop-Transcript
+        }
+    }
+
+    Write-Detail "Using $($MyAppPublisher.Publisher.Count) publisher(s): '$($MyAppPublisher.Publisher -join "', '")'"
 }
 
 
