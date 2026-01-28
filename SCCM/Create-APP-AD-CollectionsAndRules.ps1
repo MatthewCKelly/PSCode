@@ -1,3 +1,9 @@
+# Version 1.3.2 - 2026-01-28
+# - Optimized Manufacturer filtering to use SQL WHERE clause instead of PowerShell filtering
+# - Updated get-AppPublisher function to accept -Manufacturer parameter with SQL-level filtering
+# - Automatic conversion of PowerShell wildcards (* and ?) to SQL wildcards (% and _)
+# - Significantly improved performance when filtering by manufacturer
+#
 # Version 1.3.1 - 2026-01-28
 # - Fixed -Manufacturer parameter to properly resolve wildcards to actual publisher names
 # - Manufacturer wildcards now query database first and show matches for confirmation
@@ -275,8 +281,20 @@ Return [STRING]$mySQLQuery;
 function get-AppPublisher {
     [CmdletBinding()]
     PARAM (
-        [Parameter(Mandatory=$false, HelpMessage="Application Publisher")][STRING]$AppPublisher
+        [Parameter(Mandatory=$false, HelpMessage="Application Publisher (supports wildcards * and ?)")]
+        [STRING]$Manufacturer
     )
+
+    # Build WHERE clause if Manufacturer filter is provided
+    $whereClause32 = ""
+    $whereClause64 = ""
+
+    if (-not [string]::IsNullOrEmpty($Manufacturer)) {
+        # Convert PowerShell wildcards to SQL wildcards
+        $sqlPattern = $Manufacturer -replace '\*', '%' -replace '\?', '_'
+        $whereClause32 = "WHERE v_GS_ADD_REMOVE_PROGRAMS.Publisher0 LIKE '$sqlPattern'"
+        $whereClause64 = "WHERE v_GS_ADD_REMOVE_PROGRAMS_64.Publisher0 LIKE '$sqlPattern'"
+    }
 
 $mySQLQuery = "SELECT  DISTINCT     
 -- 32 Bit Apps             
@@ -284,8 +302,7 @@ $mySQLQuery = "SELECT  DISTINCT
               
 FROM            v_R_System  with (nolock) INNER JOIN
                          v_GS_ADD_REMOVE_PROGRAMS with (nolock) ON v_R_System.ResourceID = v_GS_ADD_REMOVE_PROGRAMS.ResourceID
-			
-	
+$whereClause32
 
 UNION
 
@@ -296,13 +313,13 @@ SELECT   DISTINCT
             
 			  ISNULL(v_GS_ADD_REMOVE_PROGRAMS_64.Publisher0, '') AS 'Publisher'
 
-FROM          v_R_System with (nolock) 
+FROM          v_R_System with (nolock)
 				INNER JOIN
                          v_GS_ADD_REMOVE_PROGRAMS_64 with (nolock) ON v_R_System.ResourceID = v_GS_ADD_REMOVE_PROGRAMS_64.ResourceID
-						
+$whereClause64
 
 
-order by 'Publisher';" -f $AppPublisher;
+order by 'Publisher';"
 Return [STRING]$mySQLQuery;
 
 }
@@ -975,23 +992,27 @@ if ([string]::IsNullOrEmpty($Manufacturer)) {
         Stop-Transcript
     }
 } else {
-    # Manufacturer parameter provided - resolve wildcards to actual publisher names
+    # Manufacturer parameter provided - query database with filter
     Write-Detail "Manufacturer parameter specified: '$Manufacturer'"
-    Write-Detail "Querying database to resolve manufacturer name(s)..."
+    Write-Detail "Querying database with manufacturer filter..."
 
-    # Query all publishers from database
-    $SQLQuery = get-AppPublisher;
+    # Query publishers from database with SQL-level filtering
+    $SQLQuery = get-AppPublisher -Manufacturer $Manufacturer;
     $dataAdapter = New-Object System.Data.SqlClient.SqlDataAdapter($SQLQuery, $ConnectionString)
     $SQLdataTable = New-object "System.Data.DataTable"
     $dataAdapter.Fill($SQLdataTable);
     $dataAdapter.Dispose()
 
-    # Filter publishers using the manufacturer parameter (supports wildcards)
-    $matchedPublishers = $SQLdataTable | Where-Object { $_.Publisher -like $Manufacturer }
-
-    if ($matchedPublishers.Count -eq 0) {
+    if ($SQLdataTable.Rows.Count -eq 0) {
         Write-Detail "ERROR: No publishers matched '$Manufacturer'"
-        Write-Detail "Available publishers will be shown for selection..."
+        Write-Detail "Querying all publishers for selection..."
+
+        # Query all publishers as fallback
+        $SQLQuery = get-AppPublisher;
+        $dataAdapter = New-Object System.Data.SqlClient.SqlDataAdapter($SQLQuery, $ConnectionString)
+        $SQLdataTable = New-object "System.Data.DataTable"
+        $dataAdapter.Fill($SQLdataTable);
+        $dataAdapter.Dispose()
 
         # Show all for selection as fallback
         $MyAppPublisher = $SQLdataTable | Out-GridView -Title "No matches for '$Manufacturer' - Choose publisher(s)..." -PassThru
@@ -1002,13 +1023,13 @@ if ([string]::IsNullOrEmpty($Manufacturer)) {
             Stop-Transcript
         }
     } else {
-        Write-Detail "Found $($matchedPublishers.Count) matching publisher(s):"
-        foreach ($pub in $matchedPublishers) {
-            Write-Detail "  - $($pub.Publisher)"
+        Write-Detail "Found $($SQLdataTable.Rows.Count) matching publisher(s):"
+        foreach ($row in $SQLdataTable.Rows) {
+            Write-Detail "  - $($row.Publisher)"
         }
 
         # Show matched publishers for confirmation
-        $MyAppPublisher = $matchedPublishers | Out-GridView -Title "Confirm publisher(s) matching '$Manufacturer'..." -PassThru
+        $MyAppPublisher = $SQLdataTable | Out-GridView -Title "Confirm publisher(s) matching '$Manufacturer'..." -PassThru
 
         if ($MyAppPublisher.Publisher.Count -eq 0) {
             Write-detail "Nothing selected..."
