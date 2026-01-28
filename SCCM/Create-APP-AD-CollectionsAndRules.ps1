@@ -1,3 +1,8 @@
+# Version 1.3.3 - 2026-01-28
+# - Added check to exit gracefully when no collections are selected
+# - Prevents unnecessary SCCM server connection and folder query when nothing to do
+# - Improved user experience with clear exit message
+#
 # Version 1.3.2 - 2026-01-28
 # - Optimized Manufacturer filtering to use SQL WHERE clause instead of PowerShell filtering
 # - Updated get-AppPublisher function to accept -Manufacturer parameter with SQL-level filtering
@@ -1187,6 +1192,18 @@ if (-not [string]::IsNullOrEmpty($Product)) {
     # Update the collection list with deduplicated version
     $UpdatedCollections = $deduplicatedCollections
 
+
+# Check if any collections remain to be created
+if ($UpdatedCollections.Count -eq 0) {
+    Write-Host ""
+    Write-Detail "No collections selected to create. Exiting..."
+    Write-Detail "Logs : `"$logFile`""
+    Stop-Transcript
+    Exit
+}
+
+Write-Host ""
+Write-Detail "Proceeding with $($UpdatedCollections.Count) collection(s) to create..."
 
 
 # Get SCCM object from server..
