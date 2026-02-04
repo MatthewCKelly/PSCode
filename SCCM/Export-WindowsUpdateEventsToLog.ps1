@@ -1,3 +1,7 @@
+# Version 1.1.0 - 2026-02-04
+# - Added administrator privilege check
+# - Added event log existence validation before querying
+# - Added -Monitor switch for continuous monitoring mode
 # Version 1.0.0 - 2026-02-04
 # - Initial release: Export Windows Update events to CM Log format
 # - Supports WindowsUpdateClient, UpdateOrchestrator, SetupDiag, DeliveryOptimization logs
@@ -13,11 +17,13 @@
     to CM Log format files in the SCCM logs directory. The CM Log format is
     compatible with CMTrace.exe for easy viewing and log merging.
 
-    Event logs collected:
+    Event logs collected (if available on system):
     - Microsoft-Windows-WindowsUpdateClient/Operational
     - Microsoft-Windows-UpdateOrchestrator/Operational
     - Microsoft-Windows-SetupDiag/Operational
     - Microsoft-Windows-DeliveryOptimization/Operational
+    - Microsoft-Windows-Bits-Client/Operational
+    - Microsoft-Windows-CbsPreview/Operational
 
 .PARAMETER DaysBack
     Number of days to look back for events. Default is 2.
@@ -31,6 +37,12 @@
 .PARAMETER IncludeAllEvents
     Include all event IDs, not just the filtered important ones.
 
+.PARAMETER Monitor
+    Run continuously, monitoring for new events. Press Ctrl+C to stop.
+
+.PARAMETER PollIntervalSeconds
+    Interval in seconds between polls when in Monitor mode. Default is 30.
+
 .EXAMPLE
     .\Export-WindowsUpdateEventsToLog.ps1
     Exports last 2 days of Windows Update events to C:\Windows\CCM\Logs
@@ -40,8 +52,12 @@
     Exports last 7 days of events to C:\Logs directory
 
 .EXAMPLE
-    .\Export-WindowsUpdateEventsToLog.ps1 -IncludeAllEvents
-    Exports all events, not just the filtered important event IDs
+    .\Export-WindowsUpdateEventsToLog.ps1 -Monitor
+    Continuously monitors and appends new events to log files. Press Ctrl+C to stop.
+
+.EXAMPLE
+    .\Export-WindowsUpdateEventsToLog.ps1 -Monitor -PollIntervalSeconds 60
+    Monitors with 60 second poll interval
 
 .NOTES
     Requires administrative privileges to read certain event logs.
@@ -64,7 +80,14 @@ param(
     [string]$LogPrefix = "WinUpdate",
 
     [Parameter(Mandatory = $false)]
-    [switch]$IncludeAllEvents
+    [switch]$IncludeAllEvents,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$Monitor,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(5, 3600)]
+    [int]$PollIntervalSeconds = 30
 )
 
 #region Helper Functions
@@ -97,6 +120,52 @@ function Write-Detail {
         'Success' { Write-Host $logEntry -ForegroundColor Green }
         'Debug'   { Write-Host $logEntry -ForegroundColor Gray }
         default   { Write-Host $logEntry }
+    }
+}
+
+function Test-Administrator {
+    <#
+    .SYNOPSIS
+        Checks if the current user has administrator privileges
+    .DESCRIPTION
+        Returns $true if running as administrator, throws exception otherwise
+    #>
+    $currentUser = New-Object Security.Principal.WindowsPrincipal $([Security.Principal.WindowsIdentity]::GetCurrent())
+    $isAdmin = $currentUser.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
+
+    if ($isAdmin -eq $true) {
+        Write-Detail "Current user is an Administrator" -Level Success
+        return $true
+    }
+    else {
+        Write-Detail "Current user is not an Administrator" -Level Error
+        Write-Detail "This script requires administrative privileges to read event logs." -Level Error
+        Write-Detail "Please run PowerShell as Administrator and try again." -Level Info
+        throw [System.Security.Principal.IdentityNotMappedException]::New("Current user is not an Administrator. Please run as Administrator.")
+    }
+}
+
+function Test-EventLogExists {
+    <#
+    .SYNOPSIS
+        Tests if an event log exists on the system
+    .PARAMETER LogName
+        The name of the event log to check
+    .OUTPUTS
+        Returns $true if the log exists, $false otherwise
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LogName
+    )
+
+    try {
+        $null = Get-WinEvent -ListLog $LogName -ErrorAction Stop
+        return $true
+    }
+    catch {
+        return $false
     }
 }
 
@@ -247,6 +316,8 @@ function Export-EventsToLog {
         Full path to the output log file
     .PARAMETER Component
         Component name for the log entries
+    .PARAMETER Append
+        If true, appends to existing file instead of checking for duplicates
     #>
     [CmdletBinding()]
     param(
@@ -258,11 +329,13 @@ function Export-EventsToLog {
         [string]$LogFile,
 
         [Parameter(Mandatory = $true)]
-        [string]$Component
+        [string]$Component,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$Append
     )
 
     if ($Events.Count -eq 0) {
-        Write-Detail "No events to export for $Component" -Level Debug
         return 0
     }
 
@@ -291,6 +364,82 @@ function Export-EventsToLog {
     return $count
 }
 
+function Get-ValidatedEventLogConfigs {
+    <#
+    .SYNOPSIS
+        Returns event log configurations after validating which logs exist on the system
+    #>
+    [CmdletBinding()]
+    param()
+
+    # Define all possible event log configurations
+    $allConfigs = @(
+        @{
+            Name = "WindowsUpdateClient"
+            LogName = "Microsoft-Windows-WindowsUpdateClient/Operational"
+            Component = "WUClient"
+            EventIds = @(19, 20, 25, 26, 30, 31, 32, 43, 44)
+            Description = "Windows Update Client events (download, install, reboot)"
+        },
+        @{
+            Name = "UpdateOrchestrator"
+            LogName = "Microsoft-Windows-UpdateOrchestrator/Operational"
+            Component = "WUOrch"
+            EventIds = @(115, 116, 121, 200, 201, 257, 258)
+            Description = "Update Orchestrator events (scheduling, policies)"
+        },
+        @{
+            Name = "SetupDiag"
+            LogName = "Microsoft-Windows-SetupDiag/Operational"
+            Component = "SetupDiag"
+            EventIds = $null  # Get all events
+            MaxEvents = 50
+            Description = "Setup diagnostic events (upgrade analysis)"
+        },
+        @{
+            Name = "DeliveryOptimization"
+            LogName = "Microsoft-Windows-DeliveryOptimization/Operational"
+            Component = "DO"
+            EventIds = @(10000, 10001, 10003, 200, 201, 202, 203, 204)
+            Description = "Delivery Optimization events (download sources, peers)"
+        },
+        @{
+            Name = "BITS"
+            LogName = "Microsoft-Windows-Bits-Client/Operational"
+            Component = "BITS"
+            EventIds = @(3, 4, 5, 59, 60, 61)
+            Description = "Background Intelligent Transfer Service events"
+        },
+        @{
+            Name = "CBS"
+            LogName = "Microsoft-Windows-CbsPreview/Operational"
+            Component = "CBS"
+            EventIds = $null  # Get all events
+            MaxEvents = 100
+            Description = "Component Based Servicing events"
+        }
+    )
+
+    # Validate which logs exist
+    $validConfigs = @()
+    Write-Detail "Checking available event logs..." -Level Info
+
+    foreach ($config in $allConfigs) {
+        if (Test-EventLogExists -LogName $config.LogName) {
+            Write-Detail "  [OK] $($config.LogName)" -Level Success
+            $validConfigs += $config
+        }
+        else {
+            Write-Detail "  [--] $($config.LogName) (not available)" -Level Debug
+        }
+    }
+
+    Write-Host ""
+    Write-Detail "Found $($validConfigs.Count) of $($allConfigs.Count) event logs available" -Level Info
+
+    return $validConfigs
+}
+
 #endregion Helper Functions
 
 #region Main Script
@@ -298,6 +447,17 @@ function Export-EventsToLog {
 Write-Host ""
 Write-Detail "Windows Update Events to CM Log Exporter" -Level Info
 Write-Detail ("=" * 60) -Level Info
+Write-Host ""
+
+# Check for administrator privileges
+try {
+    Test-Administrator | Out-Null
+}
+catch {
+    Start-Sleep -Seconds 5
+    exit 1
+}
+
 Write-Host ""
 
 # Validate output path
@@ -312,177 +472,173 @@ if (-not (Test-Path $OutputPath)) {
     }
 }
 
+# Get validated event log configurations
+$eventLogConfigs = Get-ValidatedEventLogConfigs
+
+if ($eventLogConfigs.Count -eq 0) {
+    Write-Detail "No event logs are available on this system. Exiting." -Level Error
+    exit 1
+}
+
+Write-Host ""
+
 # Calculate start time
 $startTime = (Get-Date).AddDays(-$DaysBack)
 Write-Detail "Collecting events from: $($startTime.ToString('yyyy-MM-dd HH:mm:ss'))" -Level Info
 Write-Detail "Output directory: $OutputPath" -Level Info
-Write-Host ""
 
-# Define event log configurations
-$eventLogConfigs = @(
-    @{
-        Name = "WindowsUpdateClient"
-        LogName = "Microsoft-Windows-WindowsUpdateClient/Operational"
-        Component = "WUClient"
-        EventIds = @(19, 20, 25, 26, 30, 31, 32, 43, 44)
-        Description = "Windows Update Client events (download, install, reboot)"
-    },
-    @{
-        Name = "UpdateOrchestrator"
-        LogName = "Microsoft-Windows-UpdateOrchestrator/Operational"
-        Component = "WUOrch"
-        EventIds = @(115, 116, 121, 200, 201, 257, 258)
-        Description = "Update Orchestrator events (scheduling, policies)"
-    },
-    @{
-        Name = "SetupDiag"
-        LogName = "Microsoft-Windows-SetupDiag/Operational"
-        Component = "SetupDiag"
-        EventIds = $null  # Get all events
-        MaxEvents = 50
-        Description = "Setup diagnostic events (upgrade analysis)"
-    },
-    @{
-        Name = "DeliveryOptimization"
-        LogName = "Microsoft-Windows-DeliveryOptimization/Operational"
-        Component = "DO"
-        EventIds = @(10000, 10001, 10003, 200, 201, 202, 203, 204)
-        Description = "Delivery Optimization events (download sources, peers)"
-    },
-    @{
-        Name = "BITS"
-        LogName = "Microsoft-Windows-Bits-Client/Operational"
-        Component = "BITS"
-        EventIds = @(3, 4, 5, 59, 60, 61)
-        Description = "Background Intelligent Transfer Service events"
-    },
-    @{
-        Name = "CBS"
-        LogName = "Microsoft-Windows-CbsPreview/Operational"
-        Component = "CBS"
-        EventIds = $null  # Get all events
-        MaxEvents = 100
-        Description = "Component Based Servicing events"
-    }
-)
-
-# Track totals
-$totalEvents = 0
-$logFiles = @()
-
-# Process each event log
-foreach ($config in $eventLogConfigs) {
-    Write-Detail "Processing: $($config.Description)" -Level Info
-
-    # Build filter hashtable
-    $filter = @{
-        LogName = $config.LogName
-        StartTime = $startTime
-    }
-
-    # Add event ID filter unless getting all events or IncludeAllEvents is set
-    if (-not $IncludeAllEvents -and $config.EventIds) {
-        $filter['Id'] = $config.EventIds
-    }
-
-    # Get events
-    $maxEvents = if ($config.MaxEvents) { $config.MaxEvents } else { 0 }
-    $events = Get-EventLogSafely -FilterHashtable $filter -MaxEvents $maxEvents
-
-    if ($events.Count -gt 0) {
-        # Create log file path
-        $logFileName = "{0}_{1}.log" -f $LogPrefix, $config.Name
-        $logFilePath = Join-Path $OutputPath $logFileName
-
-        # Remove existing file to start fresh
-        if (Test-Path $logFilePath) {
-            Remove-Item $logFilePath -Force
-        }
-
-        # Export events
-        $count = Export-EventsToLog -Events $events -LogFile $logFilePath -Component $config.Component
-
-        Write-Detail "  Exported $count events to $logFileName" -Level Success
-        $totalEvents += $count
-        $logFiles += $logFilePath
-    }
-    else {
-        Write-Detail "  No events found" -Level Debug
-    }
+if ($Monitor) {
+    Write-Detail "Monitor mode: ENABLED (Poll interval: $PollIntervalSeconds seconds)" -Level Info
+    Write-Detail "Press Ctrl+C to stop monitoring" -Level Warning
 }
 
 Write-Host ""
-Write-Detail ("=" * 60) -Level Info
 
-# Create combined log file
-if ($logFiles.Count -gt 0) {
-    $combinedLogPath = Join-Path $OutputPath "$($LogPrefix)_Combined.log"
+# Function to process events (used in both one-shot and monitor modes)
+function Invoke-EventExport {
+    param(
+        [datetime]$FromTime,
+        [switch]$Append,
+        [switch]$SuppressNoEventsMessage
+    )
 
-    Write-Detail "Creating combined log file..." -Level Info
+    $totalEvents = 0
+    $logFiles = @()
 
-    # Remove existing combined file
-    if (Test-Path $combinedLogPath) {
-        Remove-Item $combinedLogPath -Force
-    }
-
-    # Collect all events from all sources for combined file
-    $allEvents = @()
-
+    # Process each event log
     foreach ($config in $eventLogConfigs) {
-        $filter = @{
-            LogName = $config.LogName
-            StartTime = $startTime
+        if (-not $SuppressNoEventsMessage) {
+            Write-Detail "Processing: $($config.Description)" -Level Info
         }
 
+        # Build filter hashtable
+        $filter = @{
+            LogName = $config.LogName
+            StartTime = $FromTime
+        }
+
+        # Add event ID filter unless getting all events or IncludeAllEvents is set
         if (-not $IncludeAllEvents -and $config.EventIds) {
             $filter['Id'] = $config.EventIds
         }
 
+        # Get events
         $maxEvents = if ($config.MaxEvents) { $config.MaxEvents } else { 0 }
         $events = Get-EventLogSafely -FilterHashtable $filter -MaxEvents $maxEvents
 
-        foreach ($event in $events) {
-            $allEvents += [PSCustomObject]@{
-                TimeCreated = $event.TimeCreated
-                Id = $event.Id
-                Message = $event.Message
-                LevelDisplayName = $event.LevelDisplayName
-                ProcessId = $event.ProcessId
-                Component = $config.Component
+        if ($events.Count -gt 0) {
+            # Create log file path
+            $logFileName = "{0}_{1}.log" -f $LogPrefix, $config.Name
+            $logFilePath = Join-Path $OutputPath $logFileName
+
+            # Remove existing file only if not appending
+            if (-not $Append -and (Test-Path $logFilePath)) {
+                Remove-Item $logFilePath -Force
             }
+
+            # Export events
+            $count = Export-EventsToLog -Events $events -LogFile $logFilePath -Component $config.Component -Append:$Append
+
+            Write-Detail "  Exported $count events to $logFileName" -Level Success
+            $totalEvents += $count
+            if ($logFilePath -notin $logFiles) {
+                $logFiles += $logFilePath
+            }
+        }
+        elseif (-not $SuppressNoEventsMessage) {
+            Write-Detail "  No events found" -Level Debug
         }
     }
 
-    # Sort all events by time and write to combined file
-    $sortedAllEvents = $allEvents | Sort-Object TimeCreated
+    # Create/update combined log file
+    if ($totalEvents -gt 0) {
+        $combinedLogPath = Join-Path $OutputPath "$($LogPrefix)_Combined.log"
 
-    foreach ($event in $sortedAllEvents) {
-        $message = "[$($event.Component)] [EventID: $($event.Id)] $($event.Message)"
-        $logType = ConvertTo-CMLogType -Level $event.LevelDisplayName
+        if (-not $Append) {
+            Write-Detail "Creating combined log file..." -Level Info
 
-        Write-CMLogEntry -Message $message `
-                         -LogFile $combinedLogPath `
-                         -Component $event.Component `
-                         -Type $logType `
-                         -Thread $event.ProcessId `
-                         -EventTime $event.TimeCreated
+            # Remove existing combined file only if not appending
+            if (Test-Path $combinedLogPath) {
+                Remove-Item $combinedLogPath -Force
+            }
+        }
+
+        # Collect all events from all sources for combined file
+        $allEvents = @()
+
+        foreach ($config in $eventLogConfigs) {
+            $filter = @{
+                LogName = $config.LogName
+                StartTime = $FromTime
+            }
+
+            if (-not $IncludeAllEvents -and $config.EventIds) {
+                $filter['Id'] = $config.EventIds
+            }
+
+            $maxEvents = if ($config.MaxEvents) { $config.MaxEvents } else { 0 }
+            $events = Get-EventLogSafely -FilterHashtable $filter -MaxEvents $maxEvents
+
+            foreach ($event in $events) {
+                $allEvents += [PSCustomObject]@{
+                    TimeCreated = $event.TimeCreated
+                    Id = $event.Id
+                    Message = $event.Message
+                    LevelDisplayName = $event.LevelDisplayName
+                    ProcessId = $event.ProcessId
+                    Component = $config.Component
+                }
+            }
+        }
+
+        # Sort all events by time and write to combined file
+        $sortedAllEvents = $allEvents | Sort-Object TimeCreated
+
+        foreach ($event in $sortedAllEvents) {
+            $message = "[$($event.Component)] [EventID: $($event.Id)] $($event.Message)"
+            $logType = ConvertTo-CMLogType -Level $event.LevelDisplayName
+
+            Write-CMLogEntry -Message $message `
+                             -LogFile $combinedLogPath `
+                             -Component $event.Component `
+                             -Type $logType `
+                             -Thread $event.ProcessId `
+                             -EventTime $event.TimeCreated
+        }
+
+        if (-not $Append) {
+            Write-Detail "Combined log created: $combinedLogPath" -Level Success
+        }
     }
 
-    Write-Detail "Combined log created: $combinedLogPath" -Level Success
+    return @{
+        TotalEvents = $totalEvents
+        LogFiles = $logFiles
+    }
 }
 
+# Initial export
+$result = Invoke-EventExport -FromTime $startTime
+
 Write-Host ""
-Write-Detail "Export complete!" -Level Success
-Write-Detail "Total events exported: $totalEvents" -Level Info
+Write-Detail ("=" * 60) -Level Info
+Write-Host ""
+Write-Detail "Initial export complete!" -Level Success
+Write-Detail "Total events exported: $($result.TotalEvents)" -Level Info
 Write-Detail "Log files created in: $OutputPath" -Level Info
 Write-Host ""
 
 # Display file list
+$logFiles = $result.LogFiles
+$combinedLogPath = Join-Path $OutputPath "$($LogPrefix)_Combined.log"
+
 if ($logFiles.Count -gt 0) {
     Write-Detail "Files created:" -Level Info
     foreach ($file in $logFiles) {
-        $fileInfo = Get-Item $file
-        Write-Detail "  - $(Split-Path $file -Leaf) ($([math]::Round($fileInfo.Length / 1KB, 2)) KB)" -Level Info
+        if (Test-Path $file) {
+            $fileInfo = Get-Item $file
+            Write-Detail "  - $(Split-Path $file -Leaf) ($([math]::Round($fileInfo.Length / 1KB, 2)) KB)" -Level Info
+        }
     }
 
     if (Test-Path $combinedLogPath) {
@@ -493,5 +649,45 @@ if ($logFiles.Count -gt 0) {
 
 Write-Host ""
 Write-Detail "Use CMTrace.exe to view these log files" -Level Info
+
+# Monitor mode - continuous polling
+if ($Monitor) {
+    Write-Host ""
+    Write-Detail ("=" * 60) -Level Info
+    Write-Detail "Entering monitor mode..." -Level Info
+    Write-Detail "Polling every $PollIntervalSeconds seconds for new events" -Level Info
+    Write-Detail "Press Ctrl+C to stop" -Level Warning
+    Write-Host ""
+
+    # Track the last check time
+    $lastCheckTime = Get-Date
+
+    try {
+        while ($true) {
+            Start-Sleep -Seconds $PollIntervalSeconds
+
+            $currentTime = Get-Date
+            Write-Detail "Checking for new events since $($lastCheckTime.ToString('HH:mm:ss'))..." -Level Debug
+
+            # Get events since last check
+            $monitorResult = Invoke-EventExport -FromTime $lastCheckTime -Append -SuppressNoEventsMessage
+
+            if ($monitorResult.TotalEvents -gt 0) {
+                Write-Detail "Added $($monitorResult.TotalEvents) new events to logs" -Level Success
+            }
+
+            $lastCheckTime = $currentTime
+        }
+    }
+    catch {
+        # Ctrl+C or other interruption
+        Write-Host ""
+        Write-Detail "Monitor mode stopped" -Level Info
+    }
+    finally {
+        Write-Host ""
+        Write-Detail "Monitoring ended at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -Level Info
+    }
+}
 
 #endregion Main Script
