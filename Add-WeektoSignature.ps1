@@ -1646,7 +1646,11 @@ Function Update-FormLayout {
 
     $cancelButton.Location = New-Object System.Drawing.Point(($rightEdge - 80), $intButtonTop)
     $applyButton.Location = New-Object System.Drawing.Point(($rightEdge - 190), $intButtonTop)
-    $startupButton.Location = New-Object System.Drawing.Point(($rightEdge - 320), $intButtonTop)
+
+    # Position left-side buttons (auto-run management)
+    $setupAutoRunButton.Location = New-Object System.Drawing.Point(10, $intButtonTop)
+    $removeAutoRunButton.Location = New-Object System.Drawing.Point(130, $intButtonTop)
+    $configIntervalButton.Location = New-Object System.Drawing.Point(265, $intButtonTop)
 
     # Ensure form is tall enough to show all buttons
     $requiredHeight = $intButtonTop + 70  # Button height (30) + margin (40)
@@ -2431,7 +2435,9 @@ finally {
     if ($htmlPreviewLabel) { $htmlPreviewLabel.Dispose() }
     if ($applyButton) { $applyButton.Dispose() }
     if ($cancelButton) { $cancelButton.Dispose() }
-    if ($startupButton) { $startupButton.Dispose() }
+    if ($setupAutoRunButton) { $setupAutoRunButton.Dispose() }
+    if ($removeAutoRunButton) { $removeAutoRunButton.Dispose() }
+    if ($configIntervalButton) { $configIntervalButton.Dispose() }
     if ($htmlMoveUpButton) { $htmlMoveUpButton.Dispose() }
     if ($htmlMoveDownButton) { $htmlMoveDownButton.Dispose() }
     if ($textMoveUpButton) { $textMoveUpButton.Dispose() }
