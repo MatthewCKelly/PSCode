@@ -39,6 +39,10 @@
           without HTML entities, dynamic height allocation for preview areas
     2.3.1 - Fixed text output generation to use plain text directly instead of HTML
             conversion, properly formats each day on separate line with clean status
+    2.4 - Added registry persistence for weekly selections and split mode preference
+          Selections are now saved when Apply is clicked and restored on next launch
+          Form height automatically adjusts to ensure all buttons are visible
+          Fixed form cut-off issues with bottom buttons
 #>
 
 #region Initialization and Global Variables
@@ -52,6 +56,8 @@ $regPath = "HKCU:\Software\OutlookSignatureManager"
 $regValueName = "LastSignatureFile"
 $regNumDaysValue = "NumberOfDays"
 $regIncludeTodayValue = "IncludeToday"
+$regWeeklySelectionsValue = "WeeklySelections"
+$regSplitModeValue = "SplitMode"
 
 # Backup directory in roaming appdata
 $backupPath = "$env:APPDATA\OutlookSignatureManager\Backups"
@@ -163,35 +169,55 @@ Function Write-Detail {
 # Function to load configuration from registry
 Function Get-SignatureConfig {
     Write-Detail -Message "Loading configuration from registry" -Level Debug
-    
+
     try {
         if (-not (Test-Path $regPath)) {
             Write-Detail -Message "No configuration found, using defaults" -Level Debug
             return @{
                 NumDays = $script:defaultNumDays
                 IncludeToday = $script:defaultIncludeToday
+                SplitMode = $false
+                WeeklySelections = $null
             }
         }
-        
+
         $numDays = (Get-ItemProperty -Path $regPath -Name $regNumDaysValue -ErrorAction SilentlyContinue).$regNumDaysValue
         $includeToday = (Get-ItemProperty -Path $regPath -Name $regIncludeTodayValue -ErrorAction SilentlyContinue).$regIncludeTodayValue
-        
+        $splitMode = (Get-ItemProperty -Path $regPath -Name $regSplitModeValue -ErrorAction SilentlyContinue).$regSplitModeValue
+        $weeklySelectionsJson = (Get-ItemProperty -Path $regPath -Name $regWeeklySelectionsValue -ErrorAction SilentlyContinue).$regWeeklySelectionsValue
+
         # Use defaults if values not found
         if ($null -eq $numDays) { $numDays = $script:defaultNumDays }
         if ($null -eq $includeToday) { $includeToday = $script:defaultIncludeToday }
-        
-        Write-Detail -Message "Configuration loaded: NumDays=$numDays, IncludeToday=$includeToday" -Level Info
-        
+        if ($null -eq $splitMode) { $splitMode = $false }
+
+        # Parse weekly selections from JSON
+        $weeklySelections = $null
+        if ($weeklySelectionsJson) {
+            try {
+                $weeklySelections = $weeklySelectionsJson | ConvertFrom-Json
+                Write-Detail -Message "Loaded weekly selections from registry" -Level Debug
+            } catch {
+                Write-Detail -Message "Failed to parse weekly selections: $($_.Exception.Message)" -Level Warning
+            }
+        }
+
+        Write-Detail -Message "Configuration loaded: NumDays=$numDays, IncludeToday=$includeToday, SplitMode=$splitMode" -Level Info
+
         return @{
             NumDays = $numDays
             IncludeToday = $includeToday
+            SplitMode = $splitMode
+            WeeklySelections = $weeklySelections
         }
-        
+
     } catch {
         Write-Detail -Message "Failed to load configuration: $($_.Exception.Message)" -Level Warning
         return @{
             NumDays = $script:defaultNumDays
             IncludeToday = $script:defaultIncludeToday
+            SplitMode = $false
+            WeeklySelections = $null
         }
     }
 } # end of Get-SignatureConfig function
@@ -200,23 +226,33 @@ Function Get-SignatureConfig {
 Function Set-SignatureConfig {
     param(
         [int]$NumDays,
-        [bool]$IncludeToday
+        [bool]$IncludeToday,
+        [bool]$SplitMode,
+        [hashtable]$WeeklySelections
     )
-    
-    Write-Detail -Message "Saving configuration to registry: NumDays=$NumDays, IncludeToday=$IncludeToday" -Level Debug
-    
+
+    Write-Detail -Message "Saving configuration to registry: NumDays=$NumDays, IncludeToday=$IncludeToday, SplitMode=$SplitMode" -Level Debug
+
     try {
         if (-not (Test-Path $regPath)) {
             New-Item -Path $regPath -Force | Out-Null
             Write-Detail -Message "Created registry key: $regPath" -Level Debug
         }
-        
+
         Set-ItemProperty -Path $regPath -Name $regNumDaysValue -Value $NumDays
         Set-ItemProperty -Path $regPath -Name $regIncludeTodayValue -Value ([int]$IncludeToday)
-        
+        Set-ItemProperty -Path $regPath -Name $regSplitModeValue -Value ([int]$SplitMode)
+
+        # Save weekly selections as JSON
+        if ($WeeklySelections) {
+            $weeklySelectionsJson = $WeeklySelections | ConvertTo-Json -Compress
+            Set-ItemProperty -Path $regPath -Name $regWeeklySelectionsValue -Value $weeklySelectionsJson
+            Write-Detail -Message "Saved weekly selections to registry" -Level Debug
+        }
+
         Write-Detail -Message "Configuration saved successfully" -Level Info
         return $true
-        
+
     } catch {
         Write-Detail -Message "Failed to save configuration: $($_.Exception.Message)" -Level Error
         return $false
@@ -773,8 +809,13 @@ Write-Detail -Message "Starting Outlook Signature Manager" -Level Info
 $config = Get-SignatureConfig
 $numDays = $config.NumDays
 $includeToday = $config.IncludeToday
+$script:savedSplitMode = $config.SplitMode
+$script:savedWeeklySelections = $config.WeeklySelections
 
-Write-Detail -Message "Configuration: NumDays=$numDays, IncludeToday=$includeToday" -Level Info
+Write-Detail -Message "Configuration: NumDays=$numDays, IncludeToday=$includeToday, SplitMode=$($script:savedSplitMode)" -Level Info
+if ($script:savedWeeklySelections) {
+    Write-Detail -Message "Loaded saved weekly selections from previous session" -Level Info
+}
 
 # Check if running in startup/minimized mode
 $isStartupMode = $false
@@ -967,7 +1008,7 @@ $useAmPmCheckbox.Location = New-Object System.Drawing.Point(320, 68)
 $useAmPmCheckbox.Size = New-Object System.Drawing.Size(240, 25)
 $useAmPmCheckbox.Text = "Split AM/PM (show separate times)"
 $useAmPmCheckbox.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-$useAmPmCheckbox.Checked = $false
+$useAmPmCheckbox.Checked = $script:savedSplitMode
 $form.Controls.Add($useAmPmCheckbox)
 
 
@@ -1250,14 +1291,45 @@ Function Update-DayControls {
         
         $yPosition += $script:rowHeight
     } # end of create/update controls loop
-    
+
+    # Restore saved selections if available
+    if ($script:savedWeeklySelections) {
+        Write-Detail -Message "Restoring saved weekly selections" -Level Debug
+        foreach ($dayKey in $script:dropdowns.Keys | Sort-Object) {
+            $savedDay = $script:savedWeeklySelections | Where-Object { $_.DayKey -eq $dayKey } | Select-Object -First 1
+            if ($savedDay) {
+                # Restore AM/PM selections if in split mode
+                if ($script:dropdowns[$dayKey]['AM'] -and $savedDay.AM) {
+                    $amIndex = $script:statusOptions.IndexOf($savedDay.AM)
+                    if ($amIndex -ge 0) {
+                        $script:dropdowns[$dayKey]['AM'].SelectedIndex = $amIndex
+                    }
+                }
+                if ($script:dropdowns[$dayKey]['PM'] -and $savedDay.PM) {
+                    $pmIndex = $script:statusOptions.IndexOf($savedDay.PM)
+                    if ($pmIndex -ge 0) {
+                        $script:dropdowns[$dayKey]['PM'].SelectedIndex = $pmIndex
+                    }
+                }
+                # Restore full day selection if not in split mode
+                if ($script:dropdowns[$dayKey]['Day'] -and $savedDay.Day) {
+                    $dayIndex = $script:statusOptions.IndexOf($savedDay.Day)
+                    if ($dayIndex -ge 0) {
+                        $script:dropdowns[$dayKey]['Day'].SelectedIndex = $dayIndex
+                    }
+                }
+                Write-Detail -Message "Restored selections for $dayKey" -Level Debug
+            }
+        }
+    }
+
     # Update title label with date range
     if ($workingDays.Count -gt 0) {
         $startDate = $workingDays[0].ToString('dd/MM/yyyy')
         $endDate = $workingDays[$workingDays.Count - 1].ToString('dd/MM/yyyy')
         $titleLabel.Text = "Next $requestedDays Working Day$(if($requestedDays -gt 1){'s'}): $startDate - $endDate"
     }
-    
+
     # Position preview browser and buttons
     Update-FormLayout
     
@@ -1326,6 +1398,13 @@ Function Update-FormLayout {
     $cancelButton.Location = New-Object System.Drawing.Point(($rightEdge - 80), $intButtonTop)
     $applyButton.Location = New-Object System.Drawing.Point(($rightEdge - 190), $intButtonTop)
     $startupButton.Location = New-Object System.Drawing.Point(($rightEdge - 320), $intButtonTop)
+
+    # Ensure form is tall enough to show all buttons
+    $requiredHeight = $intButtonTop + 70  # Button height (30) + margin (40)
+    if ($form.ClientSize.Height -lt $requiredHeight) {
+        $form.ClientSize = New-Object System.Drawing.Size($form.ClientSize.Width, $requiredHeight)
+        Write-Detail -Message "Adjusted form height to $requiredHeight to fit all controls" -Level Debug
+    }
 
 } # end of Update-FormLayout function
 
@@ -1684,19 +1763,11 @@ $startupButton.Add_Click({
 $applyButton.Add_Click({
     Write-Detail -Message "Apply button clicked - processing signature update" -Level Info
     
-    # Save configuration to registry
-    $requestedDays = $numDaysRequired.SelectedItem
-    $includeToday = $includeTodayCheckbox.Checked
-    $saved = Set-SignatureConfig -NumDays $requestedDays -IncludeToday $includeToday
-    
-    if ($saved) {
-        Write-Detail -Message "Configuration saved: NumDays=$requestedDays, IncludeToday=$includeToday" -Level Info
-    }
-    
     # Collect status data
     $statusData = @{}
     $isSplitMode = $useAmPmCheckbox.Checked
-    
+    $weeklySelections = @()
+
     foreach ($dayKey in $($script:dropdowns.Keys | Sort-Object)) {
         if ($isSplitMode) {
             # Use separate AM/PM selections
@@ -1705,6 +1776,12 @@ $applyButton.Add_Click({
                 'PM' = $script:dropdowns[$dayKey]['PM'].SelectedItem
                 'Date' = $script:dropdowns[$dayKey]['Date']
                 'DayName' = $script:dropdowns[$dayKey]['DayName']
+            }
+            # Save for registry
+            $weeklySelections += @{
+                DayKey = $dayKey
+                AM = $script:dropdowns[$dayKey]['AM'].SelectedItem
+                PM = $script:dropdowns[$dayKey]['PM'].SelectedItem
             }
         } else {
             # Use full day selection for both AM and PM
@@ -1715,8 +1792,22 @@ $applyButton.Add_Click({
                 'Date' = $script:dropdowns[$dayKey]['Date']
                 'DayName' = $script:dropdowns[$dayKey]['DayName']
             }
+            # Save for registry
+            $weeklySelections += @{
+                DayKey = $dayKey
+                Day = $dayStatus
+            }
         }
     } # end of collect selections loop
+
+    # Save configuration to registry (including weekly selections)
+    $requestedDays = $numDaysRequired.SelectedItem
+    $includeToday = $includeTodayCheckbox.Checked
+    $saved = Set-SignatureConfig -NumDays $requestedDays -IncludeToday $includeToday -SplitMode $isSplitMode -WeeklySelections $weeklySelections
+
+    if ($saved) {
+        Write-Detail -Message "Configuration saved: NumDays=$requestedDays, IncludeToday=$includeToday, SplitMode=$isSplitMode" -Level Info
+    }
     
     # Confirmation dialog
     $confirmResult = [System.Windows.Forms.MessageBox]::Show(
