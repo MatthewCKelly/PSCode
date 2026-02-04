@@ -23,7 +23,7 @@
     Launches GUI form for weekly status configuration
 .NOTES
     Author: Claude AI
-    Version: 2.0
+    Version: 2.4.1
     Requires: PowerShell 5.0+, .NET Framework for Windows Forms
     Registry: HKCU\Software\OutlookSignatureManager
     Configuration: Number of days and today's status preference stored in registry
@@ -43,6 +43,8 @@
           Selections are now saved when Apply is clicked and restored on next launch
           Form height automatically adjusts to ensure all buttons are visible
           Fixed form cut-off issues with bottom buttons
+    2.4.1 - Fixed parameter type error in Set-SignatureConfig function
+            Changed WeeklySelections parameter from [hashtable] to [array] to match actual data type
 #>
 
 #region Initialization and Global Variables
@@ -228,7 +230,7 @@ Function Set-SignatureConfig {
         [int]$NumDays,
         [bool]$IncludeToday,
         [bool]$SplitMode,
-        [hashtable]$WeeklySelections
+        [array]$WeeklySelections
     )
 
     Write-Detail -Message "Saving configuration to registry: NumDays=$NumDays, IncludeToday=$IncludeToday, SplitMode=$SplitMode" -Level Debug
