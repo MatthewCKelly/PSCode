@@ -23,7 +23,7 @@
     Launches GUI form for weekly status configuration
 .NOTES
     Author: Claude AI
-    Version: 2.4.1
+    Version: 2.5
     Requires: PowerShell 5.0+, .NET Framework for Windows Forms
     Registry: HKCU\Software\OutlookSignatureManager
     Configuration: Number of days and today's status preference stored in registry
@@ -45,7 +45,15 @@
           Fixed form cut-off issues with bottom buttons
     2.4.1 - Fixed parameter type error in Set-SignatureConfig function
             Changed WeeklySelections parameter from [hashtable] to [array] to match actual data type
+    2.5 - Added scheduled task functionality for automatic signature updates on logon/unlock
+          Configurable run interval (default 7 hours) to prevent frequent re-runs
+          New buttons: Setup Auto-Run, Remove Auto-Run, Configure Interval
 #>
+
+# Script parameters
+param(
+    [switch]$AutoRun
+)
 
 #region Initialization and Global Variables
 
@@ -262,6 +270,228 @@ Function Set-SignatureConfig {
 } # end of Set-SignatureConfig function
 
 #endregion Configuration Functions
+
+#region Scheduled Task Functions
+
+# Registry path for last run timestamp
+$regLastRunValue = "LastRunTimestamp"
+$regRunIntervalHoursValue = "RunIntervalHours"
+
+# Function to check if script should run based on last run time
+Function Test-ShouldRunScript {
+    param(
+        [int]$MinimumHoursInterval = 7
+    )
+
+    Write-Detail -Message "Checking if script should run (minimum interval: $MinimumHoursInterval hours)" -Level Debug
+
+    try {
+        if (-not (Test-Path $regPath)) {
+            Write-Detail -Message "No previous run detected, script will run" -Level Info
+            return $true
+        }
+
+        $lastRunValue = (Get-ItemProperty -Path $regPath -Name $regLastRunValue -ErrorAction SilentlyContinue).$regLastRunValue
+
+        if (-not $lastRunValue) {
+            Write-Detail -Message "No last run timestamp found, script will run" -Level Info
+            return $true
+        }
+
+        # Parse last run timestamp
+        $lastRunTime = [DateTime]::ParseExact($lastRunValue, 'yyyy-MM-dd HH:mm:ss', $null)
+        $hoursSinceLastRun = (Get-Date) - $lastRunTime | Select-Object -ExpandProperty TotalHours
+
+        Write-Detail -Message "Last run: $lastRunValue ($([math]::Round($hoursSinceLastRun, 2)) hours ago)" -Level Info
+
+        if ($hoursSinceLastRun -ge $MinimumHoursInterval) {
+            Write-Detail -Message "Script will run (interval met)" -Level Info
+            return $true
+        } else {
+            $hoursRemaining = [math]::Round($MinimumHoursInterval - $hoursSinceLastRun, 2)
+            Write-Detail -Message "Script will not run (wait $hoursRemaining more hours)" -Level Info
+            return $false
+        }
+
+    } catch {
+        Write-Detail -Message "Error checking last run time: $($_.Exception.Message)" -Level Warning
+        return $true  # Default to running if we can't check
+    }
+} # end of Test-ShouldRunScript function
+
+# Function to update last run timestamp
+Function Update-LastRunTimestamp {
+    Write-Detail -Message "Updating last run timestamp" -Level Debug
+
+    try {
+        if (-not (Test-Path $regPath)) {
+            New-Item -Path $regPath -Force | Out-Null
+        }
+
+        $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+        Set-ItemProperty -Path $regPath -Name $regLastRunValue -Value $timestamp
+
+        Write-Detail -Message "Last run timestamp updated: $timestamp" -Level Debug
+        return $true
+
+    } catch {
+        Write-Detail -Message "Failed to update last run timestamp: $($_.Exception.Message)" -Level Warning
+        return $false
+    }
+} # end of Update-LastRunTimestamp function
+
+# Function to get configured run interval
+Function Get-RunIntervalHours {
+    try {
+        if (-not (Test-Path $regPath)) {
+            return 7  # Default
+        }
+
+        $interval = (Get-ItemProperty -Path $regPath -Name $regRunIntervalHoursValue -ErrorAction SilentlyContinue).$regRunIntervalHoursValue
+
+        if ($null -eq $interval -or $interval -le 0) {
+            return 7  # Default
+        }
+
+        return $interval
+
+    } catch {
+        return 7  # Default
+    }
+} # end of Get-RunIntervalHours function
+
+# Function to set run interval
+Function Set-RunIntervalHours {
+    param(
+        [int]$Hours = 7
+    )
+
+    try {
+        if (-not (Test-Path $regPath)) {
+            New-Item -Path $regPath -Force | Out-Null
+        }
+
+        Set-ItemProperty -Path $regPath -Name $regRunIntervalHoursValue -Value $Hours
+        Write-Detail -Message "Run interval set to $Hours hours" -Level Info
+        return $true
+
+    } catch {
+        Write-Detail -Message "Failed to set run interval: $($_.Exception.Message)" -Level Error
+        return $false
+    }
+} # end of Set-RunIntervalHours function
+
+# Function to install scheduled task
+Function Install-ScheduledTask {
+    param(
+        [ValidateSet('Logon', 'Unlock', 'Both')]
+        [string]$TriggerType = 'Both'
+    )
+
+    Write-Detail -Message "Installing scheduled task with trigger: $TriggerType" -Level Info
+
+    try {
+        $taskName = "OutlookSignatureManager_AutoUpdate"
+        $scriptPath = $PSCommandPath
+
+        if (-not $scriptPath) {
+            $scriptPath = $MyInvocation.MyCommand.Path
+        }
+
+        # Check if script file exists
+        if (-not (Test-Path $scriptPath)) {
+            Write-Detail -Message "Cannot determine script path for scheduled task" -Level Error
+            return $false
+        }
+
+        # Create action to run PowerShell with this script
+        $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+            -Argument "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -AutoRun"
+
+        # Create trigger(s)
+        $triggers = @()
+
+        if ($TriggerType -eq 'Logon' -or $TriggerType -eq 'Both') {
+            $logonTrigger = New-ScheduledTaskTrigger -AtLogOn
+            $triggers += $logonTrigger
+            Write-Detail -Message "Added logon trigger" -Level Debug
+        }
+
+        if ($TriggerType -eq 'Unlock' -or $TriggerType -eq 'Both') {
+            # Unlock trigger is implemented using Event-based trigger
+            # Event ID 4801 = Workstation was unlocked
+            $unlockTrigger = Get-CimClass -ClassName MSFT_TaskEventTrigger -Namespace Root/Microsoft/Windows/TaskScheduler
+            $trigger = New-CimInstance -CimClass $unlockTrigger -ClientOnly
+            $trigger.Enabled = $true
+            $trigger.Subscription = @"
+<QueryList>
+  <Query Id="0" Path="Security">
+    <Select Path="Security">*[System[EventID=4801]]</Select>
+  </Query>
+</QueryList>
+"@
+            $triggers += $trigger
+            Write-Detail -Message "Added unlock trigger (Event ID 4801)" -Level Debug
+        }
+
+        # Create principal (run with user context)
+        $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive
+
+        # Create settings
+        $settings = New-ScheduledTaskSettingsSet `
+            -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries `
+            -StartWhenAvailable `
+            -DontStopOnIdleEnd
+
+        # Check if task already exists
+        $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+
+        if ($existingTask) {
+            Write-Detail -Message "Scheduled task already exists, updating..." -Level Info
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+        }
+
+        # Register the task
+        Register-ScheduledTask -TaskName $taskName `
+            -Action $action `
+            -Trigger $triggers `
+            -Principal $principal `
+            -Settings $settings `
+            -Description "Automatically updates Outlook signature weekly status table on logon/unlock" | Out-Null
+
+        Write-Detail -Message "Scheduled task installed successfully: $taskName" -Level Success
+        return $true
+
+    } catch {
+        Write-Detail -Message "Failed to install scheduled task: $($_.Exception.Message)" -Level Error
+        return $false
+    }
+} # end of Install-ScheduledTask function
+
+# Function to uninstall scheduled task
+Function Uninstall-ScheduledTask {
+    try {
+        $taskName = "OutlookSignatureManager_AutoUpdate"
+
+        $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+
+        if ($existingTask) {
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+            Write-Detail -Message "Scheduled task removed: $taskName" -Level Success
+            return $true
+        } else {
+            Write-Detail -Message "Scheduled task not found: $taskName" -Level Warning
+            return $false
+        }
+
+    } catch {
+        Write-Detail -Message "Failed to uninstall scheduled task: $($_.Exception.Message)" -Level Error
+        return $false
+    }
+} # end of Uninstall-ScheduledTask function
+
+#endregion Scheduled Task Functions
 
 #region Outlook Helper Functions
 
@@ -819,6 +1049,23 @@ if ($script:savedWeeklySelections) {
     Write-Detail -Message "Loaded saved weekly selections from previous session" -Level Info
 }
 
+# Check if running in auto-run mode (triggered by scheduled task)
+if ($AutoRun) {
+    Write-Detail -Message "Running in auto-run mode (triggered by scheduled task)" -Level Info
+
+    # Get configured run interval
+    $runInterval = Get-RunIntervalHours
+    Write-Detail -Message "Configured run interval: $runInterval hours" -Level Info
+
+    # Check if enough time has passed since last run
+    if (-not (Test-ShouldRunScript -MinimumHoursInterval $runInterval)) {
+        Write-Detail -Message "Skipping run - minimum interval not met" -Level Info
+        exit 0
+    }
+
+    Write-Detail -Message "Proceeding with auto-run (interval met)" -Level Info
+}
+
 # Check if running in startup/minimized mode
 $isStartupMode = $false
 
@@ -841,10 +1088,10 @@ if ($isStartupMode) {
 }
 
 # Get signature path and name early for preview
-$sigPath = Get-OutlookSignaturePath
-$userAccount = Get-OutlookUserAccount
-$sigName = $null
-$existingHTML = ""
+$script:sigPath = Get-OutlookSignaturePath
+$script:userAccount = Get-OutlookUserAccount
+$script:sigName = $null
+$script:existingHTML = ""
 
 Write-Detail -Message "User account detected: $userAccount" -Level Info
 
@@ -872,8 +1119,8 @@ if ($sigPath) {
     if ($sigName) {
         $htmlFile = Join-Path $sigPath "$sigName.htm"
         if (Test-Path $htmlFile) {
-            $existingHTML = Get-Content -Path $htmlFile -Raw -Encoding UTF8
-            $existingHTML = Remove-MSOTags -html $existingHTML
+            $script:existingHTML = Get-Content -Path $htmlFile -Raw -Encoding UTF8
+            $script:existingHTML = Remove-MSOTags -html $script:existingHTML
             Write-Detail -Message "Loaded existing signature: $htmlFile" -Level Info
         } else {
             Write-Detail -Message "Signature file not found: $htmlFile" -Level Warning
@@ -1536,9 +1783,9 @@ $updatePreview = {
     
     # Combine with existing signature or create new
     $previewHTML = ""
-    if ($existingHTML -match '(?s)<body[^>]*>(.*)</body>') {
+    if ($script:existingHTML -match '(?s)<body[^>]*>(.*)</body>') {
         $bodyContent = $matches[1]
-        
+
         # Check if table already exists (look for unique identifier comment)
         if ($bodyContent -match '(?s)<!-- OutlookSignatureManager:WeeklyStatusTable:Start -->.*?<!-- OutlookSignatureManager:WeeklyStatusTable:End -->') {
             # Table exists, replace it using identifier comments
@@ -1556,8 +1803,8 @@ $updatePreview = {
             Write-Detail -Message "No existing status table, appending to end" -Level Debug
             $newBodyContent = $bodyContent.TrimEnd() + "`n`n" + $tableHTML
         }
-        
-        $previewHTML = $existingHTML -replace '(?s)<body[^>]*>.*</body>', "<body>`n$newBodyContent`n</body>"
+
+        $previewHTML = $script:existingHTML -replace '(?s)<body[^>]*>.*</body>', "<body>`n$newBodyContent`n</body>"
     } else {
         # Create new HTML document with table
         $previewHTML = @"
@@ -1587,8 +1834,8 @@ $tableHTML
     # Update text preview
     # Get current text version (if exists)
     $currentTextVersion = ""
-    if ($sigName -and $sigPath) {
-        $txtFile = Join-Path $sigPath "$sigName.txt"
+    if ($script:sigName -and $script:sigPath) {
+        $txtFile = Join-Path $script:sigPath "$($script:sigName).txt"
         if (Test-Path $txtFile) {
             $currentTextVersion = Get-Content -Path $txtFile -Raw -ErrorAction SilentlyContinue
             if ([string]::IsNullOrWhiteSpace($currentTextVersion)) {
@@ -1605,7 +1852,7 @@ $tableHTML
     $tableText = New-StatusTableText -statusData $statusData -isSplitMode $isSplitMode
 
     # For the updated version, we need to get the base signature text and add the table
-    if ($existingHTML -and $existingHTML -match '(?s)<body[^>]*>(.*)</body>') {
+    if ($script:existingHTML -and $script:existingHTML -match '(?s)<body[^>]*>(.*)</body>') {
         $bodyContent = $matches[1]
 
         # Remove any existing table from body
@@ -1666,9 +1913,9 @@ $includeTodayCheckbox.Add_CheckedChanged({
 # Checkbox change event to show/hide AM/PM dropdowns
 $useAmPmCheckbox.Add_CheckedChanged({
     $isSplitMode = $useAmPmCheckbox.Checked
-    
-    # Track cumulative Y position
-    $cumulativeY = 100
+
+    # Track cumulative Y position (match initial offset from Update-DayControls)
+    $cumulativeY = 5
     
     foreach ($dayKey in $script:dropdowns.Keys | Sort-Object) {
         # Position all items at the same Y level first
@@ -1739,26 +1986,148 @@ $cancelButton.FlatStyle = "Flat"
 $cancelButton.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($cancelButton)
 
-# Startup configuration button
-$startupButton = New-Object System.Windows.Forms.Button
-$startupButton.Location = New-Object System.Drawing.Point(270, $intButtonTop)
-$startupButton.Size = New-Object System.Drawing.Size(100, 35)
-$startupButton.Text = "Startup..."
-$startupButton.BackColor = [System.Drawing.Color]::LightBlue
-$startupButton.FlatStyle = "Flat"
-$startupButton.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-$startupButton.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
-$form.Controls.Add($startupButton)
+# Setup Auto-Run button
+$setupAutoRunButton = New-Object System.Windows.Forms.Button
+$setupAutoRunButton.Location = New-Object System.Drawing.Point(10, $intButtonTop)
+$setupAutoRunButton.Size = New-Object System.Drawing.Size(110, 35)
+$setupAutoRunButton.Text = "Setup Auto-Run"
+$setupAutoRunButton.BackColor = [System.Drawing.Color]::LightGreen
+$setupAutoRunButton.FlatStyle = "Flat"
+$setupAutoRunButton.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$setupAutoRunButton.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left
+$form.Controls.Add($setupAutoRunButton)
 
-# Startup button click event (placeholder - original functionality not included in requirements)
-$startupButton.Add_Click({
-    Write-Detail -Message "Startup configuration requested" -Level Info
-    [System.Windows.Forms.MessageBox]::Show(
-        "Startup configuration functionality to be implemented.",
-        "Startup Configuration",
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]::Information
+# Setup Auto-Run button click event
+$setupAutoRunButton.Add_Click({
+    Write-Detail -Message "Setup Auto-Run requested" -Level Info
+
+    $result = [System.Windows.Forms.MessageBox]::Show(
+        "This will create a scheduled task to automatically update your signature on logon and screen unlock.`n`nThe task will only run if at least " + (Get-RunIntervalHours) + " hours have passed since the last update.`n`nContinue?",
+        "Setup Auto-Run",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
     )
+
+    if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
+        $success = Install-ScheduledTask -TriggerType 'Both'
+
+        if ($success) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Scheduled task installed successfully!`n`nYour signature will now automatically update on logon and screen unlock (if " + (Get-RunIntervalHours) + "+ hours have passed).`n`nTask Name: OutlookSignatureManager_AutoUpdate",
+                "Success",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            )
+        } else {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Failed to install scheduled task. Check the console for details.`n`nYou may need to run PowerShell as Administrator.",
+                "Error",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            )
+        }
+    }
+})
+
+# Remove Auto-Run button
+$removeAutoRunButton = New-Object System.Windows.Forms.Button
+$removeAutoRunButton.Location = New-Object System.Drawing.Point(130, $intButtonTop)
+$removeAutoRunButton.Size = New-Object System.Drawing.Size(125, 35)
+$removeAutoRunButton.Text = "Remove Auto-Run"
+$removeAutoRunButton.BackColor = [System.Drawing.Color]::LightCoral
+$removeAutoRunButton.FlatStyle = "Flat"
+$removeAutoRunButton.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$removeAutoRunButton.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left
+$form.Controls.Add($removeAutoRunButton)
+
+# Remove Auto-Run button click event
+$removeAutoRunButton.Add_Click({
+    Write-Detail -Message "Remove Auto-Run requested" -Level Info
+
+    $result = [System.Windows.Forms.MessageBox]::Show(
+        "This will remove the automatic signature update scheduled task.`n`nContinue?",
+        "Remove Auto-Run",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+
+    if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
+        $success = Uninstall-ScheduledTask
+
+        if ($success) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Scheduled task removed successfully!",
+                "Success",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            )
+        } else {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Scheduled task was not found or could not be removed.",
+                "Information",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            )
+        }
+    }
+})
+
+# Configure Interval button
+$configIntervalButton = New-Object System.Windows.Forms.Button
+$configIntervalButton.Location = New-Object System.Drawing.Point(265, $intButtonTop)
+$configIntervalButton.Size = New-Object System.Drawing.Size(105, 35)
+$configIntervalButton.Text = "Configure Interval"
+$configIntervalButton.BackColor = [System.Drawing.Color]::LightBlue
+$configIntervalButton.FlatStyle = "Flat"
+$configIntervalButton.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+$configIntervalButton.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left
+$form.Controls.Add($configIntervalButton)
+
+# Configure Interval button click event
+$configIntervalButton.Add_Click({
+    Write-Detail -Message "Configure Interval requested" -Level Info
+
+    $currentInterval = Get-RunIntervalHours
+
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    $newInterval = [Microsoft.VisualBasic.Interaction]::InputBox(
+        "Enter the minimum number of hours between automatic signature updates:`n`n(This prevents the script from running too frequently when you logon or unlock your screen multiple times)",
+        "Configure Run Interval",
+        $currentInterval
+    )
+
+    if ([string]::IsNullOrWhiteSpace($newInterval)) {
+        return  # User cancelled
+    }
+
+    # Validate input
+    $intervalValue = 0
+    if ([int]::TryParse($newInterval, [ref]$intervalValue) -and $intervalValue -gt 0) {
+        $success = Set-RunIntervalHours -Hours $intervalValue
+
+        if ($success) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Run interval updated to $intervalValue hours.`n`nThe script will only run automatically if at least $intervalValue hours have passed since the last update.",
+                "Success",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            )
+        } else {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Failed to update run interval.",
+                "Error",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            )
+        }
+    } else {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Invalid input. Please enter a positive number.",
+            "Invalid Input",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        )
+    }
 })
 
 # Apply button click event
@@ -1963,7 +2332,10 @@ $tableHTML
 
             Set-Content -Path $txtFile -Value $finalText -Encoding UTF8 -Force
             Write-Detail -Message "Text signature file updated: $txtFile" -Level Info
-            
+
+            # Update last run timestamp (for auto-run scheduling)
+            Update-LastRunTimestamp
+
             [System.Windows.Forms.MessageBox]::Show(
                 "Signature updated successfully!`n`nFiles updated:`n$htmlFile`n$txtFile",
                 "Success",
