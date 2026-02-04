@@ -48,6 +48,8 @@
     2.5 - Added scheduled task functionality for automatic signature updates on logon/unlock
           Configurable run interval (default 7 hours) to prevent frequent re-runs
           New buttons: Setup Auto-Run, Remove Auto-Run, Configure Interval
+          Fixed scheduled task to work without admin rights using XML-based registration
+          Uses SessionStateChangeTrigger for unlock instead of Event-based trigger
 #>
 
 # Script parameters
@@ -404,67 +406,103 @@ Function Install-ScheduledTask {
             return $false
         }
 
-        # Create action to run PowerShell with this script
-        $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-            -Argument "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -AutoRun"
+        # Get current user information
+        $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        $userName = $currentUser.Name
+        $userSID = $currentUser.User.Value
 
-        # Create trigger(s)
-        $triggers = @()
+        Write-Detail -Message "Creating task for user: $userName (SID: $userSID)" -Level Debug
+
+        # Build triggers XML based on selection
+        $triggersXml = ""
 
         if ($TriggerType -eq 'Logon' -or $TriggerType -eq 'Both') {
-            $logonTrigger = New-ScheduledTaskTrigger -AtLogOn
-            $triggers += $logonTrigger
-            Write-Detail -Message "Added logon trigger" -Level Debug
+            $triggersXml += @"
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>$userName</UserId>
+    </LogonTrigger>
+"@
+            Write-Detail -Message "Added logon trigger to XML" -Level Debug
         }
 
         if ($TriggerType -eq 'Unlock' -or $TriggerType -eq 'Both') {
-            # Unlock trigger is implemented using Event-based trigger
-            # Event ID 4801 = Workstation was unlocked
-            $unlockTrigger = Get-CimClass -ClassName MSFT_TaskEventTrigger -Namespace Root/Microsoft/Windows/TaskScheduler
-            $trigger = New-CimInstance -CimClass $unlockTrigger -ClientOnly
-            $trigger.Enabled = $true
-            $trigger.Subscription = @"
-<QueryList>
-  <Query Id="0" Path="Security">
-    <Select Path="Security">*[System[EventID=4801]]</Select>
-  </Query>
-</QueryList>
+            $triggersXml += @"
+    <SessionStateChangeTrigger>
+      <Enabled>true</Enabled>
+      <StateChange>SessionUnlock</StateChange>
+      <UserId>$userName</UserId>
+    </SessionStateChangeTrigger>
 "@
-            $triggers += $trigger
-            Write-Detail -Message "Added unlock trigger (Event ID 4801)" -Level Debug
+            Write-Detail -Message "Added unlock trigger to XML" -Level Debug
         }
 
-        # Create principal (run with user context)
-        $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive
-
-        # Create settings
-        $settings = New-ScheduledTaskSettingsSet `
-            -AllowStartIfOnBatteries `
-            -DontStopIfGoingOnBatteries `
-            -StartWhenAvailable `
-            -DontStopOnIdleEnd
+        # Build complete task XML (user-level, no admin required)
+        $taskXml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Date>$(Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')</Date>
+    <Author>$userName</Author>
+    <Description>Automatically updates Outlook signature weekly status table on logon/unlock</Description>
+    <URI>\$taskName</URI>
+  </RegistrationInfo>
+  <Triggers>
+$triggersXml
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>$userSID</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT1H</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe</Command>
+      <Arguments>-WindowStyle Hidden -NoProfile -File "$scriptPath" -AutoRun</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"@
 
         # Check if task already exists
         $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 
         if ($existingTask) {
-            Write-Detail -Message "Scheduled task already exists, updating..." -Level Info
-            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+            Write-Detail -Message "Scheduled task already exists, removing old version..." -Level Info
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
         }
 
-        # Register the task
-        Register-ScheduledTask -TaskName $taskName `
-            -Action $action `
-            -Trigger $triggers `
-            -Principal $principal `
-            -Settings $settings `
-            -Description "Automatically updates Outlook signature weekly status table on logon/unlock" | Out-Null
+        # Register task using XML (works without admin rights for user-level tasks)
+        Write-Detail -Message "Registering scheduled task from XML..." -Level Debug
+        Register-ScheduledTask -TaskName $taskName -Xml $taskXml | Out-Null
 
         Write-Detail -Message "Scheduled task installed successfully: $taskName" -Level Success
         return $true
 
     } catch {
         Write-Detail -Message "Failed to install scheduled task: $($_.Exception.Message)" -Level Error
+        Write-Detail -Message "Stack trace: $($_.ScriptStackTrace)" -Level Debug
         return $false
     }
 } # end of Install-ScheduledTask function
