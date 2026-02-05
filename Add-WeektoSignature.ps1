@@ -536,6 +536,94 @@ Function Uninstall-ScheduledTask {
 
 #region Outlook Helper Functions
 
+# Function to detect Outlook version (Classic vs New Outlook)
+Function Test-OutlookClassic {
+    <#
+    .SYNOPSIS
+        Detects if Classic Outlook is installed/running vs New Outlook (Mail app)
+    .DESCRIPTION
+        Checks for Classic Outlook installation and running processes to determine
+        which version of Outlook is being used. New Outlook uses different signature paths.
+    .OUTPUTS
+        Hashtable with IsClassic, Version, and IsRunning properties
+    #>
+    Write-Detail -Message "Detecting Outlook version..." -Level Debug
+
+    $result = @{
+        IsClassic = $false
+        Version = "Unknown"
+        IsRunning = $false
+        InstallPath = $null
+        SignaturePath = $null
+    }
+
+    try {
+        # Check for Classic Outlook installation via registry
+        $outlookPaths = @(
+            "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration",
+            "HKLM:\SOFTWARE\Microsoft\Office\16.0\Outlook\InstallRoot",
+            "HKLM:\SOFTWARE\Microsoft\Office\15.0\Outlook\InstallRoot",
+            "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Office\16.0\Outlook\InstallRoot",
+            "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Office\15.0\Outlook\InstallRoot"
+        )
+
+        $classicOutlookFound = $false
+
+        foreach ($path in $outlookPaths) {
+            if (Test-Path $path) {
+                $installPath = (Get-ItemProperty -Path $path -ErrorAction SilentlyContinue).Path
+                if ($installPath) {
+                    $outlookExe = Join-Path $installPath "OUTLOOK.EXE"
+                    if (Test-Path $outlookExe) {
+                        $classicOutlookFound = $true
+                        $result.InstallPath = $outlookExe
+
+                        # Get version from file
+                        $versionInfo = (Get-Item $outlookExe).VersionInfo
+                        $result.Version = $versionInfo.FileVersion
+                        Write-Detail -Message "Found Classic Outlook: $($result.Version) at $outlookExe" -Level Info
+                        break
+                    }
+                }
+            }
+        }
+
+        # Check if Classic Outlook is running
+        $outlookProcess = Get-Process -Name "OUTLOOK" -ErrorAction SilentlyContinue
+        if ($outlookProcess) {
+            $result.IsRunning = $true
+            Write-Detail -Message "Classic Outlook process is running" -Level Debug
+        }
+
+        # Check for New Outlook (HxOutlook/olk.exe)
+        $newOutlookProcess = Get-Process -Name "olk" -ErrorAction SilentlyContinue
+        if ($newOutlookProcess) {
+            Write-Detail -Message "New Outlook (olk.exe) process detected - signatures stored in cloud" -Level Warning
+        }
+
+        # Determine signature path based on version
+        if ($classicOutlookFound) {
+            $result.IsClassic = $true
+            $result.SignaturePath = "$env:APPDATA\Microsoft\Signatures"
+        } else {
+            # New Outlook or no Outlook found
+            $result.IsClassic = $false
+            $result.SignaturePath = "$env:LOCALAPPDATA\Microsoft\Outlook\Signatures"
+
+            if (-not $classicOutlookFound -and -not $newOutlookProcess) {
+                Write-Detail -Message "No Outlook installation detected" -Level Warning
+            }
+        }
+
+        Write-Detail -Message "Outlook detection complete - Classic: $($result.IsClassic), Version: $($result.Version)" -Level Info
+
+    } catch {
+        Write-Detail -Message "Error detecting Outlook version: $($_.Exception.Message)" -Level Error
+    }
+
+    return $result
+} # end of Test-OutlookClassic function
+
 # Function to get Outlook signature path
 Function Get-OutlookSignaturePath {
     Write-Detail -Message "Locating Outlook signature directory" -Level Debug
@@ -1088,6 +1176,30 @@ $script:savedWeeklySelections = $config.WeeklySelections
 Write-Detail -Message "Configuration: NumDays=$numDays, IncludeToday=$includeToday, SplitMode=$($script:savedSplitMode)" -Level Info
 if ($script:savedWeeklySelections) {
     Write-Detail -Message "Loaded saved weekly selections from previous session" -Level Info
+}
+
+# Detect Outlook version (Classic vs New Outlook)
+$outlookInfo = Test-OutlookClassic
+
+if (-not $outlookInfo.IsClassic) {
+    Write-Detail -Message "WARNING: Classic Outlook not detected!" -Level Warning
+
+    if (-not $AutoRun) {
+        # Show warning dialog in GUI mode
+        $warningResult = [System.Windows.Forms.MessageBox]::Show(
+            "Classic Outlook was not detected on this system.`n`nThis script is designed for Classic Outlook (desktop app) and may not work correctly with:`n• New Outlook (Mail app)`n• Outlook.com web version`n`nNew Outlook stores signatures in the cloud, not locally.`n`nDo you want to continue anyway?",
+            "Outlook Version Warning",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        )
+
+        if ($warningResult -eq [System.Windows.Forms.DialogResult]::No) {
+            Write-Detail -Message "User cancelled due to Outlook version incompatibility" -Level Info
+            exit 0
+        }
+    }
+} else {
+    Write-Detail -Message "Classic Outlook detected - Version: $($outlookInfo.Version)" -Level Success
 }
 
 # Check if running in auto-run mode (triggered by scheduled task)
