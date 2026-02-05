@@ -1,6 +1,6 @@
 # CLAUDE.md - AI Assistant Guide for PSCode Repository
 
-> **Last Updated:** 2025-11-20
+> **Last Updated:** 2026-02-05
 > **Repository:** PSCode - PowerShell Utility Scripts Collection
 
 ---
@@ -30,16 +30,16 @@
 ### Technology Stack
 - **Language:** PowerShell 5.1+ (100%)
 - **Framework:** .NET Framework
-- **Dependencies:** Windows Forms, System.IO.Ports
-- **External APIs:** Plex Media Server, LiquidFiles
-- **Total Lines of Code:** ~3,854 lines
+- **Dependencies:** Windows Forms, System.IO.Ports, ConfigurationManager module
+- **External APIs:** Plex Media Server, LiquidFiles, SCCM/ConfigMgr
+- **Total Lines of Code:** ~10,000+ lines
 
 ### Project Statistics
 ```
-PowerShell Scripts: 6 main files
+PowerShell Scripts: 17+ files across 4 directories
 Configuration Templates: 2 files
-Total Scripts LOC: 3,854 lines
-Largest Script: Add-WeektoSignature.ps1 (1,949 lines)
+Total Scripts LOC: ~10,000+ lines
+Largest Script: Add-WeektoSignature.ps1 (2,499 lines)
 ```
 
 ---
@@ -48,13 +48,27 @@ Largest Script: Add-WeektoSignature.ps1 (1,949 lines)
 
 ```
 PSCode/
-├── Serial/                              # Serial communication module
-│   └── CheckComm.ps1                   # GPS/NMEA terminal & logger (449 lines)
+├── Dev/                                 # Development & proxy settings tools
+│   ├── CLAUDE.md                       # Dev folder specific AI guide
+│   ├── Detection-DefaultProxySettings.ps1  # Proxy detection script (472 lines)
+│   ├── Read-DefaultProxySettings.ps1   # Proxy settings reader (389 lines)
+│   ├── Set-ProxySettings.ps1           # Proxy configuration tool (597 lines)
+│   ├── Test-ProxySettingsDecoder.ps1   # Proxy decoder tests (312 lines)
+│   └── ...                             # Additional proxy utilities
 │
-├── Add-WeektoSignature.ps1             # Outlook signature manager (1,949 lines)
-├── RssDownloadandStart-v2.ps1          # Torrent/Plex integration (566 lines)
-├── Test-LiquidFilesAccess.ps1          # LiquidFiles API tester (420 lines)
-├── Upload-ToLiquidFiles.ps1            # LiquidFiles uploader (475 lines)
+├── SCCM/                                # SCCM/ConfigMgr automation
+│   ├── Create-APP-AD-CollectionsAndRules.ps1  # Collection creator (~1,400 lines)
+│   └── Export-WindowsUpdateEventsToLog.ps1    # WU events to CM Log (~550 lines)
+│
+├── Serial/                              # Serial communication module
+│   └── CheckComm.ps1                   # GPS/NMEA terminal & logger (478 lines)
+│
+├── Add-WeektoSignature.ps1             # Outlook signature manager (2,499 lines)
+├── Install-OutlookIntegration.ps1      # Outlook integration installer (145 lines)
+├── RssDownloadandStart-v2.ps1          # Torrent/Plex integration (568 lines)
+├── Test-LiquidFilesAccess.ps1          # LiquidFiles API tester (419 lines)
+├── Test-RegistryValueType.ps1          # Registry value type checker (189 lines)
+├── Upload-ToLiquidFiles.ps1            # LiquidFiles uploader (474 lines)
 ├── isScreenLocked                       # Screen lock utility (30 lines)
 │
 ├── liquidfiles-config.json.template     # LiquidFiles configuration template
@@ -65,7 +79,9 @@ PSCode/
 ```
 
 ### Directory Organization
-- **Root Directory:** Standalone utility scripts
+- **Root Directory:** Standalone utility scripts and main tools
+- **Dev/:** Development tools, proxy settings management scripts
+- **SCCM/:** Microsoft SCCM/ConfigMgr automation scripts
 - **Serial/:** Serial port communication scripts (GPS, NMEA, hardware)
 - **Configuration Files:** JSON templates with `.template` or `.sample` suffix
 - **Actual Configs:** Git-ignored (must be created from templates)
@@ -82,20 +98,23 @@ PSCode/
 ### Recent Development Activity
 Based on recent commits:
 ```
-✓ Serial communication improvements (COM port handling)
-✓ GPS data CSV logging functionality
-✓ Outlook signature form layout enhancements
-✓ LiquidFiles authentication fixes (HTTP Basic Auth)
-✓ Form resizing capabilities
-✓ API integration testing scripts
+✓ Write-Detail function standardized across all scripts
+✓ Success log level added to Write-Detail function
+✓ Scheduled task functionality for Outlook signature auto-run
+✓ SCCM collection and rules automation scripts
+✓ Windows Update events to CM Log exporter
+✓ Registry value type testing utilities
+✓ Proxy settings detection and configuration tools
+✓ Outlook toolbar integration installer
 ```
 
 ### Commit Message Conventions
 - **Format:** Descriptive imperative mood ("Add feature" not "Added feature")
 - **Examples from repo:**
-  - "Fix COM port parameter handling and serial communication reliability"
-  - "Add CSV logging for GPS coordinates in CheckComm.ps1"
-  - "Fix authentication to use HTTP Basic Auth with base64 encoding"
+  - "Standardize Write-Detail function across all scripts"
+  - "Add scheduled task functionality and fix preview issues (v2.5)"
+  - "Add admin check, log validation, and monitor mode to WinUpdate exporter"
+  - "Fix scheduled task creation to work without admin rights"
 
 ### Pull Request Workflow
 1. Develop on `claude/[feature]-[session-id]` branch
@@ -108,8 +127,10 @@ Based on recent commits:
 
 ## Key Scripts Reference
 
-### 1. Add-WeektoSignature.ps1 (1,949 lines)
+### 1. Add-WeektoSignature.ps1 (2,499 lines)
 **Purpose:** Outlook email signature manager with dynamic work status tables
+
+**Current Version:** 2.5
 
 **Key Features:**
 - Windows Forms GUI for day selection (1-14 days)
@@ -120,6 +141,9 @@ Based on recent commits:
 - Backup system for existing signatures
 - Real-time HTML/text preview
 - MSO tag cleanup for clean HTML
+- **Scheduled task functionality for automatic signature updates on logon/unlock** (v2.5)
+- **Configurable run interval to prevent frequent re-runs** (default 7 hours)
+- **Auto-run buttons: Setup Auto-Run, Remove Auto-Run, Configure Interval**
 
 **Important Functions:**
 - `Show-SignatureForm` - Main GUI entry point
@@ -127,6 +151,8 @@ Based on recent commits:
 - `Generate-SignatureFiles` - Creates HTML/TXT signatures
 - `Save-ToRegistry` / `Load-FromRegistry` - Configuration persistence
 - `Get-NextWeekdates` - Date calculation logic
+- `Register-SignatureTask` - Creates scheduled task for auto-run (v2.5)
+- `Unregister-SignatureTask` - Removes scheduled task (v2.5)
 
 **Configuration Storage:** Windows Registry (HKCU)
 
@@ -134,9 +160,12 @@ Based on recent commits:
 - Signatures: `%APPDATA%\Microsoft\Signatures\`
 - Backups: `%APPDATA%\Microsoft\Signatures\Backup\`
 
+**Command Line Parameters:**
+- `-AutoRun` - Run in silent mode for scheduled task execution
+
 ---
 
-### 2. RssDownloadandStart-v2.ps1 (566 lines)
+### 2. RssDownloadandStart-v2.ps1 (568 lines)
 **Purpose:** Automated torrent downloader for Plex media library
 
 **Key Features:**
@@ -227,7 +256,7 @@ $headers = @{ Authorization = "Basic $base64Auth" }
 
 ---
 
-### 5. Serial/CheckComm.ps1 (449 lines)
+### 5. Serial/CheckComm.ps1 (478 lines)
 **Purpose:** Serial port terminal with GPS/NMEA data logging
 
 **Key Features:**
@@ -283,6 +312,139 @@ Data Bits: 8
 $locked = Test-ScreenLock
 if ($locked) { Write-Host "Screen is locked" }
 ```
+
+---
+
+### 7. Install-OutlookIntegration.ps1 (145 lines)
+**Purpose:** Installs Outlook Signature Manager with toolbar integration
+
+**Key Features:**
+- Creates installation directory in user's Documents
+- Copies script files to install location
+- Creates desktop shortcut with calendar icon
+- Generates VBA macro code for Outlook toolbar button
+- Provides step-by-step instructions for Outlook integration
+
+**Installation Path:** `%USERPROFILE%\Documents\OutlookSignatureManager`
+
+**What It Creates:**
+- Desktop shortcut: "Weekly Signature Manager.lnk"
+- VBA macro for Outlook Quick Access Toolbar
+- Documentation copy for reference
+
+---
+
+### 8. Test-RegistryValueType.ps1 (189 lines)
+**Purpose:** Tests registry value types in DeviceManageabilityCSP path
+
+**Key Features:**
+- Checks registry value types for QWORD detection
+- Lists all values with their types and data
+- Color-coded output for warnings (QWORD types)
+- Useful for device management troubleshooting
+
+**Registry Path:** `HKLM:\SOFTWARE\Microsoft\DeviceManageabilityCSP\Provider\MS DM Server`
+
+**Parameter Sets:**
+```powershell
+# Test specific value
+.\Test-RegistryValueType.ps1 -ValueName "ConfigLock"
+
+# List all values
+.\Test-RegistryValueType.ps1 -ListAllValues
+```
+
+---
+
+### 9. SCCM/Create-APP-AD-CollectionsAndRules.ps1 (~1,400 lines)
+**Purpose:** Creates SCCM collections and rules based on installed software inventory
+
+**Current Version:** 1.3.3
+
+**Key Features:**
+- Queries SCCM database for installed applications
+- Interactive manufacturer/product selection via GridView
+- Creates collections with query-based membership rules
+- Supports PowerShell wildcards (* and ?) for filtering
+- Folder selection for organizing collections
+- Duplicate collection detection
+- SQL-level filtering for performance
+
+**Parameters:**
+```powershell
+# Interactive mode
+.\Create-APP-AD-CollectionsAndRules.ps1
+
+# Filter by manufacturer
+.\Create-APP-AD-CollectionsAndRules.ps1 -Manufacturer "Adobe*"
+
+# Filter by manufacturer and product
+.\Create-APP-AD-CollectionsAndRules.ps1 -Manufacturer "Dell Inc." -Product "Dell Optimizer*"
+```
+
+**Configuration:** Hardcoded site codes (edit script for your environment)
+
+**Requirements:**
+- SCCM admin access
+- SQL database connectivity
+- ConfigurationManager PowerShell module
+
+---
+
+### 10. SCCM/Export-WindowsUpdateEventsToLog.ps1 (~550 lines)
+**Purpose:** Exports Windows Update events to CM Log format for CMTrace viewing
+
+**Current Version:** 1.1.0
+
+**Key Features:**
+- Collects events from multiple Windows Update event logs
+- Outputs CM Log format compatible with CMTrace.exe
+- Monitor mode for continuous event capture
+- Configurable lookback period (1-365 days)
+- Administrator privilege check
+- Event log existence validation
+
+**Event Logs Collected:**
+- Microsoft-Windows-WindowsUpdateClient/Operational
+- Microsoft-Windows-UpdateOrchestrator/Operational
+- Microsoft-Windows-SetupDiag/Operational
+- Microsoft-Windows-DeliveryOptimization/Operational
+- Microsoft-Windows-Bits-Client/Operational
+- Microsoft-Windows-CbsPreview/Operational
+
+**Parameters:**
+```powershell
+# Default: Last 2 days to CCM logs
+.\Export-WindowsUpdateEventsToLog.ps1
+
+# Custom lookback and output
+.\Export-WindowsUpdateEventsToLog.ps1 -DaysBack 7 -OutputPath "C:\Logs"
+
+# Continuous monitoring mode
+.\Export-WindowsUpdateEventsToLog.ps1 -Monitor
+
+# Monitor with custom interval
+.\Export-WindowsUpdateEventsToLog.ps1 -Monitor -PollIntervalSeconds 60
+```
+
+**Default Output:** `C:\Windows\CCM\Logs`
+
+**Requirements:** Administrative privileges
+
+---
+
+### 11. Dev/ Directory - Proxy Settings Tools
+**Purpose:** Development and testing tools for Windows proxy settings
+
+The Dev/ folder contains specialized scripts for reading, writing, and testing Windows proxy registry settings. These scripts handle the complex binary format of DefaultConnectionSettings registry values.
+
+**Key Scripts:**
+- `Set-ProxySettings.ps1` - Configure proxy settings programmatically
+- `Read-DefaultProxySettings.ps1` - Decode and display current proxy settings
+- `Detection-DefaultProxySettings.ps1` - Detection scripts for deployment
+- `Test-ProxySettingsDecoder.ps1` - Unit tests for proxy decoding
+
+**Note:** This folder has its own `CLAUDE.md` with detailed documentation specific to proxy settings tools.
 
 ---
 
@@ -641,10 +803,11 @@ Scripts include version numbers in comments:
 ## Script-Specific Notes
 
 ### Add-WeektoSignature.ps1
-- **Complex UI** - 1,949 lines, mostly GUI code
+- **Complex UI** - 2,499 lines, mostly GUI code
 - **Registry persistence** - All settings saved to registry
 - **HTML generation** - Clean MSO tags, validate HTML output
 - **Backup system** - Always backup before overwriting signatures
+- **Scheduled tasks** - Uses XML-based task registration (no admin required)
 - **Testing tip** - Use test signature names during development
 
 ### RssDownloadandStart-v2.ps1
@@ -664,6 +827,25 @@ Scripts include version numbers in comments:
 - **GPS parsing** - NMEA sentences have specific formats
 - **CSV logging** - Continuous append mode, manage file size
 - **Testing tip** - Use GPS simulator or loopback adapter
+
+### SCCM/Create-APP-AD-CollectionsAndRules.ps1
+- **Database queries** - Direct SQL queries to SCCM database
+- **Site codes** - Hardcoded values must be edited for your environment
+- **Wildcards** - Uses PowerShell wildcards (* and ?) converted to SQL (% and _)
+- **Collection folders** - Supports hierarchical folder organization
+- **Testing tip** - Test with small manufacturer filter first
+
+### SCCM/Export-WindowsUpdateEventsToLog.ps1
+- **Admin required** - Needs elevated privileges for event log access
+- **CM Log format** - Compatible with CMTrace.exe
+- **Monitor mode** - Continuous polling with configurable interval
+- **Event filtering** - Only important event IDs by default
+- **Testing tip** - Use `-DaysBack 1` for quick tests
+
+### Dev/ Proxy Scripts
+- **Binary format** - DefaultConnectionSettings uses complex binary structure
+- **Registry locations** - Both HKCU and HKLM paths supported
+- **Separate documentation** - See Dev/CLAUDE.md for detailed guidance
 
 ---
 
@@ -690,6 +872,12 @@ git push -u origin claude/feature-name-session-id
 # Outlook Signature Manager
 .\Add-WeektoSignature.ps1
 
+# Outlook Signature Manager (auto-run mode for scheduled tasks)
+.\Add-WeektoSignature.ps1 -AutoRun
+
+# Install Outlook Integration
+.\Install-OutlookIntegration.ps1
+
 # Torrent Processor (with config)
 .\RssDownloadandStart-v2.ps1
 
@@ -704,6 +892,18 @@ git push -u origin claude/feature-name-session-id
 
 # Screen Lock Check
 . .\isScreenLocked; Test-ScreenLock
+
+# Registry Value Type Test
+.\Test-RegistryValueType.ps1 -ListAllValues
+
+# SCCM Collection Creator
+.\SCCM\Create-APP-AD-CollectionsAndRules.ps1 -Manufacturer "Adobe*"
+
+# Windows Update Events to CM Log
+.\SCCM\Export-WindowsUpdateEventsToLog.ps1 -DaysBack 7
+
+# Windows Update Events Monitor Mode
+.\SCCM\Export-WindowsUpdateEventsToLog.ps1 -Monitor
 ```
 
 ### Configuration Setup
@@ -745,6 +945,18 @@ When reporting issues, include:
 ---
 
 ## Changelog
+
+### 2026-02-05 - Major Update: New Scripts and Directories
+- Added documentation for new SCCM/ directory with ConfigMgr scripts
+- Added documentation for Dev/ directory with proxy settings tools
+- Added 5 new scripts to Key Scripts Reference (sections 7-11)
+- Updated Add-WeektoSignature.ps1 documentation (v2.5 with scheduled tasks)
+- Updated line counts across all scripts (total now ~10,000+ lines)
+- Updated codebase structure diagram with new directories
+- Added Script-Specific Notes for SCCM and Dev/ scripts
+- Updated Quick Reference Commands with new script examples
+- Updated Recent Development Activity with current commits
+- Updated Technology Stack with SCCM/ConfigMgr dependencies
 
 ### 2025-11-20 - Write-Detail Usage Guidelines
 - Added critical warnings about `Write-Detail` function usage
