@@ -1,0 +1,89 @@
+name: Sign with Azure Code Signing
+
+# Azure Trusted Signing (formerly Azure Code Signing)
+# More info: https://learn.microsoft.com/azure/trusted-signing/
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  sign-scripts:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Azure Code Signing CLI
+        shell: pwsh
+        run: |
+          Write-Host "Installing Azure Code Signing CLI..."
+          dotnet tool install --global AzureSignTool
+          Write-Host "Azure SignTool installed"
+
+      - name: Sign PowerShell scripts
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          SIGNING_ENDPOINT: ${{ secrets.AZURE_CODE_SIGNING_ENDPOINT }}
+          CERTIFICATE_PROFILE: ${{ secrets.AZURE_CODE_SIGNING_PROFILE }}
+        run: |
+          $scripts = @(
+            "Add-WeektoSignature.ps1",
+            "RssDownloadandStart-v2.ps1",
+            "Upload-ToLiquidFiles.ps1",
+            "Test-LiquidFilesAccess.ps1",
+            "Sign-PowerShellScript.ps1",
+            "Serial/CheckComm.ps1"
+          )
+
+          Write-Host "Signing scripts with Azure Code Signing..."
+          Write-Host ""
+
+          foreach ($script in $scripts) {
+            if (Test-Path $script) {
+              Write-Host "Signing: $script"
+
+              azuresigntool sign `
+                --azure-key-vault-url $env:SIGNING_ENDPOINT `
+                --azure-key-vault-tenant-id $env:AZURE_TENANT_ID `
+                --azure-key-vault-client-id $env:AZURE_CLIENT_ID `
+                --azure-key-vault-client-secret $env:AZURE_CLIENT_SECRET `
+                --azure-key-vault-certificate $env:CERTIFICATE_PROFILE `
+                --timestamp-rfc3161 http://timestamp.digicert.com `
+                --verbose `
+                $script
+
+              if ($LASTEXITCODE -eq 0) {
+                Write-Host "  ✓ Signed successfully" -ForegroundColor Green
+              } else {
+                Write-Host "  ✗ Signing failed" -ForegroundColor Red
+                exit 1
+              }
+            }
+            Write-Host ""
+          }
+
+      - name: Verify signatures
+        shell: pwsh
+        run: |
+          Get-ChildItem -Filter "*.ps1" -Recurse | ForEach-Object {
+            $sig = Get-AuthenticodeSignature -FilePath $_.FullName
+            if ($sig.Status -eq 'Valid') {
+              Write-Host "✓ $($_.Name): Valid" -ForegroundColor Green
+            } else {
+              Write-Host "✗ $($_.Name): $($sig.Status)" -ForegroundColor Red
+            }
+          }
+
+      - name: Upload signed scripts
+        uses: actions/upload-artifact@v4
+        with:
+          name: azure-signed-scripts
+          path: |
+            *.ps1
+            Serial/*.ps1

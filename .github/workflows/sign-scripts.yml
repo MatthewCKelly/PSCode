@@ -1,0 +1,200 @@
+name: Sign PowerShell Scripts
+
+on:
+  # Trigger on releases
+  release:
+    types: [published]
+
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      scripts:
+        description: 'Scripts to sign (comma-separated, or "all")'
+        required: false
+        default: 'all'
+
+jobs:
+  sign-scripts:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decode certificate
+        shell: pwsh
+        run: |
+          Write-Host "Decoding code signing certificate..."
+          $certBytes = [System.Convert]::FromBase64String("${{ secrets.CODE_SIGNING_CERT }}")
+          $certPath = "$env:TEMP\CodeSigningCert.pfx"
+          [IO.File]::WriteAllBytes($certPath, $certBytes)
+          echo "CERT_PATH=$certPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Certificate decoded to: $certPath"
+
+      - name: Import certificate
+        shell: pwsh
+        run: |
+          Write-Host "Importing certificate to certificate store..."
+          $certPassword = ConvertTo-SecureString "${{ secrets.CODE_SIGNING_PASSWORD }}" -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $env:CERT_PATH -CertStoreLocation Cert:\CurrentUser\My -Password $certPassword
+          echo "CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Certificate imported with thumbprint: $($cert.Thumbprint)"
+          Write-Host "Subject: $($cert.Subject)"
+          Write-Host "Expires: $($cert.NotAfter)"
+
+      - name: Determine scripts to sign
+        shell: pwsh
+        run: |
+          $scriptsInput = "${{ github.event.inputs.scripts }}"
+
+          if ([string]::IsNullOrEmpty($scriptsInput) -or $scriptsInput -eq "all") {
+            # Sign all main scripts
+            $scripts = @(
+              "Add-WeektoSignature.ps1",
+              "RssDownloadandStart-v2.ps1",
+              "Upload-ToLiquidFiles.ps1",
+              "Test-LiquidFilesAccess.ps1",
+              "Test-RegistryValueType.ps1",
+              "Install-OutlookIntegration.ps1",
+              "Sign-PowerShellScript.ps1",
+              "Serial/CheckComm.ps1"
+            )
+          } else {
+            $scripts = $scriptsInput -split ',' | ForEach-Object { $_.Trim() }
+          }
+
+          $scriptsJson = $scripts | ConvertTo-Json -Compress
+          echo "SCRIPTS_TO_SIGN=$scriptsJson" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          Write-Host "Scripts to sign:"
+          $scripts | ForEach-Object { Write-Host "  - $_" }
+
+      - name: Sign PowerShell scripts
+        shell: pwsh
+        run: |
+          $cert = Get-ChildItem -Path Cert:\CurrentUser\My\$env:CERT_THUMBPRINT
+          $scripts = $env:SCRIPTS_TO_SIGN | ConvertFrom-Json
+
+          Write-Host "Signing $($scripts.Count) script(s)..."
+          Write-Host ""
+
+          $timestampServer = "http://timestamp.sectigo.com"
+          $signedCount = 0
+          $failedCount = 0
+
+          foreach ($scriptPath in $scripts) {
+            if (Test-Path $scriptPath) {
+              try {
+                Write-Host "Signing: $scriptPath"
+
+                $result = Set-AuthenticodeSignature -FilePath $scriptPath `
+                  -Certificate $cert `
+                  -TimestampServer $timestampServer `
+                  -HashAlgorithm SHA256 `
+                  -ErrorAction Stop
+
+                if ($result.Status -eq 'Valid') {
+                  Write-Host "  ✓ Successfully signed" -ForegroundColor Green
+                  $signedCount++
+                } else {
+                  Write-Host "  ✗ Signing failed: $($result.Status)" -ForegroundColor Red
+                  $failedCount++
+                }
+              } catch {
+                Write-Host "  ✗ Error: $($_.Exception.Message)" -ForegroundColor Red
+                $failedCount++
+              }
+            } else {
+              Write-Host "  ⚠ Script not found: $scriptPath" -ForegroundColor Yellow
+              $failedCount++
+            }
+            Write-Host ""
+          }
+
+          Write-Host "Signing complete:"
+          Write-Host "  Signed: $signedCount"
+          Write-Host "  Failed: $failedCount"
+
+          if ($failedCount -gt 0) {
+            exit 1
+          }
+
+      - name: Verify signatures
+        shell: pwsh
+        run: |
+          Write-Host "Verifying signatures..."
+          Write-Host ""
+
+          $scripts = $env:SCRIPTS_TO_SIGN | ConvertFrom-Json
+          $allValid = $true
+
+          foreach ($scriptPath in $scripts) {
+            if (Test-Path $scriptPath) {
+              $sig = Get-AuthenticodeSignature -FilePath $scriptPath
+
+              $statusIcon = if ($sig.Status -eq 'Valid') { '✓' } else { '✗' }
+              $statusColor = if ($sig.Status -eq 'Valid') { 'Green' } else { 'Red' }
+
+              Write-Host "$statusIcon $scriptPath`: " -NoNewline
+              Write-Host "$($sig.Status)" -ForegroundColor $statusColor
+
+              if ($sig.Status -ne 'Valid') {
+                $allValid = $false
+              }
+            }
+          }
+
+          Write-Host ""
+
+          if (-not $allValid) {
+            Write-Host "✗ Some signatures are invalid!" -ForegroundColor Red
+            exit 1
+          } else {
+            Write-Host "✓ All signatures verified successfully!" -ForegroundColor Green
+          }
+
+      - name: Cleanup certificate
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "Cleaning up certificate..."
+          if ($env:CERT_PATH -and (Test-Path $env:CERT_PATH)) {
+            Remove-Item $env:CERT_PATH -Force
+            Write-Host "Certificate file removed"
+          }
+
+          if ($env:CERT_THUMBPRINT) {
+            $cert = Get-ChildItem -Path Cert:\CurrentUser\My\$env:CERT_THUMBPRINT -ErrorAction SilentlyContinue
+            if ($cert) {
+              Remove-Item $cert.PSPath -Force
+              Write-Host "Certificate removed from store"
+            }
+          }
+
+      - name: Commit signed scripts
+        if: github.event_name == 'release'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add *.ps1 Serial/*.ps1
+
+          if (git diff --cached --quiet) {
+            Write-Host "No changes to commit"
+          } else {
+            git commit -m "Sign PowerShell scripts for release ${{ github.event.release.tag_name }}"
+            git push
+            Write-Host "Signed scripts committed and pushed"
+          }
+
+      - name: Upload signed scripts as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-scripts
+          path: |
+            *.ps1
+            Serial/*.ps1
+          retention-days: 90

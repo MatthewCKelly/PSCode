@@ -2,6 +2,25 @@
 
 This guide explains how to sign PowerShell scripts in the PSCode repository for security and to meet execution policy requirements.
 
+> **🚀 NEW: Automated Signing with GitHub Actions**
+> For CI/CD pipelines and automated signing, see [AUTOMATED_SIGNING.md](AUTOMATED_SIGNING.md)
+> • **FREE** for open source projects (SignPath.io)
+> • Enterprise options with Azure Code Signing
+> • No local certificate management required
+
+---
+
+## Signing Approaches
+
+This repository supports **two signing methods**:
+
+| Method | Best For | Guide |
+|--------|----------|-------|
+| **🤖 Automated (GitHub Actions)** | Teams, CI/CD, Open Source | [AUTOMATED_SIGNING.md](AUTOMATED_SIGNING.md) |
+| **✋ Manual (Local)** | Personal use, Testing | This guide |
+
+**Recommendation:** Use automated signing for production releases and manual signing for local development/testing.
+
 ---
 
 ## Table of Contents
