@@ -59,7 +59,7 @@ Function Write-Detail {
     .PARAMETER Message
         The message to write to the log
     .PARAMETER Level
-        The logging level (Info, Warning, Error, Debug). Default is Info
+        The logging level (Info, Warning, Error, Debug, Success). Default is Info
     .PARAMETER LogFile
         Optional path to log file for persistent logging
     .INPUTS
@@ -70,6 +70,8 @@ Function Write-Detail {
         Write-Detail -Message "Processing started" -Level Info
     .EXAMPLE
         Write-Detail -Message "Error occurred" -Level Error -LogFile "C:\logs\app.log"
+    .EXAMPLE
+        Write-Detail -Message "Task completed successfully" -Level Success
     .NOTES
         Includes automatic line number detection and color-coded output
 #>
@@ -77,26 +79,27 @@ Function Write-Detail {
     param (
         [Parameter(Mandatory = $true)]
         [string]$Message,
-        
-        [ValidateSet('Info', 'Warning', 'Error', 'Debug')]
+
+        [ValidateSet('Info', 'Warning', 'Error', 'Debug', 'Success')]
         [string]$Level = 'Info',
-        
+
         [string]$LogFile = $null
     )
-    
+
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $lineNumber = $MyInvocation.ScriptLineNumber
-    
+
     # Using format strings for precise alignment
     # {0} = timestamp, {1} = level (padded to 7 chars), {2} = line number (padded to 4 chars), {3} = message
     $logEntry = "[{0}] {1,-7} {2,4} {3}" -f $timestamp, $Level, $lineNumber, $Message
 
 #     $logEntry = "[$timestamp] [$Level] [Line:$($MyInvocation.ScriptLineNumber)] $Message"
-    
+
     # Console output with colors
     switch ($Level) {
         'Error'   { Write-Host $logEntry -ForegroundColor White -BackgroundColor Red }
         'Warning' { Write-Host $logEntry -ForegroundColor Black -BackgroundColor Yellow }
+        'Success' { Write-Host $logEntry -ForegroundColor Green }
         'Debug'   { Write-Host $logEntry -ForegroundColor Gray }
         default   { Write-Host $logEntry }
     }

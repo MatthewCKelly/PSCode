@@ -35,31 +35,61 @@ https://en.wikipedia.org/wiki/NMEA_0183
 ##########################################################################################
 Function Write-Detail {
 <#
-    .SYNOPSIS&
-
-
-	Writes to host formatted
+    .SYNOPSIS
+        Writes formatted messages to console and optionally to log file
     .DESCRIPTION
-	"Write-Detail"
-    .PARAMETER message
-
+        Enhanced logging function that supports different log levels with color coding
+        and optional file output with timestamps and line numbers
+    .PARAMETER Message
+        The message to write to the log
+    .PARAMETER Level
+        The logging level (Info, Warning, Error, Debug, Success). Default is Info
+    .PARAMETER LogFile
+        Optional path to log file for persistent logging
     .INPUTS
-        [String]
-
+        [String] Message to log
     .OUTPUTS
-        [Standard Out]
+        Console output with timestamp and formatting
     .EXAMPLE
-	    Write-Detail -message "This is my message for the log file."
-    .LINK
+        Write-Detail -Message "Processing started" -Level Info
+    .EXAMPLE
+        Write-Detail -Message "Error occurred" -Level Error
+    .EXAMPLE
+        Write-Detail -Message "Task completed successfully" -Level Success
+    .NOTES
+        Includes automatic line number detection and color-coded output
 #>
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true,HelpMessage="Please Enter string to display.")]
-        [string]
-        [ValidateNotNullOrEmpty()]
-        $message
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [string]$Message,
+
+        [ValidateSet('Info', 'Warning', 'Error', 'Debug', 'Success')]
+        [string]$Level = 'Info',
+
+        [string]$LogFileParam = $null
     )
-    Write-Host "$(Get-Date -Format s)`t$($MyInvocation.ScriptLineNumber) `t- $message"
+
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $lineNumber = $MyInvocation.ScriptLineNumber
+
+    # Using format strings for precise alignment
+    # {0} = timestamp, {1} = level (padded to 7 chars), {2} = line number (padded to 4 chars), {3} = message
+    $logEntry = "[{0}] {1,-7} {2,4} {3}" -f $timestamp, $Level, $lineNumber, $Message
+
+    # Console output with colors
+    switch ($Level) {
+        'Error'   { Write-Host $logEntry -ForegroundColor White -BackgroundColor Red }
+        'Warning' { Write-Host $logEntry -ForegroundColor Black -BackgroundColor Yellow }
+        'Success' { Write-Host $logEntry -ForegroundColor Green }
+        'Debug'   { Write-Host $logEntry -ForegroundColor Gray }
+        default   { Write-Host $logEntry }
+    }
+
+    # Optional file logging (using different param name to avoid conflict with script-level $LogFile)
+    if ($LogFileParam) {
+        Add-Content -Path $LogFileParam -Value $logEntry
+    }
 }          # End of Write-Detail
 
 
