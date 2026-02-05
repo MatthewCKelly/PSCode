@@ -1,3 +1,7 @@
+# Version 1.2.0 - 2026-02-05
+# - Added -IncludeETL switch to include WindowsUpdate.log ETL traces (ComApi, Agent, etc.)
+# - Added -ETLComponents parameter to filter specific ETL components
+# - ETL log parsing via Get-WindowsUpdateLog for detailed WU internals
 # Version 1.1.0 - 2026-02-04
 # - Added administrator privilege check
 # - Added event log existence validation before querying
@@ -25,6 +29,14 @@
     - Microsoft-Windows-Bits-Client/Operational
     - Microsoft-Windows-CbsPreview/Operational
 
+    ETL Log Components (via -IncludeETL):
+    - ComApi - COM API calls (update searches, downloads, installs)
+    - Agent - Windows Update Agent operations
+    - Handler - Update handlers (CBS, MSI, etc.)
+    - DownloadManager - Download operations
+    - Setup - Setup/upgrade operations
+    - And many more...
+
 .PARAMETER DaysBack
     Number of days to look back for events. Default is 2.
 
@@ -37,6 +49,15 @@
 .PARAMETER IncludeAllEvents
     Include all event IDs, not just the filtered important ones.
 
+.PARAMETER IncludeETL
+    Include Windows Update ETL traces (WindowsUpdate.log). This captures detailed
+    internal WU operations including ComApi, Agent, Handler, etc.
+
+.PARAMETER ETLComponents
+    Filter ETL log to specific components. Default includes common components.
+    Available: ComApi, Agent, Handler, DownloadManager, Setup, Misc, IdleTimer,
+    Reporter, Service, SLS, EndpointProvider, WuTask, ProtocolTalker, etc.
+
 .PARAMETER Monitor
     Run continuously, monitoring for new events. Press Ctrl+C to stop.
 
@@ -48,20 +69,25 @@
     Exports last 2 days of Windows Update events to C:\Windows\CCM\Logs
 
 .EXAMPLE
+    .\Export-WindowsUpdateEventsToLog.ps1 -IncludeETL
+    Includes ETL traces with ComApi, Agent, and Handler events
+
+.EXAMPLE
+    .\Export-WindowsUpdateEventsToLog.ps1 -IncludeETL -ETLComponents @('ComApi', 'Agent')
+    Includes only ComApi and Agent ETL components
+
+.EXAMPLE
     .\Export-WindowsUpdateEventsToLog.ps1 -DaysBack 7 -OutputPath "C:\Logs"
     Exports last 7 days of events to C:\Logs directory
 
 .EXAMPLE
-    .\Export-WindowsUpdateEventsToLog.ps1 -Monitor
-    Continuously monitors and appends new events to log files. Press Ctrl+C to stop.
-
-.EXAMPLE
-    .\Export-WindowsUpdateEventsToLog.ps1 -Monitor -PollIntervalSeconds 60
-    Monitors with 60 second poll interval
+    .\Export-WindowsUpdateEventsToLog.ps1 -Monitor -IncludeETL
+    Continuously monitors including ETL traces. Press Ctrl+C to stop.
 
 .NOTES
     Requires administrative privileges to read certain event logs.
     Output files are compatible with CMTrace.exe log viewer.
+    ETL processing requires Windows 10/Server 2016 or later.
 
 .LINK
     https://docs.microsoft.com/en-us/mem/configmgr/core/support/cmtrace
@@ -81,6 +107,12 @@ param(
 
     [Parameter(Mandatory = $false)]
     [switch]$IncludeAllEvents,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$IncludeETL,
+
+    [Parameter(Mandatory = $false)]
+    [string[]]$ETLComponents = @('ComApi', 'Agent', 'Handler', 'DownloadManager', 'Setup', 'Misc'),
 
     [Parameter(Mandatory = $false)]
     [switch]$Monitor,
@@ -162,6 +194,20 @@ function Test-EventLogExists {
 
     try {
         $null = Get-WinEvent -ListLog $LogName -ErrorAction Stop
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
+function Test-GetWindowsUpdateLogAvailable {
+    <#
+    .SYNOPSIS
+        Tests if Get-WindowsUpdateLog cmdlet is available
+    #>
+    try {
+        $cmd = Get-Command Get-WindowsUpdateLog -ErrorAction Stop
         return $true
     }
     catch {
@@ -364,6 +410,183 @@ function Export-EventsToLog {
     return $count
 }
 
+function Get-WindowsUpdateETLLog {
+    <#
+    .SYNOPSIS
+        Retrieves and parses the Windows Update ETL log
+    .DESCRIPTION
+        Uses Get-WindowsUpdateLog to convert ETL traces to text, then parses the output.
+        Returns parsed log entries with timestamp, component, PID, TID, and message.
+    .PARAMETER StartTime
+        Only return entries after this time
+    .PARAMETER Components
+        Filter to specific components (ComApi, Agent, Handler, etc.)
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [datetime]$StartTime,
+
+        [Parameter(Mandatory = $false)]
+        [string[]]$Components = @()
+    )
+
+    $entries = @()
+
+    # Create temp file for log output
+    $tempLogPath = Join-Path $env:TEMP "WindowsUpdate_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+
+    try {
+        Write-Detail "Generating WindowsUpdate.log from ETL traces..." -Level Info
+        Write-Detail "This may take a moment..." -Level Debug
+
+        # Run Get-WindowsUpdateLog (this can take a while)
+        $null = Get-WindowsUpdateLog -LogPath $tempLogPath -ErrorAction Stop 2>&1
+
+        if (-not (Test-Path $tempLogPath)) {
+            Write-Detail "Failed to generate WindowsUpdate.log" -Level Warning
+            return @()
+        }
+
+        Write-Detail "Parsing WindowsUpdate.log..." -Level Info
+
+        # Read and parse the log file
+        # Format: YYYY/MM/DD HH:MM:SS.fffffff PID  TID  Component       Message
+        # Example: 2023/11/15 10:30:45.1234567 12345  6789  ComApi          Title=Feature update...
+
+        $logContent = Get-Content $tempLogPath -ErrorAction Stop
+
+        foreach ($line in $logContent) {
+            # Skip empty lines and header lines
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            if ($line -match '^\s*$') { continue }
+
+            # Parse the log line using regex
+            # Format: YYYY/MM/DD HH:MM:SS.fffffff PID TID Component Message
+            if ($line -match '^(\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.*)$') {
+                $timestampStr = $Matches[1]
+                $pid = $Matches[2]
+                $tid = $Matches[3]
+                $component = $Matches[4]
+                $message = $Matches[5]
+
+                # Parse timestamp
+                try {
+                    # Convert from YYYY/MM/DD HH:MM:SS.fffffff format
+                    $timestamp = [datetime]::ParseExact(
+                        $timestampStr.Substring(0, 23),  # Trim to milliseconds
+                        "yyyy/MM/dd HH:mm:ss.fff",
+                        [System.Globalization.CultureInfo]::InvariantCulture
+                    )
+                }
+                catch {
+                    # Try alternative parsing
+                    try {
+                        $timestamp = Get-Date $timestampStr.Substring(0, 19)
+                    }
+                    catch {
+                        continue  # Skip unparseable lines
+                    }
+                }
+
+                # Filter by start time
+                if ($timestamp -lt $StartTime) { continue }
+
+                # Filter by components if specified
+                if ($Components.Count -gt 0) {
+                    $matchesComponent = $false
+                    foreach ($comp in $Components) {
+                        if ($component -like "*$comp*") {
+                            $matchesComponent = $true
+                            break
+                        }
+                    }
+                    if (-not $matchesComponent) { continue }
+                }
+
+                # Create entry object
+                $entries += [PSCustomObject]@{
+                    TimeCreated = $timestamp
+                    ProcessId = [int]$pid
+                    ThreadId = [int]$tid
+                    Component = $component
+                    Message = $message
+                    Source = "ETL"
+                }
+            }
+        }
+
+        Write-Detail "Found $($entries.Count) ETL entries matching criteria" -Level Info
+    }
+    catch {
+        Write-Detail "Error processing ETL log: $($_.Exception.Message)" -Level Error
+    }
+    finally {
+        # Clean up temp file
+        if (Test-Path $tempLogPath) {
+            Remove-Item $tempLogPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    return $entries
+}
+
+function Export-ETLEventsToLog {
+    <#
+    .SYNOPSIS
+        Exports ETL log entries to CM Log format file
+    .PARAMETER Entries
+        Array of parsed ETL log entries
+    .PARAMETER LogFile
+        Full path to the output log file
+    .PARAMETER Append
+        If true, appends to existing file
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [array]$Entries,
+
+        [Parameter(Mandatory = $true)]
+        [string]$LogFile,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$Append
+    )
+
+    if ($Entries.Count -eq 0) {
+        return 0
+    }
+
+    # Sort by time
+    $sortedEntries = $Entries | Sort-Object TimeCreated
+
+    $count = 0
+    foreach ($entry in $sortedEntries) {
+        # Determine log type based on message content
+        $logType = 1  # Default to Info
+        if ($entry.Message -match 'error|fail|exception' -and $entry.Message -notmatch 'no error|success') {
+            $logType = 3  # Error
+        }
+        elseif ($entry.Message -match 'warn') {
+            $logType = 2  # Warning
+        }
+
+        # Write the entry
+        Write-CMLogEntry -Message $entry.Message `
+                         -LogFile $LogFile `
+                         -Component $entry.Component `
+                         -Type $logType `
+                         -Thread $entry.ThreadId `
+                         -EventTime $entry.TimeCreated
+
+        $count++
+    }
+
+    return $count
+}
+
 function Get-ValidatedEventLogConfigs {
     <#
     .SYNOPSIS
@@ -475,8 +698,24 @@ if (-not (Test-Path $OutputPath)) {
 # Get validated event log configurations
 $eventLogConfigs = Get-ValidatedEventLogConfigs
 
-if ($eventLogConfigs.Count -eq 0) {
-    Write-Detail "No event logs are available on this system. Exiting." -Level Error
+# Check ETL availability if requested
+$etlAvailable = $false
+if ($IncludeETL) {
+    Write-Host ""
+    Write-Detail "Checking ETL log availability..." -Level Info
+    if (Test-GetWindowsUpdateLogAvailable) {
+        Write-Detail "  [OK] Get-WindowsUpdateLog cmdlet available" -Level Success
+        Write-Detail "  ETL Components to capture: $($ETLComponents -join ', ')" -Level Info
+        $etlAvailable = $true
+    }
+    else {
+        Write-Detail "  [--] Get-WindowsUpdateLog not available (requires Windows 10/Server 2016+)" -Level Warning
+        Write-Detail "  ETL traces will be skipped" -Level Warning
+    }
+}
+
+if ($eventLogConfigs.Count -eq 0 -and -not $etlAvailable) {
+    Write-Detail "No event logs or ETL sources are available. Exiting." -Level Error
     exit 1
 }
 
@@ -493,6 +732,9 @@ if ($Monitor) {
 }
 
 Write-Host ""
+
+# Track ETL last processed time for monitor mode
+$script:lastETLTime = $startTime
 
 # Function to process events (used in both one-shot and monitor modes)
 function Invoke-EventExport {
@@ -550,6 +792,42 @@ function Invoke-EventExport {
         }
     }
 
+    # Process ETL logs if enabled
+    if ($etlAvailable -and $IncludeETL) {
+        if (-not $SuppressNoEventsMessage) {
+            Write-Detail "Processing: Windows Update ETL traces (ComApi, Agent, etc.)" -Level Info
+        }
+
+        $etlEntries = Get-WindowsUpdateETLLog -StartTime $FromTime -Components $ETLComponents
+
+        if ($etlEntries.Count -gt 0) {
+            # Group by component and create separate log files
+            $groupedEntries = $etlEntries | Group-Object Component
+
+            foreach ($group in $groupedEntries) {
+                $componentName = $group.Name -replace '[^\w]', ''  # Clean component name
+                $logFileName = "{0}_ETL_{1}.log" -f $LogPrefix, $componentName
+                $logFilePath = Join-Path $OutputPath $logFileName
+
+                # Remove existing file only if not appending
+                if (-not $Append -and (Test-Path $logFilePath)) {
+                    Remove-Item $logFilePath -Force
+                }
+
+                $count = Export-ETLEventsToLog -Entries $group.Group -LogFile $logFilePath -Append:$Append
+
+                Write-Detail "  Exported $count ETL events to $logFileName" -Level Success
+                $totalEvents += $count
+                if ($logFilePath -notin $logFiles) {
+                    $logFiles += $logFilePath
+                }
+            }
+        }
+        elseif (-not $SuppressNoEventsMessage) {
+            Write-Detail "  No ETL events found" -Level Debug
+        }
+    }
+
     # Create/update combined log file
     if ($totalEvents -gt 0) {
         $combinedLogPath = Join-Path $OutputPath "$($LogPrefix)_Combined.log"
@@ -583,10 +861,27 @@ function Invoke-EventExport {
                 $allEvents += [PSCustomObject]@{
                     TimeCreated = $event.TimeCreated
                     Id = $event.Id
-                    Message = $event.Message
+                    Message = "[EventID: $($event.Id)] $($event.Message)"
                     LevelDisplayName = $event.LevelDisplayName
                     ProcessId = $event.ProcessId
                     Component = $config.Component
+                    Source = "EventLog"
+                }
+            }
+        }
+
+        # Add ETL events to combined log
+        if ($etlAvailable -and $IncludeETL) {
+            $etlEntries = Get-WindowsUpdateETLLog -StartTime $FromTime -Components $ETLComponents
+            foreach ($entry in $etlEntries) {
+                $allEvents += [PSCustomObject]@{
+                    TimeCreated = $entry.TimeCreated
+                    Id = 0
+                    Message = $entry.Message
+                    LevelDisplayName = "Information"
+                    ProcessId = $entry.ThreadId
+                    Component = $entry.Component
+                    Source = "ETL"
                 }
             }
         }
@@ -595,8 +890,18 @@ function Invoke-EventExport {
         $sortedAllEvents = $allEvents | Sort-Object TimeCreated
 
         foreach ($event in $sortedAllEvents) {
-            $message = "[$($event.Component)] [EventID: $($event.Id)] $($event.Message)"
+            $message = "[$($event.Component)] $($event.Message)"
             $logType = ConvertTo-CMLogType -Level $event.LevelDisplayName
+
+            # Override log type for ETL based on content
+            if ($event.Source -eq "ETL") {
+                if ($event.Message -match 'error|fail|exception' -and $event.Message -notmatch 'no error|success') {
+                    $logType = 3
+                }
+                elseif ($event.Message -match 'warn') {
+                    $logType = 2
+                }
+            }
 
             Write-CMLogEntry -Message $message `
                              -LogFile $combinedLogPath `
@@ -656,6 +961,9 @@ if ($Monitor) {
     Write-Detail ("=" * 60) -Level Info
     Write-Detail "Entering monitor mode..." -Level Info
     Write-Detail "Polling every $PollIntervalSeconds seconds for new events" -Level Info
+    if ($IncludeETL -and $etlAvailable) {
+        Write-Detail "Note: ETL processing in monitor mode may have delays" -Level Warning
+    }
     Write-Detail "Press Ctrl+C to stop" -Level Warning
     Write-Host ""
 
