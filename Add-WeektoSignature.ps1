@@ -23,7 +23,7 @@
     Launches GUI form for weekly status configuration
 .NOTES
     Author: Claude AI
-    Version: 2.5
+    Version: 2.5.1
     Requires: PowerShell 5.0+, .NET Framework for Windows Forms
     Registry: HKCU\Software\OutlookSignatureManager
     Configuration: Number of days and today's status preference stored in registry
@@ -50,6 +50,10 @@
           New buttons: Setup Auto-Run, Remove Auto-Run, Configure Interval
           Fixed scheduled task to work without admin rights using XML-based registration
           Uses SessionStateChangeTrigger for unlock instead of Event-based trigger
+    2.5.1 - Fixed date shifting bug in saved weekly selections
+            Selections are now saved with actual dates instead of only positional keys
+            Restoring selections matches by date so they remain stable across daily runs
+            Backward compatible with old registry data that lacks date information
 #>
 
 # Script parameters
@@ -1694,11 +1698,16 @@ Function Update-DayControls {
         $yPosition += $script:rowHeight
     } # end of create/update controls loop
 
-    # Restore saved selections if available
+    # Restore saved selections if available (match by date, not positional key)
     if ($script:savedWeeklySelections) {
         Write-Detail -Message "Restoring saved weekly selections" -Level Debug
         foreach ($dayKey in $script:dropdowns.Keys | Sort-Object) {
-            $savedDay = $script:savedWeeklySelections | Where-Object { $_.DayKey -eq $dayKey } | Select-Object -First 1
+            $dayDateStr = $script:dropdowns[$dayKey]['Date'].ToString('yyyy-MM-dd')
+            # Match by date first (correct behavior), fall back to DayKey for backward compatibility with old registry data
+            $savedDay = $script:savedWeeklySelections | Where-Object { $_.Date -eq $dayDateStr } | Select-Object -First 1
+            if (-not $savedDay) {
+                $savedDay = $script:savedWeeklySelections | Where-Object { $_.DayKey -eq $dayKey -and -not $_.Date } | Select-Object -First 1
+            }
             if ($savedDay) {
                 # Restore AM/PM selections if in split mode
                 if ($script:dropdowns[$dayKey]['AM'] -and $savedDay.AM) {
@@ -1720,7 +1729,7 @@ Function Update-DayControls {
                         $script:dropdowns[$dayKey]['Day'].SelectedIndex = $dayIndex
                     }
                 }
-                Write-Detail -Message "Restored selections for $dayKey" -Level Debug
+                Write-Detail -Message "Restored selections for $dayKey (date: $dayDateStr)" -Level Debug
             }
         }
     }
@@ -2305,9 +2314,10 @@ $applyButton.Add_Click({
                 'Date' = $script:dropdowns[$dayKey]['Date']
                 'DayName' = $script:dropdowns[$dayKey]['DayName']
             }
-            # Save for registry
+            # Save for registry (include date for correct day matching across sessions)
             $weeklySelections += @{
                 DayKey = $dayKey
+                Date = $script:dropdowns[$dayKey]['Date'].ToString('yyyy-MM-dd')
                 AM = $script:dropdowns[$dayKey]['AM'].SelectedItem
                 PM = $script:dropdowns[$dayKey]['PM'].SelectedItem
             }
@@ -2320,9 +2330,10 @@ $applyButton.Add_Click({
                 'Date' = $script:dropdowns[$dayKey]['Date']
                 'DayName' = $script:dropdowns[$dayKey]['DayName']
             }
-            # Save for registry
+            # Save for registry (include date for correct day matching across sessions)
             $weeklySelections += @{
                 DayKey = $dayKey
+                Date = $script:dropdowns[$dayKey]['Date'].ToString('yyyy-MM-dd')
                 Day = $dayStatus
             }
         }
