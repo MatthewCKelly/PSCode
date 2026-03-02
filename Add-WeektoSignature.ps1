@@ -2073,9 +2073,32 @@ $useAmPmCheckbox.Add_CheckedChanged({
 
     # Track cumulative Y position (match initial offset from Update-DayControls)
     $cumulativeY = 5
-    
+
     foreach ($dayKey in $script:dropdowns.Keys | Sort-Object) {
-        # Position all items at the same Y level first
+        # Migrate selections before toggling visibility
+        if ($isSplitMode) {
+            # Full Day → Split: populate AM and PM from the full-day selection
+            $daySelection = $script:dropdowns[$dayKey]['Day'].SelectedItem
+            $dayIndex = $script:statusOptions.IndexOf($daySelection)
+            if ($dayIndex -ge 0) {
+                $script:dropdowns[$dayKey]['AM'].SelectedIndex = $dayIndex
+                $script:dropdowns[$dayKey]['PM'].SelectedIndex = $dayIndex
+            }
+        } else {
+            # Split → Full Day: use AM as primary; if AM = PM use that, otherwise default to AM
+            $amSelection = $script:dropdowns[$dayKey]['AM'].SelectedItem
+            $pmSelection = $script:dropdowns[$dayKey]['PM'].SelectedItem
+            $amIndex = $script:statusOptions.IndexOf($amSelection)
+            if ($amIndex -ge 0) {
+                $script:dropdowns[$dayKey]['Day'].SelectedIndex = $amIndex
+            }
+            # Log if AM and PM differed so user is aware
+            if ($amSelection -ne $pmSelection) {
+                Write-Detail -Message "$dayKey had different AM ($amSelection) and PM ($pmSelection) - using AM for full day" -Level Debug
+            }
+        }
+
+        # Position all items at the same Y level
         $script:dropdowns[$dayKey]['DayLabelMain'].Location = New-Object System.Drawing.Point(10, $cumulativeY)
         $script:dropdowns[$dayKey]['AMLabel'].Location = New-Object System.Drawing.Point(170, $cumulativeY)
         $script:dropdowns[$dayKey]['AM'].Location = New-Object System.Drawing.Point(205, $cumulativeY)
@@ -2083,9 +2106,8 @@ $useAmPmCheckbox.Add_CheckedChanged({
         $script:dropdowns[$dayKey]['PM'].Location = New-Object System.Drawing.Point(375, $cumulativeY)
         $script:dropdowns[$dayKey]['DayLabel'].Location = New-Object System.Drawing.Point(170, $cumulativeY)
         $script:dropdowns[$dayKey]['Day'].Location = New-Object System.Drawing.Point(215, $cumulativeY)
-        
+
         if ($isSplitMode) {
-            # Split mode: Day label on first row, AM/PM on same row to the right
             $script:dropdowns[$dayKey]['DayLabel'].Visible = $false
             $script:dropdowns[$dayKey]['Day'].Visible = $false
             $script:dropdowns[$dayKey]['AMLabel'].Visible = $true
@@ -2093,7 +2115,6 @@ $useAmPmCheckbox.Add_CheckedChanged({
             $script:dropdowns[$dayKey]['PMLabel'].Visible = $true
             $script:dropdowns[$dayKey]['PM'].Visible = $true
         } else {
-            # Full day mode: Day label and single dropdown
             $script:dropdowns[$dayKey]['DayLabel'].Visible = $true
             $script:dropdowns[$dayKey]['Day'].Visible = $true
             $script:dropdowns[$dayKey]['AMLabel'].Visible = $false
@@ -2101,8 +2122,8 @@ $useAmPmCheckbox.Add_CheckedChanged({
             $script:dropdowns[$dayKey]['PMLabel'].Visible = $false
             $script:dropdowns[$dayKey]['PM'].Visible = $false
         }
-        
-        # Move to next day (same spacing for both modes)
+
+        # Move to next day
         $cumulativeY += $script:rowHeight
     } # end of foreach day layout adjustment loop
 
