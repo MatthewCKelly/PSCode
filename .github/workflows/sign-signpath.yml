@@ -1,0 +1,65 @@
+name: Sign with SignPath.io
+
+# SignPath.io is a cloud-based code signing service
+# Free for open source projects!
+# More info: https://about.signpath.io/
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  sign-scripts:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Submit signing request to SignPath.io
+        uses: signpath/github-action-submit-signing-request@v0.4
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: 'release-signing'
+          github-artifact-id: 'unsigned-scripts'
+          wait-for-completion: true
+          output-artifact-directory: 'signed-scripts'
+
+      - name: Create artifact with unsigned scripts
+        uses: actions/upload-artifact@v4
+        id: upload-unsigned
+        with:
+          name: unsigned-scripts
+          path: |
+            *.ps1
+            Serial/*.ps1
+
+      - name: Download signed scripts
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-scripts
+          path: .
+
+      - name: Verify signatures
+        shell: pwsh
+        run: |
+          Write-Host "Verifying signatures..."
+          Get-ChildItem -Filter "*.ps1" -Recurse | ForEach-Object {
+            $sig = Get-AuthenticodeSignature -FilePath $_.FullName
+            $status = if ($sig.Status -eq 'Valid') { '✓' } else { '✗' }
+            $color = if ($sig.Status -eq 'Valid') { 'Green' } else { 'Red' }
+            Write-Host "$status $($_.Name): $($sig.Status)" -ForegroundColor $color
+          }
+
+      - name: Commit signed scripts
+        if: github.event_name == 'release'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add *.ps1 Serial/*.ps1
+          git commit -m "Sign scripts with SignPath.io for release ${{ github.event.release.tag_name }}"
+          git push
