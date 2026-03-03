@@ -1828,6 +1828,10 @@ $previewBrowser.ScrollBarsEnabled = $false
 $previewBrowser.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($previewBrowser)
 
+# Initialize the WebBrowser control's document
+# This ensures the control is ready to accept DocumentText immediately
+$previewBrowser.Navigate("about:blank")
+
 # Copy HTML button (initially hidden)
 $copyHtmlButton = New-Object System.Windows.Forms.Button
 $copyHtmlButton.Location = New-Object System.Drawing.Point(480, ($previewBrowser.Location.Y + 5))
@@ -2575,8 +2579,17 @@ try {
     # Initialize day controls with saved configuration
     Update-DayControls -requestedDays $numDays -includeToday $includeToday
 
-    # Show initial preview
-    & $updatePreview
+    # Add a one-time event handler for when WebBrowser finishes initializing
+    # This ensures the preview update happens AFTER the control is ready
+    $script:initialPreviewDone = $false
+    $previewBrowser.Add_DocumentCompleted({
+        param($sender, $e)
+        if (-not $script:initialPreviewDone) {
+            $script:initialPreviewDone = $true
+            Write-Detail -Message "WebBrowser initialized, showing initial preview" -Level Debug
+            & $updatePreview
+        }
+    })
 
     # Show form
     Write-Detail -Message "Displaying GUI form" -Level Info
