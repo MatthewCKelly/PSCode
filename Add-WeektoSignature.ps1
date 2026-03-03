@@ -1837,6 +1837,10 @@ $previewBrowser.ScrollBarsEnabled = $false
 $previewBrowser.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($previewBrowser)
 
+# Initialize the WebBrowser control's document
+# This ensures the control is ready to accept DocumentText immediately
+$previewBrowser.Navigate("about:blank")
+
 # Copy HTML button (initially hidden)
 $copyHtmlButton = New-Object System.Windows.Forms.Button
 $copyHtmlButton.Location = New-Object System.Drawing.Point(480, ($previewBrowser.Location.Y + 5))
@@ -1916,38 +1920,45 @@ $form.Controls.Add($textPreviewBox)
 
 # Update preview function
 $updatePreview = {
-    # Collect current selections
-    $statusData = @{}
-    $isSplitMode = $useAmPmCheckbox.Checked
-    
-    foreach ($dayKey in $($script:dropdowns.Keys | Sort-Object)) {
-        if ($isSplitMode) {
-            # Use separate AM/PM selections
-            $statusData[$dayKey] = @{
-                'AM' = $script:dropdowns[$dayKey]['AM'].SelectedItem
-                'PM' = $script:dropdowns[$dayKey]['PM'].SelectedItem
-                'Date' = $script:dropdowns[$dayKey]['Date']
-                'DayName' = $script:dropdowns[$dayKey]['DayName']
+    try {
+        Write-Detail -Message "Running updatePreview..." -Level Debug
+
+        # Collect current selections
+        $statusData = @{}
+        $isSplitMode = $useAmPmCheckbox.Checked
+
+        Write-Detail -Message "Split mode: $isSplitMode, Dropdown count: $($script:dropdowns.Count)" -Level Debug
+
+        foreach ($dayKey in $($script:dropdowns.Keys | Sort-Object)) {
+            if ($isSplitMode) {
+                # Use separate AM/PM selections
+                $statusData[$dayKey] = @{
+                    'AM' = $script:dropdowns[$dayKey]['AM'].SelectedItem
+                    'PM' = $script:dropdowns[$dayKey]['PM'].SelectedItem
+                    'Date' = $script:dropdowns[$dayKey]['Date']
+                    'DayName' = $script:dropdowns[$dayKey]['DayName']
+                }
+            } else {
+                # Use full day selection for both AM and PM
+                $dayStatus = $script:dropdowns[$dayKey]['Day'].SelectedItem
+                $statusData[$dayKey] = @{
+                    'AM' = $dayStatus
+                    'PM' = $dayStatus
+                    'Date' = $script:dropdowns[$dayKey]['Date']
+                    'DayName' = $script:dropdowns[$dayKey]['DayName']
+                }
             }
-        } else {
-            # Use full day selection for both AM and PM
-            $dayStatus = $script:dropdowns[$dayKey]['Day'].SelectedItem
-            $statusData[$dayKey] = @{
-                'AM' = $dayStatus
-                'PM' = $dayStatus
-                'Date' = $script:dropdowns[$dayKey]['Date']
-                'DayName' = $script:dropdowns[$dayKey]['DayName']
-            }
-        }
-    } # end of collect selections loop
-    
-    # Generate new table HTML with split mode flag
-    $tableHTML = New-StatusTableHTML -statusData $statusData -isSplitMode $isSplitMode
-    
-    # Generate new table text
-    $tableText = New-StatusTableText -statusData $statusData -isSplitMode $isSplitMode
-    
-    # Combine with existing signature or create new
+        } # end of collect selections loop
+
+        Write-Detail -Message "Collected status data for $($statusData.Count) days" -Level Debug
+
+        # Generate new table HTML with split mode flag
+        $tableHTML = New-StatusTableHTML -statusData $statusData -isSplitMode $isSplitMode
+
+        # Generate new table text
+        $tableText = New-StatusTableText -statusData $statusData -isSplitMode $isSplitMode
+
+        # Combine with existing signature or create new
     $previewHTML = ""
     if ($script:existingHTML -match '(?s)<body[^>]*>(.*)</body>') {
         $bodyContent = $matches[1]
@@ -1993,10 +2004,14 @@ $tableHTML
 </html>
 "@
     }
-    
+
+    Write-Detail -Message "Generated preview HTML ($($previewHTML.Length) chars)" -Level Debug
+
     # Update HTML preview
     $previewBrowser.DocumentText = $previewHTML
-    
+
+    Write-Detail -Message "Set previewBrowser.DocumentText" -Level Debug
+
     # Update text preview
     # Get current text version (if exists)
     $currentTextVersion = ""
@@ -2038,14 +2053,25 @@ $tableHTML
         $updatedTextVersion = $tableText
     }
 
-    # Combine current and updated for display
-    $textPreviewContent = "=== CURRENT TEXT VERSION ===`n"
-    $textPreviewContent += $currentTextVersion
-    $textPreviewContent += "`n`n=== UPDATED TEXT VERSION ===`n"
-    $textPreviewContent += $updatedTextVersion
+        # Combine current and updated for display
+        $textPreviewContent = "=== CURRENT TEXT VERSION ===`n"
+        $textPreviewContent += $currentTextVersion
+        $textPreviewContent += "`n`n=== UPDATED TEXT VERSION ===`n"
+        $textPreviewContent += $updatedTextVersion
 
-    $textPreviewBox.Text = $textPreviewContent
-    
+        $textPreviewBox.Text = $textPreviewContent
+
+        Write-Detail -Message "Preview updated successfully" -Level Debug
+
+    } catch {
+        Write-Detail -Message "ERROR in updatePreview: $($_.Exception.Message)" -Level Error
+        Write-Detail -Message "Stack trace: $($_.ScriptStackTrace)" -Level Debug
+
+        # Set error message in preview
+        if ($previewBrowser) {
+            $previewBrowser.DocumentText = "<html><body><h3>Error generating preview</h3><p>$($_.Exception.Message)</p></body></html>"
+        }
+    }
 } # end of updatePreview scriptblock
 
 # Number of days change event
@@ -2564,8 +2590,17 @@ try {
     # Initialize day controls with saved configuration
     Update-DayControls -requestedDays $numDays -includeToday $includeToday
 
-    # Show initial preview
-    & $updatePreview
+    # Add a one-time event handler for when WebBrowser finishes initializing
+    # This ensures the preview update happens AFTER the control is ready
+    $script:initialPreviewDone = $false
+    $previewBrowser.Add_DocumentCompleted({
+        param($sender, $e)
+        if (-not $script:initialPreviewDone) {
+            $script:initialPreviewDone = $true
+            Write-Detail -Message "WebBrowser initialized, showing initial preview" -Level Debug
+            & $updatePreview
+        }
+    })
 
     # Show form
     Write-Detail -Message "Displaying GUI form" -Level Info
