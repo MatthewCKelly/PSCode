@@ -1,0 +1,22 @@
+{
+  "_comment": "Copy this file to strava-config.json and fill in your credentials. NEVER commit strava-config.json.",
+  "ClientId": "YOUR_STRAVA_CLIENT_ID",
+  "ClientSecret": "YOUR_STRAVA_CLIENT_SECRET",
+  "RefreshToken": "",
+  "AccessToken": "",
+  "TokenExpiry": "",
+  "AthleteId": "",
+  "DataDirectory": ".\\Data",
+  "DownloadMonths": 6,
+  "Notes": {
+    "HowToGetCredentials": [
+      "1. Go to https://www.strava.com/settings/api",
+      "2. Create an application (or use existing one)",
+      "3. Copy 'Client ID' and 'Client Secret' into this file",
+      "4. Run Get-StravaRides.ps1 - it will open a browser to authorize",
+      "5. Paste the redirect URL back into the script when prompted",
+      "6. The RefreshToken and AccessToken will be saved automatically"
+    ],
+    "Scopes": "activity:read_all,read"
+  }
+}
