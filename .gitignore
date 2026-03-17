@@ -10,6 +10,9 @@ liquidfiles-config.json
 Strava/Data/*.json
 Strava/StravaAnalysis-Report.html
 
+# Garmin raw .fit files (personal data, can be large)
+Strava/GarminExport/*.fit
+
 # PowerShell logs
 *.log
 
