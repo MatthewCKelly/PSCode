@@ -1,6 +1,6 @@
 /**
  * ============================================================
- *  STRAVA FLYBY DIRECTOR  v2.9.2
+ *  STRAVA FLYBY DIRECTOR  v2.9.3
  *  2026-05-07T00:00:00+12:00
  * ============================================================
  *
@@ -650,8 +650,11 @@ const TIMELINE = [
     console.log(PREFIX + ' [' + idx + '] ' + name + '  ' + latlng.length + ' pts  ' +
       new Date(startTime * 1000).toISOString());
 
+    var athleteId = attr.athleteId != null ? String(attr.athleteId) : null;
+
     return {
       id        : actId,
+      athleteId : athleteId,
       name      : name,
       color     : color,
       startTime : startTime,

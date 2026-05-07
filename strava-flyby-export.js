@@ -25,6 +25,7 @@
     var name      = attr.shortFirstName || (attr.athlete && attr.athlete.firstName) || attr.name || ('Athlete ' + idx);
     var color     = attr.streamColor || COLORS[idx % COLORS.length];
     var actId     = String(model.id || idx);
+    var athleteId = attr.athleteId != null ? String(attr.athleteId) : null;
 
     if (!points) {
       console.warn('[Export] ' + name + ' (idx ' + idx + '): no data');
@@ -43,10 +44,11 @@
       altitude.push(p.elevation != null ? p.elevation : null);
     });
 
-    console.log('[Export] ' + name + '  ' + latlng.length + ' pts  color:' + color);
+    console.log('[Export] ' + name + '  athleteId:' + (athleteId||'?') + '  actId:' + actId + '  ' + latlng.length + ' pts');
 
     return {
       id        : actId,
+      athleteId : athleteId,
       name      : name,
       color     : color,
       startTime : startTime,
