@@ -1,6 +1,6 @@
 /**
  * ============================================================
- *  STRAVA FLYBY DIRECTOR  v2.9.1
+ *  STRAVA FLYBY DIRECTOR  v2.9.2
  *  2026-05-07T00:00:00+12:00
  * ============================================================
  *
@@ -596,95 +596,74 @@ const TIMELINE = [
   } // end of tick()
 
   // ----------------------------------------------------------
-  //  DATA EXPORT  (v2.9.1)
+  //  DATA EXPORT  (v2.9.2)
   //
-  //  Reads GPS data from model.data.attributes.data — a Backbone
-  //  model whose attributes.data is an Array of:
-  //    { point: { lat, lng }, time: unixSeconds, ... }
+  //  Reads GPS data from model.data (Backbone model) whose
+  //  attributes.data is an Array of:
+  //    { elevation: 115, point: { lat, lng }, time: unixSeconds }
+  //
+  //  For athletes whose data hasn't loaded yet, triggers
+  //  model.data.fetch() and waits before downloading.
   //
   //  Downloads a JSON blob compatible with strava-flyby-offline.html.
   // ----------------------------------------------------------
 
-  function exportData() {
-    var fb = window.flyby;
-    if (!fb || !fb.results || !fb.results.activities) {
-      console.error(PREFIX + ' exportData: window.flyby not ready -- wait for athletes to load');
-      return;
+  function getPoints(model) {
+    var dm = model.data;
+    if (!dm) return null;
+    var pts = (typeof dm.get === 'function') ? dm.get('data') : null;
+    if (!Array.isArray(pts) && dm.attributes) pts = dm.attributes.data;
+    return (Array.isArray(pts) && pts.length > 1) ? pts : null;
+  }
+
+  function buildAthleteObj(model, idx) {
+    var attr  = model.attributes || {};
+    var name  = attr.shortFirstName ||
+                (attr.athlete && attr.athlete.firstName) ||
+                attr.name || ('Athlete ' + (idx + 1));
+    var color = attr.streamColor || COLORS[idx % COLORS.length];
+    var actId = String(model.id || attr.id || idx);
+
+    var points = getPoints(model);
+    if (!points) {
+      console.warn(PREFIX + ' [' + idx + '] ' + name + ': no data');
+      return null;
     }
 
-    var allModels = fb.results.activities.models || [];
-    if (!allModels.length) {
-      console.error(PREFIX + ' exportData: no activity models found');
-      return;
+    var startTime = points[0].time;
+    var latlng    = [];
+    var time      = [];
+    var altitude  = [];
+
+    points.forEach(function (p) {
+      if (!p || !p.point || p.time == null) return;
+      latlng.push([p.point.lat, p.point.lng]);
+      time.push(Math.round(p.time - startTime));
+      altitude.push(p.elevation != null ? p.elevation : null);
+    });
+
+    if (latlng.length < 2) {
+      console.warn(PREFIX + ' [' + idx + '] ' + name + ': no valid GPS points after filter');
+      return null;
     }
 
-    console.log(PREFIX + ' exportData: reading ' + allModels.length + ' athletes...');
+    console.log(PREFIX + ' [' + idx + '] ' + name + '  ' + latlng.length + ' pts  ' +
+      new Date(startTime * 1000).toISOString());
 
-    var athletes = [];
+    return {
+      id        : actId,
+      name      : name,
+      color     : color,
+      startTime : startTime,
+      streams   : { latlng: latlng, time: time, altitude: altitude },
+    };
+  }
 
-    allModels.forEach(function (model, idx) {
-      var attr  = model.attributes || {};
-      var name  = attr.shortFirstName ||
-                  (attr.athlete && attr.athlete.firstName) ||
-                  attr.name || ('Athlete ' + (idx + 1));
-      var color = attr.streamColor || COLORS[idx % COLORS.length];
-      var actId = String(model.id || attr.id || idx);
-
-      // model.data is a Backbone model.
-      // GPS array lives at model.data.attributes.data
-      // Each element: { point: { lat, lng }, time: unixSeconds }
-      var dataModel = model.data;
-      var points    = null;
-
-      if (dataModel) {
-        // Prefer Backbone .get() if available
-        if (typeof dataModel.get === 'function') {
-          points = dataModel.get('data');
-        }
-        // Direct attribute fallback
-        if (!Array.isArray(points) && dataModel.attributes) {
-          points = dataModel.attributes.data;
-        }
-      }
-
-      if (!Array.isArray(points) || points.length < 2) {
-        console.warn(PREFIX + ' [' + idx + '] ' + name + ': data array not found or empty');
-        return;
-      }
-
-      var startTime = points[0].time;
-      var latlng    = [];
-      var time      = [];
-
-      points.forEach(function (p) {
-        if (p && p.point && p.point.lat != null && p.point.lng != null && p.time != null) {
-          latlng.push([p.point.lat, p.point.lng]);
-          time.push(Math.round(p.time - startTime));
-        }
-      });
-
-      if (latlng.length < 2) {
-        console.warn(PREFIX + ' [' + idx + '] ' + name + ': no valid GPS points');
-        return;
-      }
-
-      console.log(PREFIX + ' [' + idx + '] ' + name + '  ' + latlng.length + ' pts  ' +
-        new Date(startTime * 1000).toISOString());
-
-      athletes.push({
-        id        : actId,
-        name      : name,
-        color     : color,
-        startTime : startTime,
-        streams   : { latlng: latlng, time: time },
-      });
-    }); // end forEach model
-
+  function doDownload(athletes) {
     if (!athletes.length) {
-      console.error(PREFIX + ' exportData: no data extracted');
+      console.error(PREFIX + ' exportData: no data to download');
       return;
     }
-
     var totalPts = athletes.reduce(function (s, a) { return s + a.streams.time.length; }, 0);
     var json     = JSON.stringify(athletes, null, 2);
     var blob     = new Blob([json], { type: 'application/json' });
@@ -696,10 +675,51 @@ const TIMELINE = [
     a.click();
     document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(url); }, 8000);
-
     console.log(PREFIX + ' ✓ ' + athletes.length + ' athletes · ' +
       totalPts + ' pts · ' + Math.round(json.length / 1024) + ' KB');
     console.log(PREFIX + ' → Load flyby-export-*.json into strava-flyby-offline.html');
+  }
+
+  function exportData() {
+    var fb = window.flyby;
+    if (!fb || !fb.results || !fb.results.activities) {
+      console.error(PREFIX + ' exportData: window.flyby not ready');
+      return;
+    }
+
+    var allModels = fb.results.activities.models || [];
+    if (!allModels.length) {
+      console.error(PREFIX + ' exportData: no activity models found');
+      return;
+    }
+
+    console.log(PREFIX + ' exportData: ' + allModels.length + ' athletes');
+
+    var missing = allModels.filter(function (m) { return !getPoints(m); });
+
+    if (!missing.length) {
+      doDownload(allModels.map(buildAthleteObj).filter(Boolean));
+      return;
+    }
+
+    // Trigger fetch for any athletes not yet loaded
+    console.log(PREFIX + ' Fetching ' + missing.length + ' unloaded athlete(s)...');
+    var fetches = missing.map(function (m) {
+      var name = (m.attributes || {}).shortFirstName || m.id;
+      console.log(PREFIX + '  fetching: ' + name);
+      return new Promise(function (resolve) {
+        if (m.data && typeof m.data.fetch === 'function') {
+          m.data.fetch({ success: resolve, error: resolve });
+        } else {
+          resolve();
+        }
+      });
+    });
+
+    Promise.all(fetches).then(function () {
+      console.log(PREFIX + ' Fetches done — building export...');
+      doDownload(allModels.map(buildAthleteObj).filter(Boolean));
+    });
   } // end exportData()
 
   // Fallback color palette used if model has no streamColor
