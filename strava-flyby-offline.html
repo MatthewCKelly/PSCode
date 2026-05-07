@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Offline Flyby Viewer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#1a1a1a;--surface:#242424;--surface2:#2e2e2e;--border:#3a3a3a;
+      --text:#e8e8e8;--dim:#888;--accent:#fc5200;--accent2:#cc4400;
+      --green:#2ecc71;--blue:#3498db;--yellow:#f39c12;--red:#e74c3c;
+    }
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+      background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+    /* ── TOP BAR ── */
+    #topbar{background:var(--surface);border-bottom:1px solid var(--border);
+      padding:7px 12px;display:flex;align-items:center;gap:10px;flex-shrink:0;flex-wrap:wrap}
+    .logo{font-weight:700;font-size:13px;color:var(--accent);white-space:nowrap;letter-spacing:-0.3px}
+    .sep{width:1px;height:22px;background:var(--border)}
+    .btn{padding:4px 11px;border:1px solid var(--border);background:var(--surface2);color:var(--text);
+      border-radius:4px;cursor:pointer;font-size:12px;white-space:nowrap;transition:background .12s}
+    .btn:hover{background:var(--border)}
+    .btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+    .btn.pri:hover{background:var(--accent2)}
+    input[type=file]{display:none}
+
+    /* playback strip */
+    #pb{display:flex;align-items:center;gap:8px;margin-left:auto}
+    #play-btn{width:30px;height:30px;border-radius:50%;background:var(--accent);border:none;
+      color:#fff;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+    #play-btn:hover{background:var(--accent2)}
+    #tl-wrap{display:flex;align-items:center;gap:7px;flex:1;min-width:180px}
+    #timeline{flex:1;-webkit-appearance:none;height:4px;background:var(--border);border-radius:2px;
+      outline:none;cursor:pointer}
+    #timeline::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
+      border-radius:50%;background:var(--accent);cursor:pointer}
+    .tlabel{font-size:11px;color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums}
+    #spd{background:var(--surface2);border:1px solid var(--border);color:var(--text);
+      padding:3px 5px;border-radius:4px;font-size:12px;cursor:pointer}
+
+    /* ── MAIN ── */
+    #main{display:flex;flex:1;overflow:hidden}
+
+    /* sidebar */
+    #sidebar{width:210px;background:var(--surface);border-right:1px solid var(--border);
+      display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto}
+    .ph{padding:8px 12px 5px;font-size:10px;font-weight:600;color:var(--dim);
+      text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
+    #alist{padding:4px 0}
+    .aitem{display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;
+      transition:background .1s;user-select:none}
+    .aitem:hover{background:var(--surface2)}
+    .aitem.off{opacity:.4}
+    .adot{width:11px;height:11px;border-radius:50%;flex-shrink:0}
+    .ainfo{flex:1;min-width:0}
+    .aname{font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ameta{font-size:10px;color:var(--dim)}
+    .astatus{width:7px;height:7px;border-radius:50%;flex-shrink:0;border:1px solid transparent}
+    .mybadge{display:inline-block;background:var(--accent);color:#fff;font-size:9px;
+      padding:1px 4px;border-radius:3px;font-weight:700;letter-spacing:.4px}
+
+    /* map */
+    #mapwrap{flex:1;position:relative}
+    #map{width:100%;height:100%}
+    #nodatamsg{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+      text-align:center;color:var(--dim);pointer-events:none;z-index:1000}
+    #nodatamsg .ico{font-size:44px;margin-bottom:10px}
+    #nodatamsg p{font-size:13px}
+    #mapbadge{position:absolute;top:10px;right:10px;background:rgba(26,26,26,.88);
+      border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11px;
+      z-index:1000;pointer-events:none;display:none}
+
+    /* ── METRICS ── */
+    #metrics{height:155px;background:var(--surface);border-top:1px solid var(--border);
+      display:flex;flex-shrink:0;overflow:hidden}
+    .mchart{flex:1;display:flex;flex-direction:column;border-right:1px solid var(--border);min-width:0}
+    .mchart:last-child{border-right:none}
+    .mhdr{padding:4px 8px 2px;font-size:10px;font-weight:600;color:var(--dim);text-transform:uppercase;
+      display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+    .mval{color:var(--text);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+    .cwrap{flex:1;position:relative;min-height:0}
+    .cwrap canvas{position:absolute;inset:0;width:100%;height:100%}
+
+    /* ── MODAL ── */
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;
+      align-items:center;justify-content:center;z-index:9999}
+    .overlay.hide{display:none}
+    .modal{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+      padding:22px;max-width:560px;width:90%;max-height:82vh;overflow-y:auto}
+    .modal h2{font-size:15px;margin-bottom:10px}
+    .modal h3{font-size:12px;color:var(--dim);margin:14px 0 5px;text-transform:uppercase;letter-spacing:.4px}
+    .modal p{font-size:12px;line-height:1.65;color:var(--dim);margin-bottom:6px}
+    .modal pre{background:var(--bg);border:1px solid var(--border);border-radius:4px;
+      padding:9px 11px;font-size:11px;white-space:pre-wrap;word-break:break-all;
+      color:var(--green);margin:6px 0;overflow-x:auto}
+    .mfooter{margin-top:14px;display:flex;gap:8px;justify-content:flex-end}
+
+    /* ── TOAST ── */
+    #toast{position:fixed;bottom:18px;right:18px;background:var(--surface2);border:1px solid var(--border);
+      border-radius:6px;padding:9px 15px;font-size:12px;z-index:9998;
+      transform:translateY(50px);opacity:0;transition:all .25s;pointer-events:none}
+    #toast.show{transform:translateY(0);opacity:1}
+    #toast.success{border-color:var(--green);color:var(--green)}
+    #toast.error{border-color:var(--red);color:var(--red)}
+    #toast.warn{border-color:var(--yellow);color:var(--yellow)}
+  </style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <span class="logo">⚡ Flyby Offline</span>
+  <div class="sep"></div>
+  <button class="btn" onclick="openGuide()">📡 Capture Guide</button>
+  <button class="btn pri" onclick="$('load-ath').click()">Load Athletes JSON</button>
+  <input type="file" id="load-ath" accept=".json" onchange="loadAthletes(event)">
+  <button class="btn" onclick="$('load-fit').click()">Load My FIT File</button>
+  <input type="file" id="load-fit" accept=".fit,.FIT" onchange="loadFit(event)">
+  <button class="btn" id="fit-rm" onclick="clearFit()" style="display:none">✕ Remove FIT</button>
+  <button class="btn" onclick="loadSample()">Load Sample</button>
+
+  <div id="pb">
+    <button id="play-btn" onclick="togglePlay()">▶</button>
+    <div id="tl-wrap">
+      <span class="tlabel" id="t-cur">0:00:00</span>
+      <input type="range" id="timeline" min="0" max="100" value="0" oninput="scrub(event)">
+      <span class="tlabel" id="t-tot">0:00:00</span>
+    </div>
+    <select id="spd" onchange="setSpeed(this.value)">
+      <option value="1">1×</option>
+      <option value="5">5×</option>
+      <option value="10" selected>10×</option>
+      <option value="30">30×</option>
+      <option value="60">60×</option>
+      <option value="120">120×</option>
+    </select>
+    <button class="btn" onclick="fitBounds()" title="Fit all">⛶</button>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+  <div id="sidebar">
+    <div class="ph">Athletes (<span id="acnt">0</span>)</div>
+    <div id="alist"><div style="padding:12px;font-size:12px;color:var(--dim)">Load athletes JSON or click "Load Sample"</div></div>
+  </div>
+  <div id="mapwrap">
+    <div id="map"></div>
+    <div id="nodatamsg"><div class="ico">🗺️</div><p>Load Athletes JSON to see tracks</p></div>
+    <div id="mapbadge"><span id="badge-t">—</span></div>
+  </div>
+</div>
+
+<!-- METRICS -->
+<div id="metrics">
+  <div class="mchart">
+    <div class="mhdr"><span>Heart Rate</span><span class="mval" id="v-hr">—</span></div>
+    <div class="cwrap"><canvas id="c-hr"></canvas></div>
+  </div>
+  <div class="mchart">
+    <div class="mhdr"><span>Power</span><span class="mval" id="v-pwr">—</span></div>
+    <div class="cwrap"><canvas id="c-pwr"></canvas></div>
+  </div>
+  <div class="mchart">
+    <div class="mhdr"><span>Speed</span><span class="mval" id="v-spd">—</span></div>
+    <div class="cwrap"><canvas id="c-spd"></canvas></div>
+  </div>
+  <div class="mchart">
+    <div class="mhdr"><span>Cadence</span><span class="mval" id="v-cad">—</span></div>
+    <div class="cwrap"><canvas id="c-cad"></canvas></div>
+  </div>
+</div>
+
+<!-- CAPTURE GUIDE MODAL -->
+<div class="overlay hide" id="guide-modal">
+  <div class="modal">
+    <h2>📡 How to Capture Strava Flyby Data</h2>
+    <p>This tool needs athlete GPS data exported from the Strava Flyby viewer. Two methods:</p>
+
+    <h3>Method A — Console Intercept (Recommended)</h3>
+    <p>1. Open <strong>labs.strava.com/flyby/viewer/#YOUR_ACTIVITY_ID</strong></p>
+    <p>2. Press <strong>F12</strong> → Console tab. Paste and run the script below <em>before</em> the page loads athletes:</p>
+    <pre id="cap-script"></pre>
+    <button class="btn" onclick="copyScript()">📋 Copy Script</button>
+    <p style="margin-top:8px">3. After athletes appear on the map, run <code style="background:var(--bg);padding:2px 5px;border-radius:3px;font-family:monospace">exportFlybyData()</code> in the console — a JSON file will download.</p>
+    <p>4. Click <strong>"Load Athletes JSON"</strong> to load that file here.</p>
+
+    <h3>Method B — DevTools Network</h3>
+    <p>1. Open DevTools → Network tab → filter by <strong>streams</strong></p>
+    <p>2. Load the flyby page, wait for athletes</p>
+    <p>3. Right-click each "streams" response → Copy Response</p>
+    <p>4. Assemble into a JSON array (see format below)</p>
+
+    <h3>Manual JSON Format</h3>
+    <pre>[
+  {
+    "name": "Athlete Name",
+    "startTime": "2024-01-15T08:00:00Z",
+    "color": "#fc5200",
+    "streams": {
+      "latlng": [[51.507, -0.127], [51.508, -0.128]],
+      "time":   [0, 5, 10, 15]
+    }
+  }
+]</pre>
+    <p><code>startTime</code> is an ISO 8601 string or Unix timestamp (seconds). <code>latlng</code> is an array of <code>[lat, lng]</code> pairs. <code>time</code> is seconds elapsed from activity start.</p>
+
+    <div class="mfooter">
+      <button class="btn pri" onclick="closeModal('guide-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+'use strict';
+
+// ────────────────────────────────────────────────────────────────
+// CONSTANTS
+// ────────────────────────────────────────────────────────────────
+
+const COLORS = [
+  '#fc5200','#4fc3f7','#81c784','#ffb74d','#f48fb1',
+  '#ce93d8','#80deea','#a5d6a7','#ef9a9a','#90caf9',
+  '#ffe082','#bcaaa4','#b0bec5','#c5e1a5','#ffcc02'
+];
+
+const CHART_META = [
+  { key:'hr',  canvasId:'c-hr',  valId:'v-hr',  color:'#e74c3c', label:'bpm',   src:'heartrate' },
+  { key:'pwr', canvasId:'c-pwr', valId:'v-pwr', color:'#f39c12', label:'W',     src:'power'     },
+  { key:'spd', canvasId:'c-spd', valId:'v-spd', color:'#3498db', label:'km/h',  src:'speed'     },
+  { key:'cad', canvasId:'c-cad', valId:'v-cad', color:'#2ecc71', label:'rpm',   src:'cadence'   }
+];
+
+// FIT epoch offset: seconds between 1989-12-31 00:00:00 UTC and Unix epoch
+const FIT_EPOCH = 631065600;
+
+// ────────────────────────────────────────────────────────────────
+// APP STATE
+// ────────────────────────────────────────────────────────────────
+
+const S = {
+  athletes: [],
+  me: null,
+  hidden: new Set(),
+  tl: { start:0, end:0, cur:0, playing:false, speed:10, lastTick:null },
+  map: null,
+  markers: {},
+  tracks: {},
+  meMarker: null,
+  meTrack: null,
+  charts: {}
+};
+
+// ────────────────────────────────────────────────────────────────
+// DOM HELPER
+// ────────────────────────────────────────────────────────────────
+
+function $(id){ return document.getElementById(id); }
+
+// ────────────────────────────────────────────────────────────────
+// FIT FILE PARSER
+// ────────────────────────────────────────────────────────────────
+
+class FitParser {
+  parse(buf) {
+    const v = new DataView(buf);
+    const b = new Uint8Array(buf);
+
+    if (b.length < 12) throw new Error('File too small');
+    const hdrSize = v.getUint8(0);
+    const tag = String.fromCharCode(b[8],b[9],b[10],b[11]);
+    if (tag !== '.FIT') throw new Error('Not a valid FIT file');
+
+    const dataSize = v.getUint32(4, true);
+    let off = hdrSize;
+    const end = Math.min(hdrSize + dataSize, b.length - 2);
+    const defs = {};
+    const recs = [];
+
+    while (off < end) {
+      if (off >= b.length) break;
+      const hdr = v.getUint8(off++);
+
+      // Compressed timestamp header (bit 7 = 1)
+      if (hdr & 0x80) {
+        const lt = (hdr >> 5) & 0x03;
+        const def = defs[lt];
+        if (def) { recs.push(this._data(v, off, def)); off += def.sz; }
+        continue;
+      }
+
+      const isDef = !!(hdr & 0x40);
+      const hasDev = !!(hdr & 0x20);
+      const lt = hdr & 0x0F;
+
+      if (isDef) {
+        off++; // reserved
+        const le = v.getUint8(off++) === 0;
+        const gm = le ? v.getUint16(off,true) : v.getUint16(off,false); off += 2;
+        const nf = v.getUint8(off++);
+        const fields = [];
+        let sz = 0;
+        for (let i = 0; i < nf; i++) {
+          const fn = v.getUint8(off++);
+          const fs = v.getUint8(off++);
+          const ft = v.getUint8(off++);
+          fields.push({fn, fs, ft});
+          sz += fs;
+        }
+        if (hasDev) {
+          const nd = v.getUint8(off++);
+          for (let i = 0; i < nd; i++) {
+            const ds = v.getUint8(off + 1);
+            off += 3; sz += ds;
+          }
+        }
+        defs[lt] = {gm, le, fields, sz};
+      } else {
+        const def = defs[lt];
+        if (!def) break; // unknown — can't skip without knowing size
+        recs.push(this._data(v, off, def));
+        off += def.sz;
+      }
+    }
+    return this._process(recs);
+  }
+
+  _data(v, off, def) {
+    const f = {};
+    let p = off;
+    for (const fd of def.fields) {
+      f[fd.fn] = this._val(v, p, fd.fs, fd.ft, def.le);
+      p += fd.fs;
+    }
+    return {gm: def.gm, f};
+  }
+
+  _val(v, off, sz, bt, le) {
+    const t = bt & 0x9F;
+    try {
+      switch(t) {
+        case 0x00: case 0x02: case 0x0A: return v.getUint8(off);
+        case 0x01: return v.getInt8(off);
+        case 0x83: return v.getInt16(off, le);
+        case 0x84: case 0x8B: return v.getUint16(off, le);
+        case 0x85: return v.getInt32(off, le);
+        case 0x86: case 0x8C: return v.getUint32(off, le);
+        case 0x88: return v.getFloat32(off, le);
+        case 0x89: return v.getFloat64(off, le);
+        case 0x07: {
+          let s = '';
+          for (let i = 0; i < sz; i++) {
+            const c = v.getUint8(off + i);
+            if (!c) break;
+            s += String.fromCharCode(c);
+          }
+          return s;
+        }
+        default: return v.getUint8(off);
+      }
+    } catch(_){ return null; }
+  }
+
+  _process(recs) {
+    const r = { latlng:[], time:[], altitude:[], heartrate:[], cadence:[], speed:[], power:[], distance:[] };
+    let t0 = null;
+
+    for (const rec of recs) {
+      if (rec.gm !== 20) continue; // record message
+      const f = rec.f;
+
+      const ts = f[253];
+      if (ts == null || ts === 0xFFFFFFFF) continue;
+
+      const unix = ts + FIT_EPOCH;
+      if (!t0) t0 = unix;
+      r.time.push(Math.round(unix - t0));
+
+      const lat = f[0], lng = f[1];
+      r.latlng.push(
+        lat != null && lat !== 0x7FFFFFFF && lng != null && lng !== 0x7FFFFFFF
+          ? [lat * (180 / 2147483648), lng * (180 / 2147483648)]
+          : null
+      );
+
+      const alt = f[2];
+      r.altitude.push(alt != null && alt !== 0xFFFF ? (alt / 5) - 500 : null);
+
+      const hr = f[3];
+      r.heartrate.push(hr != null && hr !== 0xFF ? hr : null);
+
+      const cad = f[4];
+      r.cadence.push(cad != null && cad !== 0xFF ? cad : null);
+
+      const dist = f[5];
+      r.distance.push(dist != null && dist !== 0xFFFFFFFF ? dist / 100 : null);
+
+      const spd = f[6];
+      r.speed.push(spd != null && spd !== 0xFFFF ? (spd / 1000) * 3.6 : null);
+
+      const pwr = f[7];
+      r.power.push(pwr != null && pwr !== 0xFFFF ? pwr : null);
+    }
+
+    r.startTime = t0;
+    r.duration  = r.time.length ? r.time[r.time.length - 1] : 0;
+    return r;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────
+// MAP
+// ────────────────────────────────────────────────────────────────
+
+function initMap() {
+  S.map = L.map('map', { center:[51.505,-0.09], zoom:13 });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution:'© OpenStreetMap contributors', maxZoom:19
+  }).addTo(S.map);
+}
+
+function markerIcon(color, size=12, border=2) {
+  return L.divIcon({
+    className:'',
+    html:`<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:${border}px solid #fff;box-shadow:0 0 4px rgba(0,0,0,.6)"></div>`,
+    iconSize:[size,size], iconAnchor:[size/2,size/2]
+  });
+}
+
+function redrawAthletes() {
+  Object.values(S.markers).forEach(m => m.remove());
+  Object.values(S.tracks).forEach(t => t.remove());
+  S.markers = {}; S.tracks = {};
+
+  if (!S.athletes.length) return;
+
+  $('nodatamsg').style.display = 'none';
+  $('mapbadge').style.display  = 'block';
+
+  for (const a of S.athletes) {
+    const coords = a.streams.latlng.filter(Boolean);
+    if (!coords.length) continue;
+
+    S.tracks[a.id] = L.polyline(coords, {color:a.color, weight:2, opacity:0.3}).addTo(S.map);
+
+    const mk = L.marker(coords[0], {icon:markerIcon(a.color), zIndexOffset:500});
+    mk.addTo(S.map);
+    mk.bindTooltip(a.name, {permanent:false,direction:'top',offset:[0,-6]});
+    S.markers[a.id] = mk;
+  }
+
+  fitBounds();
+}
+
+function redrawMe() {
+  if (S.meMarker){ S.meMarker.remove(); S.meMarker = null; }
+  if (S.meTrack) { S.meTrack.remove();  S.meTrack  = null; }
+  if (!S.me) return;
+
+  const coords = S.me.latlng.filter(Boolean);
+  if (!coords.length) return;
+
+  S.meTrack = L.polyline(coords, {color:'#fff', weight:3, opacity:0.4, dashArray:'5 5'}).addTo(S.map);
+
+  const icon = L.divIcon({
+    className:'',
+    html:`<div style="width:16px;height:16px;border-radius:50%;background:#fff;border:3px solid #fc5200;box-shadow:0 0 8px rgba(252,82,0,.9)"></div>`,
+    iconSize:[16,16], iconAnchor:[8,8]
+  });
+  S.meMarker = L.marker(coords[0], {icon, zIndexOffset:2000}).addTo(S.map);
+  S.meMarker.bindTooltip('You', {permanent:false,direction:'top',offset:[0,-8]});
+}
+
+function fitBounds() {
+  const pts = [];
+  S.athletes.forEach(a => a.streams.latlng.filter(Boolean).forEach(p => pts.push(p)));
+  if (S.me) S.me.latlng.filter(Boolean).forEach(p => pts.push(p));
+  if (pts.length) S.map.fitBounds(L.latLngBounds(pts), {padding:[30,30]});
+}
+
+// ────────────────────────────────────────────────────────────────
+// INTERPOLATION
+// ────────────────────────────────────────────────────────────────
+
+function posAt(streams, startTime, absT) {
+  const rel = absT - startTime;
+  const times = streams.time, lls = streams.latlng;
+  if (rel < 0 || !times.length || rel > times[times.length-1]) return null;
+
+  let lo=0, hi=times.length-1;
+  while (lo < hi) { const m=(lo+hi+1)>>1; times[m]<=rel ? lo=m : hi=m-1; }
+
+  const p0 = lls[lo];
+  if (!p0) {
+    for (let i=lo-1;i>=0;i--) if(lls[i]) return lls[i];
+    return null;
+  }
+  if (lo >= times.length-1) return p0;
+  const p1 = lls[lo+1];
+  if (!p1) return p0;
+
+  const t0=times[lo], t1=times[lo+1];
+  if (t1===t0) return p0;
+  const fr=(rel-t0)/(t1-t0);
+  return [p0[0]+(p1[0]-p0[0])*fr, p0[1]+(p1[1]-p0[1])*fr];
+}
+
+function valAt(arr, times, rel) {
+  if (!arr || !arr.length) return null;
+  let lo=0, hi=times.length-1;
+  while (lo < hi) { const m=(lo+hi+1)>>1; times[m]<=rel ? lo=m : hi=m-1; }
+  return arr[lo] ?? null;
+}
+
+// ────────────────────────────────────────────────────────────────
+// TIMELINE
+// ────────────────────────────────────────────────────────────────
+
+function recomputeRange() {
+  const starts=[], ends=[];
+  for (const a of S.athletes) {
+    starts.push(a.startTime);
+    ends.push(a.startTime + (a.streams.time[a.streams.time.length-1]||0));
+  }
+  if (S.me?.startTime) {
+    starts.push(S.me.startTime);
+    ends.push(S.me.startTime + S.me.duration);
+  }
+  if (!starts.length) return;
+  S.tl.start = Math.min(...starts);
+  S.tl.end   = Math.max(...ends);
+  if (S.tl.cur < S.tl.start) S.tl.cur = S.tl.start;
+  $('t-tot').textContent = fmtDur(S.tl.end - S.tl.start);
+}
+
+function fmtDur(sec) {
+  const h=Math.floor(sec/3600), m=Math.floor((sec%3600)/60), s=Math.floor(sec%60);
+  return `${h}:${pad(m)}:${pad(s)}`;
+}
+function fmtTime(unix) {
+  return new Date(unix*1000).toISOString().slice(11,19);
+}
+function pad(n){ return String(n).padStart(2,'0'); }
+
+function seekTo(t) {
+  S.tl.cur = Math.max(S.tl.start, Math.min(S.tl.end, t));
+  const el = S.tl.cur - S.tl.start;
+  const tot = S.tl.end - S.tl.start || 1;
+
+  $('t-cur').textContent = fmtDur(el);
+  $('badge-t').textContent = fmtTime(S.tl.cur);
+  $('timeline').value = (el / tot) * 100;
+
+  // Move athlete markers
+  for (const a of S.athletes) {
+    const mk = S.markers[a.id];
+    if (!mk) continue;
+    if (S.hidden.has(a.id)) continue;
+
+    const pos = posAt(a.streams, a.startTime, S.tl.cur);
+    mk.setOpacity(pos ? 1 : 0);
+    if (pos) mk.setLatLng(pos);
+
+    // Status dot
+    const dot = document.querySelector(`[data-aid="${a.id}"] .astatus`);
+    if (dot) dot.style.background = pos ? a.color : 'transparent';
+  }
+
+  // Move "me" marker
+  if (S.me && S.meMarker) {
+    const pos = posAt(S.me, S.me.startTime, S.tl.cur);
+    S.meMarker.setOpacity(pos ? 1 : 0);
+    if (pos) S.meMarker.setLatLng(pos);
+  }
+
+  // Update metrics
+  updateMetrics();
+}
+
+function updateMetrics() {
+  if (!S.me) return;
+  const rel = S.tl.cur - S.me.startTime;
+
+  CHART_META.forEach(m => {
+    const frac = S.me.duration ? rel / S.me.duration : 0;
+    if (rel < 0 || rel > S.me.duration) {
+      $(m.valId).textContent = '—';
+      drawChart(S.charts[m.key], frac);
+      return;
+    }
+    const raw = valAt(S.me[m.src], S.me.time, rel);
+    let display = '—';
+    if (raw != null) {
+      display = m.key==='spd' ? `${raw.toFixed(1)} ${m.label}` : `${Math.round(raw)} ${m.label}`;
+    }
+    $(m.valId).textContent = display;
+    drawChart(S.charts[m.key], frac);
+  });
+}
+
+// ────────────────────────────────────────────────────────────────
+// PLAYBACK
+// ────────────────────────────────────────────────────────────────
+
+let raf = null;
+
+function togglePlay() {
+  S.tl.playing = !S.tl.playing;
+  $('play-btn').innerHTML = S.tl.playing ? '⏸' : '▶';
+  if (S.tl.playing) {
+    S.tl.lastTick = performance.now();
+    raf = requestAnimationFrame(tick);
+  } else if (raf) {
+    cancelAnimationFrame(raf);
+  }
+}
+
+function tick(now) {
+  if (!S.tl.playing) return;
+  const dt = (now - S.tl.lastTick) / 1000;
+  S.tl.lastTick = now;
+  const next = S.tl.cur + dt * S.tl.speed;
+  if (next >= S.tl.end) {
+    seekTo(S.tl.end);
+    S.tl.playing = false;
+    $('play-btn').innerHTML = '▶';
+    return;
+  }
+  seekTo(next);
+  raf = requestAnimationFrame(tick);
+}
+
+function setSpeed(v) { S.tl.speed = parseFloat(v); }
+
+function scrub(e) {
+  if (S.tl.playing) togglePlay();
+  const fr = e.target.value / 100;
+  seekTo(S.tl.start + fr * (S.tl.end - S.tl.start));
+}
+
+// ────────────────────────────────────────────────────────────────
+// CHARTS
+// ────────────────────────────────────────────────────────────────
+
+function initCharts() {
+  for (const m of CHART_META) {
+    const canvas = $(m.canvasId);
+    S.charts[m.key] = { canvas, ctx:canvas.getContext('2d'), data:null, color:m.color };
+  }
+  resizeCharts();
+}
+
+function resizeCharts() {
+  for (const m of CHART_META) {
+    const ch = S.charts[m.key];
+    if (!ch) continue;
+    const wrap = ch.canvas.parentElement;
+    ch.canvas.width  = wrap.clientWidth  || 200;
+    ch.canvas.height = wrap.clientHeight || 100;
+  }
+}
+
+function loadMeCharts() {
+  if (!S.me) return;
+  resizeCharts();
+  for (const m of CHART_META) {
+    const ch = S.charts[m.key];
+    ch.data = downsample(S.me[m.src], 600);
+    drawChart(ch, 0);
+  }
+}
+
+function downsample(arr, n) {
+  if (!arr || arr.length <= n) return arr || [];
+  const step = arr.length / n;
+  const out = [];
+  for (let i=0;i<n;i++) out.push(arr[Math.floor(i*step)]);
+  return out;
+}
+
+function drawChart(ch, frac) {
+  if (!ch) return;
+  const {canvas, ctx, data, color} = ch;
+  const w=canvas.width, h=canvas.height;
+  ctx.clearRect(0,0,w,h);
+  if (!data || !data.length) return;
+
+  const valid = data.filter(v => v!=null);
+  if (!valid.length) return;
+
+  const mn = Math.min(...valid) * 0.92;
+  const mx = Math.max(...valid) * 1.04;
+  const rng = mx - mn || 1;
+
+  const toY = v => h - ((v-mn)/rng) * h*0.82 - h*0.06;
+  const toX = i => (i/(data.length-1)) * w;
+
+  // Area fill
+  ctx.beginPath();
+  let started = false;
+  for (let i=0;i<data.length;i++) {
+    const v=data[i];
+    if (v==null){started=false;continue}
+    started ? ctx.lineTo(toX(i),toY(v)) : ctx.moveTo(toX(i),toY(v));
+    started=true;
+  }
+  ctx.lineTo(w,h); ctx.lineTo(0,h); ctx.closePath();
+  const g = ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0, color+'55'); g.addColorStop(1, color+'00');
+  ctx.fillStyle=g; ctx.fill();
+
+  // Line
+  ctx.beginPath(); started=false;
+  for (let i=0;i<data.length;i++) {
+    const v=data[i];
+    if (v==null){started=false;continue}
+    started ? ctx.lineTo(toX(i),toY(v)) : ctx.moveTo(toX(i),toY(v));
+    started=true;
+  }
+  ctx.strokeStyle=color; ctx.lineWidth=1.5; ctx.stroke();
+
+  // Cursor
+  if (frac>=0 && frac<=1) {
+    const cx=frac*w;
+    ctx.beginPath(); ctx.moveTo(cx,0); ctx.lineTo(cx,h);
+    ctx.strokeStyle='rgba(255,255,255,.55)'; ctx.lineWidth=1;
+    ctx.setLineDash([3,3]); ctx.stroke(); ctx.setLineDash([]);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────
+// ATHLETE LIST UI
+// ────────────────────────────────────────────────────────────────
+
+function renderList() {
+  $('acnt').textContent = S.athletes.length;
+  const list = $('alist');
+
+  if (!S.athletes.length) {
+    list.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--dim)">Load athletes JSON or click "Load Sample"</div>';
+  } else {
+    list.innerHTML = S.athletes.map(a => `
+      <div class="aitem ${S.hidden.has(a.id)?'off':''}" data-aid="${a.id}" onclick="toggleAth('${a.id}')">
+        <div class="adot" style="background:${a.color}"></div>
+        <div class="ainfo">
+          <div class="aname">${esc(a.name)}</div>
+          <div class="ameta">${fmtDur(a.streams.time[a.streams.time.length-1]||0)}</div>
+        </div>
+        <div class="astatus" style="background:${a.color}"></div>
+      </div>`).join('');
+  }
+
+  if (S.me) {
+    list.innerHTML += `
+      <div style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
+        <div class="aitem" style="cursor:default">
+          <div class="adot" style="background:#fff;border:2px solid #fc5200;box-sizing:border-box"></div>
+          <div class="ainfo">
+            <div class="aname">You <span class="mybadge">FIT</span></div>
+            <div class="ameta">${fmtDur(S.me.duration)}</div>
+          </div>
+        </div>
+      </div>`;
+  }
+}
+
+function toggleAth(id) {
+  S.hidden.has(id) ? S.hidden.delete(id) : S.hidden.add(id);
+  const mk=S.markers[id], tr=S.tracks[id];
+  if (S.hidden.has(id)) {
+    if(mk) mk.setOpacity(0);
+    if(tr) tr.setStyle({opacity:0});
+  } else {
+    if(tr) tr.setStyle({opacity:.3});
+    seekTo(S.tl.cur);
+  }
+  renderList();
+}
+
+function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ────────────────────────────────────────────────────────────────
+// FILE LOADING
+// ────────────────────────────────────────────────────────────────
+
+async function loadAthletes(e) {
+  const file = e.target.files[0]; if(!file) return;
+  e.target.value='';
+  try {
+    const raw = JSON.parse(await file.text());
+    const arr = Array.isArray(raw) ? raw : (raw.athletes||raw.activities||raw.data||[]);
+    if (!arr.length) throw new Error('No athlete entries found');
+
+    S.athletes = arr.map((a,i) => normalise(a,i)).filter(a => a.streams.latlng.some(Boolean));
+
+    recomputeRange();
+    redrawAthletes();
+    renderList();
+    seekTo(S.tl.start);
+    toast(`Loaded ${S.athletes.length} athletes`, 'success');
+  } catch(err) {
+    toast('JSON error: '+err.message, 'error');
+    console.error(err);
+  }
+}
+
+function normalise(raw, i) {
+  const color = raw.color || COLORS[i % COLORS.length];
+  const id    = String(raw.id || raw.activity_id || raw.activityId || i);
+
+  let streams = raw.streams || {};
+  // Strava API format: { latlng: { data: [...] }, time: { data: [...] } }
+  if (streams.latlng?.data) {
+    streams = {
+      latlng:   streams.latlng.data   || [],
+      time:     (streams.time||{}).data     || [],
+      altitude: (streams.altitude||{}).data || [],
+      distance: (streams.distance||{}).data || []
+    };
+  }
+
+  let startTime = raw.startTime ?? raw.start_time ?? raw.starttime ?? null;
+  if (typeof startTime === 'string') startTime = Date.parse(startTime)/1000;
+  if (!startTime) startTime = Date.now()/1000;
+
+  const name = raw.name ||
+    (raw.athlete ? `${raw.athlete.firstname||''} ${raw.athlete.lastname||''}`.trim() : null) ||
+    (raw.athlete_name) ||
+    `Athlete ${i+1}`;
+
+  return { id, name, startTime, color, streams:{ latlng: streams.latlng||[], time: streams.time||[] } };
+}
+
+async function loadFit(e) {
+  const file = e.target.files[0]; if(!file) return;
+  e.target.value='';
+  try {
+    const data = new FitParser().parse(await file.arrayBuffer());
+    if (!data.time.length) throw new Error('No GPS records found');
+
+    S.me = data;
+    redrawMe();
+    loadMeCharts();
+    recomputeRange();
+    renderList();
+    seekTo(S.tl.cur);
+    $('fit-rm').style.display='';
+
+    const metrics = [
+      data.heartrate.some(v=>v!=null)&&'HR',
+      data.power.some(v=>v!=null)&&'Power',
+      data.speed.some(v=>v!=null)&&'Speed',
+      data.cadence.some(v=>v!=null)&&'Cadence'
+    ].filter(Boolean).join(', ');
+    toast(`FIT loaded · ${data.time.length} pts · ${metrics}`, 'success');
+  } catch(err) {
+    toast('FIT error: '+err.message, 'error');
+    console.error(err);
+  }
+}
+
+function clearFit() {
+  S.me=null;
+  if(S.meMarker){S.meMarker.remove();S.meMarker=null}
+  if(S.meTrack) {S.meTrack.remove(); S.meTrack=null}
+  for (const m of CHART_META) {
+    const ch=S.charts[m.key];
+    if(ch){ch.ctx.clearRect(0,0,ch.canvas.width,ch.canvas.height);ch.data=null;}
+    $(m.valId).textContent='—';
+  }
+  $('fit-rm').style.display='none';
+  recomputeRange(); renderList();
+  toast('FIT data removed','warn');
+}
+
+// ────────────────────────────────────────────────────────────────
+// SAMPLE DATA
+// ────────────────────────────────────────────────────────────────
+
+function loadSample() {
+  // Small route around central London, 3 athletes, different start points
+  const BASE_TIME = Math.floor(Date.now()/1000) - 7200;
+
+  function makeRoute(latOff, lngOff, secs) {
+    const latlng=[], time=[];
+    let lat=51.505+latOff, lng=-0.09+lngOff;
+    for (let i=0;i<120;i++) {
+      lat += (Math.random()-.48)*0.0006;
+      lng += (Math.random()-.45)*0.0008;
+      latlng.push([lat,lng]);
+      time.push(i*secs);
+    }
+    return {latlng, time};
+  }
+
+  S.athletes = [
+    { id:'s1', name:'Alice',   startTime:BASE_TIME,      color:'#4fc3f7', streams:makeRoute(0,     0,    3) },
+    { id:'s2', name:'Bob',     startTime:BASE_TIME+120,  color:'#81c784', streams:makeRoute(0.002,-0.003,4) },
+    { id:'s3', name:'Charlie', startTime:BASE_TIME+300,  color:'#ffb74d', streams:makeRoute(-0.001,0.002,3.5) }
+  ];
+
+  recomputeRange();
+  redrawAthletes();
+  renderList();
+  seekTo(S.tl.start);
+  toast('Sample data loaded — try Play ▶', 'success');
+}
+
+// ────────────────────────────────────────────────────────────────
+// CAPTURE GUIDE
+// ────────────────────────────────────────────────────────────────
+
+const CAP_SCRIPT = `// Strava Flyby Data Capture Script
+// 1. Open labs.strava.com/flyby/viewer/#YOUR_ACTIVITY_ID
+// 2. Open DevTools (F12) → Console tab
+// 3. Paste this ENTIRE script and press Enter
+// 4. Reload the flyby page (activities will be re-fetched)
+// 5. When athletes appear on the map, run:  exportFlybyData()
+
+(function() {
+  const _fetch = window.fetch;
+  const captured = { meta:[], streams:[] };
+
+  window.fetch = async function(...args) {
+    const res = await _fetch.apply(this, args);
+    const url  = typeof args[0]==='string' ? args[0] : (args[0]?.url||'');
+    if (/streams|flyby|activities/i.test(url)) {
+      res.clone().json().then(d => {
+        if (Array.isArray(d)) captured.meta.push(...d);
+        else if (d?.streams || d?.latlng) captured.streams.push({url, data:d});
+        else captured.meta.push({url, data:d});
+        console.log('[Capture] +1 response from', url.split('?')[0]);
+      }).catch(()=>{});
+    }
+    return res;
+  };
+
+  window.exportFlybyData = function() {
+    const out = JSON.stringify({ raw_meta:captured.meta, raw_streams:captured.streams }, null, 2);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([out],{type:'application/json'}));
+    a.download = 'flyby-athletes.json';
+    a.click();
+    console.log('[Capture] Exported', captured.meta.length, 'meta +', captured.streams.length, 'stream responses');
+  };
+
+  console.log('%c[Flyby Capture] Active ✓', 'color:lime');
+  console.log('Now RELOAD the flyby page. When athletes load, run: exportFlybyData()');
+})();`;
+
+function openGuide() {
+  $('cap-script').textContent = CAP_SCRIPT;
+  $('guide-modal').classList.remove('hide');
+}
+function closeModal(id) { $(id).classList.add('hide'); }
+function copyScript() {
+  navigator.clipboard.writeText(CAP_SCRIPT)
+    .then(()=>toast('Script copied','success'))
+    .catch(()=>toast('Copy failed — select and copy manually','error'));
+}
+
+// ────────────────────────────────────────────────────────────────
+// TOAST
+// ────────────────────────────────────────────────────────────────
+
+let toastTmr=null;
+function toast(msg, type='info') {
+  const el=$('toast');
+  el.textContent=msg; el.className=`show ${type}`;
+  clearTimeout(toastTmr);
+  toastTmr=setTimeout(()=>el.className='', 3800);
+}
+
+// ────────────────────────────────────────────────────────────────
+// INIT
+// ────────────────────────────────────────────────────────────────
+
+function init() {
+  initMap();
+  initCharts();
+
+  window.addEventListener('resize', () => {
+    resizeCharts();
+    if (S.me) loadMeCharts();
+  });
+
+  document.querySelectorAll('.overlay').forEach(o => {
+    o.addEventListener('click', e => { if(e.target===o) o.classList.add('hide'); });
+  });
+}
+
+init();
+</script>
+</body>
+</html>
