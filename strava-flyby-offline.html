@@ -177,27 +177,40 @@
 <!-- CAPTURE GUIDE MODAL -->
 <div class="overlay hide" id="guide-modal">
   <div class="modal">
-    <h2>📡 How to Capture Strava Flyby Data</h2>
-    <p>This tool needs athlete GPS data exported from the Strava Flyby viewer. Two methods:</p>
+    <h2>📡 How to Export Athlete Data from Strava Flyby</h2>
 
-    <h3>Method A — Console Intercept (Recommended)</h3>
-    <p>1. Open <strong>labs.strava.com/flyby/viewer/#YOUR_ACTIVITY_ID</strong></p>
-    <p>2. Press <strong>F12</strong> → Console tab. Paste and run the script below <em>before</em> the page loads athletes:</p>
+    <h3>Method A — FlybyDirector exportData() ✓ Recommended</h3>
+    <p>The <strong>FlybyDirector</strong> script (strava-flyby-director.js) has direct access to
+    <code style="background:var(--bg);padding:1px 5px;border-radius:3px;font-family:monospace">window.flyby</code>
+    and can export all athlete GPS streams in one command.</p>
+    <p>1. Open your Flyby URL and wait for athletes to appear on the map.</p>
+    <p>2. Paste the <strong>strava-flyby-director.js</strong> script into the DevTools console and press Enter.
+    The director starts automatically.</p>
+    <p>3. Run this command in the console:</p>
+    <pre>FlybyDirector.exportData()
+
+// Optional: coarser sampling (default is 5 s between points)
+FlybyDirector.exportData(10)
+
+// Director doesn't need to be running first -- works any time:
+FlybyDirector.stop()
+FlybyDirector.exportData(5)</pre>
+    <p>4. A file named <code style="background:var(--bg);padding:1px 5px;border-radius:3px;font-family:monospace">flyby-export-*.json</code> will download automatically.</p>
+    <p>5. Click <strong>"Load Athletes JSON"</strong> above to load it into this viewer.</p>
+    <p style="color:var(--yellow)">If the export logs "0 athletes" — wait for the flyby page to finish loading all athletes, then try again.</p>
+
+    <h3>Method B — Generic XHR Intercept</h3>
+    <p>If you are not using FlybyDirector, paste this lighter intercept script into the console
+    <em>before</em> the flyby page loads its athletes, then call <code style="background:var(--bg);padding:1px 5px;border-radius:3px;font-family:monospace">exportFlybyData()</code>:</p>
     <pre id="cap-script"></pre>
-    <button class="btn" onclick="copyScript()">📋 Copy Script</button>
-    <p style="margin-top:8px">3. After athletes appear on the map, run <code style="background:var(--bg);padding:2px 5px;border-radius:3px;font-family:monospace">exportFlybyData()</code> in the console — a JSON file will download.</p>
-    <p>4. Click <strong>"Load Athletes JSON"</strong> to load that file here.</p>
-
-    <h3>Method B — DevTools Network</h3>
-    <p>1. Open DevTools → Network tab → filter by <strong>streams</strong></p>
-    <p>2. Load the flyby page, wait for athletes</p>
-    <p>3. Right-click each "streams" response → Copy Response</p>
-    <p>4. Assemble into a JSON array (see format below)</p>
+    <button class="btn" onclick="copyScript()">📋 Copy Intercept Script</button>
 
     <h3>Manual JSON Format</h3>
+    <p>You can also build the JSON by hand or convert from another source.
+    Load it with "Load Athletes JSON".</p>
     <pre>[
   {
-    "name": "Athlete Name",
+    "name": "Alice",
     "startTime": "2024-01-15T08:00:00Z",
     "color": "#fc5200",
     "streams": {
@@ -206,7 +219,9 @@
     }
   }
 ]</pre>
-    <p><code>startTime</code> is an ISO 8601 string or Unix timestamp (seconds). <code>latlng</code> is an array of <code>[lat, lng]</code> pairs. <code>time</code> is seconds elapsed from activity start.</p>
+    <p><code>startTime</code>: ISO 8601 string or Unix seconds.
+    <code>latlng</code>: array of <code>[lat, lng]</code> pairs.
+    <code>time</code>: seconds elapsed from that athlete's activity start.</p>
 
     <div class="mfooter">
       <button class="btn pri" onclick="closeModal('guide-modal')">Close</button>
