@@ -36,11 +36,12 @@
       align-items:center;justify-content:center;flex-shrink:0}
     #play-btn:hover{background:var(--accent2)}
     .tlabel{font-size:11px;color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums;flex-shrink:0}
-    #timeline{flex:1;-webkit-appearance:none;height:4px;background:var(--border);
-      border-radius:2px;outline:none;cursor:pointer;min-width:0}
+    #tl-wrap{flex:1;position:relative;height:36px;min-width:0;display:flex;align-items:center}
+    #tl-canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;border-radius:3px}
+    #timeline{position:absolute;left:0;width:100%;-webkit-appearance:none;
+      height:4px;background:transparent;outline:none;cursor:pointer;z-index:2}
     #timeline::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
-      border-radius:50%;background:var(--accent);cursor:pointer}
-    #kf-bar{flex:1;position:relative;height:4px}
+      border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 4px rgba(0,0,0,.5)}
     #spd{background:var(--surface2);border:1px solid var(--border);color:var(--text);
       padding:3px 5px;border-radius:4px;font-size:12px;cursor:pointer;flex-shrink:0}
 
@@ -49,9 +50,19 @@
 
     /* sidebar */
     #sidebar{width:200px;background:var(--surface);border-right:1px solid var(--border);
-      display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto}
+      display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto;
+      transition:width .2s}
+    #sidebar.collapsed{width:0;overflow:hidden}
     .ph{padding:7px 12px 4px;font-size:10px;font-weight:600;color:var(--dim);
-      text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);flex-shrink:0}
+      text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);
+      flex-shrink:0;display:flex;align-items:center;justify-content:space-between}
+    .ph-sort{background:none;border:1px solid var(--border);color:var(--dim);
+      border-radius:3px;font-size:9px;padding:1px 5px;cursor:pointer;white-space:nowrap}
+    .ph-sort.active{border-color:var(--accent);color:var(--accent)}
+    .apos{font-size:9px;color:var(--dim);font-weight:700;width:14px;text-align:right;flex-shrink:0}
+    .apos.lead{color:var(--yellow)}
+    .aprog{width:34px;height:3px;background:var(--border);border-radius:2px;margin-top:2px}
+    .aprog-fill{height:100%;border-radius:2px;transition:width .3s}
     #alist{padding:3px 0;flex:1;overflow-y:auto}
     .aitem{display:flex;align-items:center;gap:7px;padding:5px 12px;cursor:pointer;
       transition:background .1s;user-select:none}
@@ -94,6 +105,7 @@
     .gauge-cell{flex:1;display:flex;flex-direction:column;align-items:center;
       justify-content:center;border-right:1px solid var(--border);padding:4px 0;min-width:0}
     .gauge-cell:last-child{border-right:none}
+    #alt-cell{flex:2;align-items:stretch;padding:6px 10px 4px}
     .gauge-label{font-size:10px;font-weight:600;color:var(--dim);text-transform:uppercase;
       letter-spacing:.5px;margin-bottom:2px}
     .gauge-canvas-wrap{flex:1;width:100%;position:relative;min-height:0}
@@ -147,7 +159,10 @@
 <div id="tlbar">
   <button id="play-btn" onclick="togglePlay()">▶</button>
   <span class="tlabel" id="t-cur">0:00:00</span>
-  <input type="range" id="timeline" min="0" max="100" value="0" oninput="scrub(event)">
+  <div id="tl-wrap">
+    <canvas id="tl-canvas"></canvas>
+    <input type="range" id="timeline" min="0" max="100" value="0" oninput="scrub(event)">
+  </div>
   <span class="tlabel" id="t-tot">0:00:00</span>
   <select id="spd" onchange="setSpeed(this.value)">
     <option value="1">1×</option>
@@ -162,7 +177,10 @@
 <!-- MAIN -->
 <div id="main">
   <div id="sidebar">
-    <div class="ph">Athletes (<span id="acnt">0</span>)</div>
+    <div class="ph">
+      <span>Athletes (<span id="acnt">0</span>)</span>
+      <button class="ph-sort" id="sort-btn" onclick="toggleSort()" title="Toggle position sort">⇅ pos</button>
+    </div>
     <div id="alist"><div style="padding:10px 12px;font-size:11px;color:var(--dim)">Load athletes JSON or click Sample</div></div>
   </div>
   <div id="mapwrap">
@@ -173,7 +191,7 @@
   </div>
 </div>
 
-<!-- GAUGES -->
+<!-- GAUGES + ALTITUDE -->
 <div id="metrics">
   <div class="gauge-cell">
     <div class="gauge-label">Heart Rate</div>
@@ -186,6 +204,10 @@
   <div class="gauge-cell">
     <div class="gauge-label">Cadence</div>
     <div class="gauge-canvas-wrap"><canvas id="g-cad"></canvas></div>
+  </div>
+  <div class="gauge-cell" id="alt-cell">
+    <div class="gauge-label">Elevation</div>
+    <div class="gauge-canvas-wrap"><canvas id="g-alt"></canvas></div>
   </div>
 </div>
 
@@ -226,6 +248,8 @@ const S = {
   keyframes:  [],
   hidden:     new Set(),
   followCam:  true,
+  sortMode:   'load',   // 'load' | 'position'
+  sidebarOpen: true,
   tl: { start:0, end:0, cur:0, playing:false, speed:10, lastTick:null },
   map:        null,
   markers:    {},
@@ -471,11 +495,59 @@ function recomputeRange() {
   S.tl.start=Math.min(...starts); S.tl.end=Math.max(...ends);
   if(S.tl.cur<S.tl.start)S.tl.cur=S.tl.start;
   $f('t-tot').textContent=fmtDur(S.tl.end-S.tl.start);
-  S.lastKfUnix=null; // force keyframe reapply
+  S.lastKfUnix=null;
+  drawTimeline();
+}
+
+function drawTimeline() {
+  const canvas=$f('tl-canvas');
+  if(!canvas)return;
+  const dur=S.tl.end-S.tl.start;
+  const dpr=window.devicePixelRatio||1;
+  const W=canvas.offsetWidth||canvas.parentElement?.offsetWidth||200;
+  const H=canvas.offsetHeight||36;
+  canvas.width=W*dpr; canvas.height=H*dpr;
+  const ctx=canvas.getContext('2d');
+  ctx.scale(dpr,dpr);
+
+  // Track groove
+  const grooveY=H*0.6, grooveH=4;
+  ctx.fillStyle='rgba(255,255,255,0.1)';
+  ctx.beginPath(); ctx.roundRect(0,grooveY-grooveH/2,W,grooveH,2); ctx.fill();
+
+  if(!dur){return;}
+  const toX=t=>((t-S.tl.start)/dur)*W;
+
+  // Time tick intervals: try 1h, 30m, 15m depending on duration
+  const intervals=[[3600,'rgba(255,255,255,0.35)',12,true],[1800,'rgba(255,255,255,0.2)',8,false],[900,'rgba(255,255,255,0.13)',5,false]];
+  for(const[iv,col,th,label] of intervals){
+    if(dur/iv<2)continue;
+    const t0=Math.ceil(S.tl.start/iv)*iv;
+    for(let t=t0;t<=S.tl.end;t+=iv){
+      const x=toX(t);
+      ctx.strokeStyle=col; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(x,grooveY-grooveH/2-1); ctx.lineTo(x,grooveY-grooveH/2-th); ctx.stroke();
+      if(label){
+        ctx.fillStyle='rgba(255,255,255,0.28)';
+        ctx.font=`9px -apple-system,sans-serif`; ctx.textAlign='center';
+        ctx.fillText(fmtHHMM(t),x,grooveY-grooveH/2-th-3);
+      }
+    }
+  }
+
+  // Keyframe diamond markers
+  for(const kf of S.keyframes){
+    const x=toX(kf.unix);
+    if(x<0||x>W)continue;
+    const ky=grooveY+8, ks=4;
+    ctx.fillStyle='#fc5200';
+    ctx.beginPath(); ctx.moveTo(x,ky-ks); ctx.lineTo(x+ks,ky); ctx.lineTo(x,ky+ks); ctx.lineTo(x-ks,ky); ctx.closePath(); ctx.fill();
+  }
 }
 
 function fmtDur(sec){const h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),s=Math.floor(sec%60);return`${h}:${pad(m)}:${pad(s)}`;}
-function fmtTime(unix){return new Date(unix*1000).toISOString().slice(11,19);}
+function fmtTime(unix){const d=new Date(unix*1000);return`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;}
+function fmtHHMM(unix){const d=new Date(unix*1000);return`${pad(d.getHours())}:${pad(d.getMinutes())}`;}
 function pad(n){return String(n).padStart(2,'0');}
 
 function seekTo(t) {
@@ -517,19 +589,20 @@ function seekTo(t) {
   }
 
   updateGauges();
+  if(S.sortMode==='position')renderList();
 }
 
 function updateGauges() {
-  if(!S.me)return;
-  const rel=S.tl.cur-S.me.startTime;
-  if(rel<0||rel>S.me.duration){
+  const rel=S.me?S.tl.cur-S.me.startTime:null;
+  if(!S.me||rel===null||rel<0||rel>S.me.duration){
     GAUGE_META.forEach(m=>drawGauge(S.gauges[m.key],null,m.max,m.color,m.label));
-    return;
+  } else {
+    GAUGE_META.forEach(m=>{
+      const v=valAt(S.me[m.src],S.me.time,rel);
+      drawGauge(S.gauges[m.key],v,m.max,m.color,m.label);
+    });
   }
-  GAUGE_META.forEach(m=>{
-    const v=valAt(S.me[m.src],S.me.time,rel);
-    drawGauge(S.gauges[m.key],v,m.max,m.color,m.label);
-  });
+  drawAltChart();
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -642,11 +715,108 @@ function resizeGauges(){
     const v=S.me?valAt(S.me[m.src],S.me.time,S.tl.cur-S.me.startTime):null;
     drawGauge(canvas,v,m.max,m.color,m.label);
   });
+  drawAltChart();
+  drawTimeline();
+}
+
+function drawAltChart() {
+  const canvas=$f('g-alt');
+  if(!canvas)return;
+  // Prefer FIT altitude, fall back to my athlete's GPS altitude
+  let altArr=null, timeArr=null, startTime=null, duration=null;
+  if(S.me&&S.me.altitude&&S.me.altitude.some(v=>v!=null)){
+    altArr=S.me.altitude; timeArr=S.me.time; startTime=S.me.startTime; duration=S.me.duration;
+  } else {
+    const me=S.athletes.find(a=>a.id===MY_ACTIVITY_ID||a.athleteId===MY_ACTIVITY_ID);
+    if(me&&me.streams.altitude&&me.streams.altitude.some(v=>v!=null)){
+      altArr=me.streams.altitude; timeArr=me.streams.time; startTime=me.startTime;
+      duration=me.streams.time[me.streams.time.length-1]||0;
+    }
+  }
+
+  const wrap=canvas.parentElement;
+  const dpr=window.devicePixelRatio||1;
+  const W=wrap.clientWidth||200, H=wrap.clientHeight||100;
+  canvas.width=W*dpr; canvas.height=H*dpr;
+  const ctx=canvas.getContext('2d');
+  ctx.scale(dpr,dpr);
+
+  if(!altArr||!timeArr||!duration){
+    ctx.fillStyle='rgba(255,255,255,0.1)';
+    ctx.font=`11px sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('No elevation data',W/2,H/2);
+    return;
+  }
+
+  // Filter valid points
+  const pts=[];
+  for(let i=0;i<timeArr.length;i++){if(altArr[i]!=null)pts.push({t:timeArr[i],a:altArr[i]});}
+  if(pts.length<2){ctx.fillStyle='rgba(255,255,255,0.1)';ctx.font='11px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('No elevation data',W/2,H/2);return;}
+
+  const minA=Math.min(...pts.map(p=>p.a));
+  const maxA=Math.max(...pts.map(p=>p.a));
+  const rangeA=Math.max(1,maxA-minA);
+  const pad=8;
+  const toX=t=>(t/duration)*(W-pad*2)+pad;
+  const toY=a=>H-pad-(a-minA)/rangeA*(H-pad*2.5);
+
+  // Filled area
+  const grad=ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'rgba(52,152,219,0.55)');
+  grad.addColorStop(1,'rgba(52,152,219,0.05)');
+  ctx.beginPath(); ctx.moveTo(toX(pts[0].t),H);
+  pts.forEach(p=>ctx.lineTo(toX(p.t),toY(p.a)));
+  ctx.lineTo(toX(pts[pts.length-1].t),H); ctx.closePath();
+  ctx.fillStyle=grad; ctx.fill();
+
+  // Line
+  ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(toX(p.t),toY(p.a)):ctx.moveTo(toX(p.t),toY(p.a)));
+  ctx.strokeStyle='rgba(52,152,219,0.85)'; ctx.lineWidth=1.5; ctx.lineJoin='round'; ctx.stroke();
+
+  // Playhead
+  if(startTime&&S.tl.cur>=startTime&&S.tl.cur<=startTime+duration){
+    const rel=S.tl.cur-startTime;
+    const px=toX(rel);
+    // Current altitude value
+    const curAlt=valAt(altArr,timeArr,rel);
+    ctx.strokeStyle='rgba(255,255,255,0.7)'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(px,0); ctx.lineTo(px,H); ctx.stroke(); ctx.setLineDash([]);
+    if(curAlt!=null){
+      const py=toY(curAlt);
+      ctx.fillStyle='#3498db'; ctx.beginPath(); ctx.arc(px,py,3,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.font=`bold 9px sans-serif`; ctx.textAlign='left'; ctx.textBaseline='bottom';
+      ctx.fillText(Math.round(curAlt)+'m',px+4,py-1);
+    }
+  }
+
+  // Min/Max labels
+  ctx.fillStyle='rgba(255,255,255,0.3)'; ctx.font=`9px sans-serif`; ctx.textAlign='right'; ctx.textBaseline='top';
+  ctx.fillText(Math.round(maxA)+'m',W-2,pad);
+  ctx.textBaseline='bottom';
+  ctx.fillText(Math.round(minA)+'m',W-2,H-2);
 }
 
 // ────────────────────────────────────────────────────────────────
 // ATHLETE LIST UI
 // ────────────────────────────────────────────────────────────────
+
+function positionFrac(a) {
+  if(S.tl.cur < a.startTime) return -1;
+  if(S.tl.cur > a.endTime) return 2 + (a.endTime - a.startTime); // finished; lower = faster
+  return (S.tl.cur - a.startTime) / Math.max(1, a.endTime - a.startTime);
+}
+
+function toggleSort() {
+  S.sortMode = S.sortMode==='position' ? 'load' : 'position';
+  $f('sort-btn').classList.toggle('active', S.sortMode==='position');
+  renderList();
+}
+
+function toggleSidebar() {
+  S.sidebarOpen = !S.sidebarOpen;
+  $f('sidebar').classList.toggle('collapsed', !S.sidebarOpen);
+  setTimeout(()=>S.map&&S.map.invalidateSize(),220);
+}
 
 function renderList(){
   $f('acnt').textContent=S.athletes.length;
@@ -655,14 +825,43 @@ function renderList(){
   if(!S.athletes.length){
     list.innerHTML='<div style="padding:10px 12px;font-size:11px;color:var(--dim)">Load athletes JSON or click Sample</div>';
   } else {
-    list.innerHTML=S.athletes.map(a=>{
+    let athletes=[...S.athletes];
+    if(S.sortMode==='position'){
+      athletes.sort((a,b)=>{
+        const fa=positionFrac(a), fb=positionFrac(b);
+        // Both finished: faster finish (lower endTime) first
+        if(fa>=2&&fb>=2) return a.endTime-b.endTime;
+        if(fa>=2) return -1; if(fb>=2) return 1;
+        // Both not started: keep load order
+        if(fa<0&&fb<0) return 0;
+        if(fa<0) return 1; if(fb<0) return -1;
+        // Both active: further ahead first
+        return fb-fa;
+      });
+    }
+    list.innerHTML=athletes.map((a,rank)=>{
       const dur=fmtDur(a.streams.time[a.streams.time.length-1]||0);
       const isMe=a.id===MY_ACTIVITY_ID;
+      const frac=positionFrac(a);
+      const active=frac>=0&&frac<2;
+      const finished=frac>=2;
+      let statusMeta='';
+      if(S.sortMode==='position'){
+        if(finished) statusMeta=`<span style="color:var(--green)">✓ ${fmtDur(a.endTime-a.startTime)}</span>`;
+        else if(active) statusMeta=`<span style="color:var(--dim)">${Math.round(Math.min(frac,1)*100)}%</span>`;
+        else statusMeta=`<span style="color:var(--dim)">waiting</span>`;
+      }
+      const rankBadge=S.sortMode==='position'?`<span class="apos${rank===0?' lead':''}">${rank+1}</span>`:'';
+      const progBar=S.sortMode==='position'&&active
+        ?`<div class="aprog"><div class="aprog-fill" style="width:${Math.round(Math.min(frac,1)*100)}%;background:${a.color}"></div></div>`:''
+      ;
       return`<div class="aitem${S.hidden.has(a.id)?' off':''}" data-aid="${a.id}" onclick="toggleAth('${a.id}')">
+        ${rankBadge}
         <div class="adot" style="background:${a.color}${isMe?';border:2px solid #fff':''}"></div>
         <div class="ainfo">
           <div class="aname">${esc(a.name)}${isMe?'<span class="mybadge" style="margin-left:4px">ME</span>':''}</div>
-          <div class="ameta">${dur}${a.athleteId?' · id:'+a.athleteId:''}</div>
+          <div class="ameta">${statusMeta||dur}</div>
+          ${progBar}
         </div>
         <div class="astatus" style="background:${a.color}"></div>
       </div>`;
@@ -812,6 +1011,7 @@ async function loadTimeline(e) {
     if(!S.tl.start)console.warn('[Timeline] No athletes loaded yet — times will be computed against today\'s date');
     buildKeyframes(kfRaw);
     S.lastKfUnix=null;
+    drawTimeline();
     toast(`Timeline: ${S.keyframes.length} keyframes`,'success');
   }catch(err){
     console.error(`[Timeline] ${err.message}`);
@@ -939,6 +1139,25 @@ function toast(msg,type='info'){
 }
 
 // ────────────────────────────────────────────────────────────────
+// KEYBOARD SHORTCUTS
+// ────────────────────────────────────────────────────────────────
+
+document.addEventListener('keydown', e => {
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT'||e.target.tagName==='TEXTAREA')return;
+  const step=e.shiftKey?60:10;
+  switch(e.key){
+    case ' ':       e.preventDefault(); togglePlay(); break;
+    case 'ArrowRight': e.preventDefault(); if(S.tl.playing)togglePlay(); S.lastKfUnix=null; seekTo(S.tl.cur+step); break;
+    case 'ArrowLeft':  e.preventDefault(); if(S.tl.playing)togglePlay(); S.lastKfUnix=null; seekTo(S.tl.cur-step); break;
+    case '+': case '=': if(S.map)S.map.setZoom(S.map.getZoom()+1); break;
+    case '-': case '_': if(S.map)S.map.setZoom(S.map.getZoom()-1); break;
+    case 'h': case 'H': toggleSidebar(); break;
+    case 'f': case 'F': toggleFollow(); break;
+    case 'p': case 'P': toggleSort(); break;
+  }
+});
+
+// ────────────────────────────────────────────────────────────────
 // INIT
 // ────────────────────────────────────────────────────────────────
 
@@ -957,14 +1176,14 @@ function init(){
     recomputeRange();
     redrawAthletes();
     if(S.me)redrawMe();
-    if(S.keyframes.length)S.lastKfUnix=null;
+    if(S.keyframes.length){S.lastKfUnix=null;drawTimeline();}
     renderList();
     seekTo(S.tl.start);
     $f('nodatamsg').style.display='none';
     $f('mapbadge').style.display='block';
   }
 
-  window.addEventListener('resize',()=>{ resizeGauges(); });
+  window.addEventListener('resize',()=>{ resizeGauges(); drawTimeline(); });
 }
 
 init();
