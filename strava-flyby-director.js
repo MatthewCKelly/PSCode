@@ -1,6 +1,6 @@
 /**
  * ============================================================
- *  STRAVA FLYBY DIRECTOR  v2.9.0
+ *  STRAVA FLYBY DIRECTOR  v2.9.1
  *  2026-05-07T00:00:00+12:00
  * ============================================================
  *
@@ -596,177 +596,95 @@ const TIMELINE = [
   } // end of tick()
 
   // ----------------------------------------------------------
-  //  DATA EXPORT
+  //  DATA EXPORT  (v2.9.1)
   //
-  //  Samples all athlete position streams via timeToPos() and
-  //  downloads a JSON blob compatible with the Offline Flyby
-  //  Viewer (strava-flyby-offline.html).
+  //  Reads GPS data from model.data.attributes.data — a Backbone
+  //  model whose attributes.data is an Array of:
+  //    { point: { lat, lng }, time: unixSeconds, ... }
   //
-  //  Also attempts to read raw stream arrays directly from the
-  //  model data object for higher fidelity / faster export.
-  //
-  //  intervalSec (default 5): seconds between GPS samples when
-  //  falling back to timeToPos sampling. Lower = more points,
-  //  larger file. 5s gives ~2900 pts for a 4-hour activity.
+  //  Downloads a JSON blob compatible with strava-flyby-offline.html.
   // ----------------------------------------------------------
 
-  function exportData(intervalSec) {
-    intervalSec = (typeof intervalSec === 'number' && intervalSec > 0) ? intervalSec : 5;
-
+  function exportData() {
     var fb = window.flyby;
     if (!fb || !fb.results || !fb.results.activities) {
-      console.error(PREFIX + ' exportData: window.flyby not ready -- is the flyby page fully loaded?');
+      console.error(PREFIX + ' exportData: window.flyby not ready -- wait for athletes to load');
       return;
     }
 
     var allModels = fb.results.activities.models || [];
-    var ps        = fb.playbackState;
-
     if (!allModels.length) {
       console.error(PREFIX + ' exportData: no activity models found');
       return;
     }
-    if (!ps || !ps.startTime) {
-      console.error(PREFIX + ' exportData: playback state unavailable');
-      return;
-    }
 
-    var globalStart = ps.startTime;
-    // endTime may not be set; fall back to 7 hours after start
-    var globalEnd = ps.endTime || (globalStart + 7 * 3600);
-    var rangeMin  = Math.round((globalEnd - globalStart) / 60);
+    console.log(PREFIX + ' exportData: reading ' + allModels.length + ' athletes...');
 
-    console.log(PREFIX + ' exportData: ' + allModels.length + ' athletes, ' +
-      rangeMin + ' min window, sample interval ' + intervalSec + 's');
-    console.log(PREFIX + ' Window: ' +
-      new Date(globalStart * 1000).toISOString() + ' → ' +
-      new Date(globalEnd   * 1000).toISOString());
-
-    var athletes  = [];
-    var MAX_NULL_RUN = Math.ceil(60 / intervalSec); // 60 s gap → activity ended
-
-    // Candidate property name pairs for raw stream extraction
-    var RAW_CANDIDATES = [
-      ['times',      'latLngs'  ],
-      ['times',      'latlng'   ],
-      ['time',       'latLngs'  ],
-      ['time',       'latlng'   ],
-      ['timestamps', 'positions'],
-      ['timestamps', 'latLngs'  ],
-    ];
+    var athletes = [];
 
     allModels.forEach(function (model, idx) {
       var attr  = model.attributes || {};
-      var data  = model.data       || {};
-
       var name  = attr.shortFirstName ||
-                  (attr.athlete && (attr.athlete.firstName || attr.athlete.name)) ||
-                  attr.name ||
-                  ('Athlete ' + (idx + 1));
+                  (attr.athlete && attr.athlete.firstName) ||
+                  attr.name || ('Athlete ' + (idx + 1));
       var color = attr.streamColor || COLORS[idx % COLORS.length];
-      var actId = String(model.id || attr.activityId || idx);
+      var actId = String(model.id || attr.id || idx);
 
-      console.log(PREFIX + ' [' + idx + '] ' + name + ' (' + actId + ') ...');
+      // model.data is a Backbone model.
+      // GPS array lives at model.data.attributes.data
+      // Each element: { point: { lat, lng }, time: unixSeconds }
+      var dataModel = model.data;
+      var points    = null;
 
-      // ---- Attempt 1: read raw arrays directly ----
-      var extracted = null;
-
-      for (var ci = 0; ci < RAW_CANDIDATES.length; ci++) {
-        var tk = RAW_CANDIDATES[ci][0];
-        var pk = RAW_CANDIDATES[ci][1];
-        var ta = data[tk];
-        var pa = data[pk];
-
-        if (Array.isArray(ta) && ta.length > 5 &&
-            Array.isArray(pa) && pa.length > 5 &&
-            ta.length === pa.length) {
-
-          var startT = ta[0];
-          extracted = {
-            startTime : startT,
-            latlng    : pa.map(function (p) {
-              if (Array.isArray(p)) return [p[0], p[1]];
-              return [p.lat != null ? p.lat : p[0], p.lng != null ? p.lng : p[1]];
-            }),
-            time      : ta.map(function (t) { return Math.round(t - startT); }),
-          };
-          console.log(PREFIX + '   raw stream (' + tk + '/' + pk + ') ' + ta.length + ' pts');
-          break;
+      if (dataModel) {
+        // Prefer Backbone .get() if available
+        if (typeof dataModel.get === 'function') {
+          points = dataModel.get('data');
+        }
+        // Direct attribute fallback
+        if (!Array.isArray(points) && dataModel.attributes) {
+          points = dataModel.attributes.data;
         }
       }
 
-      // ---- Attempt 2: sample via timeToPos ----
-      if (!extracted && typeof data.timeToPos === 'function') {
-        var sampLatlng = [];
-        var sampTime   = [];
-        var actStart   = null;
-        var nullRun    = 0;
-
-        for (var t = globalStart; t <= globalEnd; t += intervalSec) {
-          var pos;
-          try { pos = data.timeToPos(t); } catch (e) { pos = null; }
-
-          var valid = pos && Array.isArray(pos) && pos.length === 2 &&
-                      !isNaN(pos[0]) && !isNaN(pos[1]) &&
-                      !(pos[0] === 0 && pos[1] === 0);
-
-          if (valid) {
-            if (!actStart) actStart = t;
-            sampLatlng.push([pos[0], pos[1]]);
-            sampTime.push(Math.round(t - actStart));
-            nullRun = 0;
-          } else if (actStart) {
-            nullRun++;
-            if (nullRun > MAX_NULL_RUN) break;
-          }
-        }
-
-        if (sampLatlng.length > 5) {
-          extracted = { startTime: actStart, latlng: sampLatlng, time: sampTime };
-          console.log(PREFIX + '   sampled @' + intervalSec + 's: ' + sampLatlng.length + ' pts');
-        } else {
-          console.warn(PREFIX + '   no valid positions found for ' + name);
-        }
+      if (!Array.isArray(points) || points.length < 2) {
+        console.warn(PREFIX + ' [' + idx + '] ' + name + ': data array not found or empty');
+        return;
       }
 
-      // ---- Attempt 3: check nested data.stream / data.streams ----
-      if (!extracted) {
-        var nested = data.stream || data.streams || data.streamData;
-        if (nested) {
-          var nt = nested.time || nested.times;
-          var nl = nested.latlng || nested.latLngs || nested.positions;
-          if (Array.isArray(nt) && nt.length > 5 &&
-              Array.isArray(nl) && nl.length > 5) {
-            var st2 = nt[0];
-            extracted = {
-              startTime : st2,
-              latlng    : nl.map(function (p) {
-                return Array.isArray(p) ? [p[0], p[1]] : [p.lat, p.lng];
-              }),
-              time      : nt.map(function (t) { return Math.round(t - st2); }),
-            };
-            console.log(PREFIX + '   nested stream: ' + nt.length + ' pts');
-          }
+      var startTime = points[0].time;
+      var latlng    = [];
+      var time      = [];
+
+      points.forEach(function (p) {
+        if (p && p.point && p.point.lat != null && p.point.lng != null && p.time != null) {
+          latlng.push([p.point.lat, p.point.lng]);
+          time.push(Math.round(p.time - startTime));
         }
+      });
+
+      if (latlng.length < 2) {
+        console.warn(PREFIX + ' [' + idx + '] ' + name + ': no valid GPS points');
+        return;
       }
 
-      if (extracted) {
-        athletes.push({
-          id        : actId,
-          name      : name,
-          color     : color,
-          startTime : extracted.startTime,
-          streams   : { latlng: extracted.latlng, time: extracted.time },
-        });
-      }
+      console.log(PREFIX + ' [' + idx + '] ' + name + '  ' + latlng.length + ' pts  ' +
+        new Date(startTime * 1000).toISOString());
+
+      athletes.push({
+        id        : actId,
+        name      : name,
+        color     : color,
+        startTime : startTime,
+        streams   : { latlng: latlng, time: time },
+      });
     }); // end forEach model
 
     if (!athletes.length) {
-      console.error(PREFIX + ' exportData: no athlete data extracted -- try calling after flyby fully loads');
+      console.error(PREFIX + ' exportData: no data extracted');
       return;
     }
 
-    // ---- Build and download JSON blob ----
     var totalPts = athletes.reduce(function (s, a) { return s + a.streams.time.length; }, 0);
     var json     = JSON.stringify(athletes, null, 2);
     var blob     = new Blob([json], { type: 'application/json' });
@@ -779,9 +697,9 @@ const TIMELINE = [
     document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(url); }, 8000);
 
-    console.log(PREFIX + ' ✓ Downloaded ' + athletes.length + ' athletes, ' +
-      totalPts + ' total points (' + Math.round(json.length / 1024) + ' KB)');
-    console.log(PREFIX + ' Load the downloaded file into strava-flyby-offline.html');
+    console.log(PREFIX + ' ✓ ' + athletes.length + ' athletes · ' +
+      totalPts + ' pts · ' + Math.round(json.length / 1024) + ' KB');
+    console.log(PREFIX + ' → Load flyby-export-*.json into strava-flyby-offline.html');
   } // end exportData()
 
   // Fallback color palette used if model has no streamColor
