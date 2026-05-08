@@ -36,12 +36,17 @@
       align-items:center;justify-content:center;flex-shrink:0}
     #play-btn:hover{background:var(--accent2)}
     .tlabel{font-size:11px;color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums;flex-shrink:0}
-    #tl-wrap{flex:1;position:relative;height:36px;min-width:0;display:flex;align-items:center}
+    #tl-wrap{flex:1;position:relative;height:44px;min-width:0;display:flex;align-items:center}
     #tl-canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;border-radius:3px}
     #timeline{position:absolute;left:0;width:100%;-webkit-appearance:none;
-      height:4px;background:transparent;outline:none;cursor:pointer;z-index:2}
+      height:4px;background:transparent;outline:none;cursor:pointer;z-index:2;top:60%}
     #timeline::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
       border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 4px rgba(0,0,0,.5)}
+    #kf-hit{position:absolute;bottom:0;left:0;width:100%;height:16px;z-index:4;cursor:default}
+    #kf-tip{position:absolute;bottom:calc(100% + 2px);background:rgba(0,0,0,.92);
+      border:2px solid var(--accent);border-radius:6px;padding:3px 9px;font-size:11px;
+      color:#fff;white-space:nowrap;pointer-events:none;display:none;z-index:20;
+      transform:translateX(-50%)}
     #spd{background:var(--surface2);border:1px solid var(--border);color:var(--text);
       padding:3px 5px;border-radius:4px;font-size:12px;cursor:pointer;flex-shrink:0}
 
@@ -161,7 +166,9 @@
   <span class="tlabel" id="t-cur">0:00:00</span>
   <div id="tl-wrap">
     <canvas id="tl-canvas"></canvas>
+    <div id="kf-tip"></div>
     <input type="range" id="timeline" min="0" max="100" value="0" oninput="scrub(event)">
+    <div id="kf-hit"></div>
   </div>
   <span class="tlabel" id="t-tot">0:00:00</span>
   <select id="spd" onchange="setSpeed(this.value)">
@@ -205,6 +212,10 @@
     <div class="gauge-label">Cadence</div>
     <div class="gauge-canvas-wrap"><canvas id="g-cad"></canvas></div>
   </div>
+  <div class="gauge-cell" id="temp-cell" style="display:none">
+    <div class="gauge-label">Temp</div>
+    <div class="gauge-canvas-wrap"><canvas id="g-temp"></canvas></div>
+  </div>
   <div class="gauge-cell" id="alt-cell">
     <div class="gauge-label">Elevation</div>
     <div class="gauge-canvas-wrap"><canvas id="g-alt"></canvas></div>
@@ -231,9 +242,10 @@ const COLORS = [
 ];
 
 const GAUGE_META = [
-  { key:'hr',  canvasId:'g-hr',  color:'#e74c3c', label:'bpm',  src:'heartrate', max:210 },
-  { key:'pwr', canvasId:'g-pwr', color:'#f39c12', label:'W',    src:'power',     max:600 },
-  { key:'cad', canvasId:'g-cad', color:'#2ecc71', label:'rpm',  src:'cadence',   max:130 },
+  { key:'hr',   canvasId:'g-hr',   color:'#e74c3c', label:'bpm', src:'heartrate',   max:210, avg:true  },
+  { key:'pwr',  canvasId:'g-pwr',  color:'#f39c12', label:'W',   src:'power',       max:600, avg:true  },
+  { key:'cad',  canvasId:'g-cad',  color:'#2ecc71', label:'rpm', src:'cadence',     max:130, avg:true  },
+  { key:'temp', canvasId:'g-temp', color:'#00bcd4', label:'°C',  src:'temperature', max:45,  avg:false },
 ];
 
 const FIT_EPOCH = 631065600;
@@ -248,8 +260,9 @@ const S = {
   keyframes:  [],
   hidden:     new Set(),
   followCam:  true,
-  sortMode:   'load',   // 'load' | 'position'
+  sortMode:    'load',   // 'load' | 'position'
   sidebarOpen: true,
+  hoveredKf:   null,
   tl: { start:0, end:0, cur:0, playing:false, speed:10, lastTick:null },
   map:        null,
   markers:    {},
@@ -298,7 +311,7 @@ class FitParser {
   _data(v,off,def){const f={};let p=off;for(const fd of def.fields){f[fd.fn]=this._val(v,p,fd.fs,fd.ft,def.le);p+=fd.fs;}return{gm:def.gm,f};}
   _val(v,off,sz,bt,le){const t=bt&0x9F;try{switch(t){case 0:case 2:case 0x0A:return v.getUint8(off);case 1:return v.getInt8(off);case 0x83:return v.getInt16(off,le);case 0x84:case 0x8B:return v.getUint16(off,le);case 0x85:return v.getInt32(off,le);case 0x86:case 0x8C:return v.getUint32(off,le);case 0x88:return v.getFloat32(off,le);case 0x89:return v.getFloat64(off,le);case 7:{let s='';for(let i=0;i<sz;i++){const c=v.getUint8(off+i);if(!c)break;s+=String.fromCharCode(c);}return s;}default:return v.getUint8(off);}}catch(_){return null;}}
   _process(recs){
-    const r={latlng:[],time:[],altitude:[],heartrate:[],cadence:[],power:[],distance:[]};
+    const r={latlng:[],time:[],altitude:[],heartrate:[],cadence:[],power:[],distance:[],temperature:[]};
     let t0=null;
     for(const rec of recs){
       if(rec.gm!==20)continue;const f=rec.f;
@@ -306,11 +319,17 @@ class FitParser {
       const unix=ts+FIT_EPOCH;if(!t0)t0=unix;r.time.push(Math.round(unix-t0));
       const lat=f[0],lng=f[1];
       r.latlng.push(lat!=null&&lat!==0x7FFFFFFF&&lng!=null&&lng!==0x7FFFFFFF?[lat*(180/2147483648),lng*(180/2147483648)]:null);
-      const alt=f[2];r.altitude.push(alt!=null&&alt!==0xFFFF?(alt/5)-500:null);
+      // enhanced_altitude (field 78, UINT32) preferred; fall back to altitude (field 2, UINT16)
+      const ealt=f[78], balt=f[2];
+      let altVal=null;
+      if(ealt!=null&&ealt!==0xFFFFFFFF) altVal=(ealt/5)-500;
+      else if(balt!=null&&balt!==0xFFFF) altVal=(balt/5)-500;
+      r.altitude.push(altVal);
       const hr=f[3];r.heartrate.push(hr!=null&&hr!==0xFF?hr:null);
       const cad=f[4];r.cadence.push(cad!=null&&cad!==0xFF?cad:null);
       const dist=f[5];r.distance.push(dist!=null&&dist!==0xFFFFFFFF?dist/100:null);
       const pwr=f[7];r.power.push(pwr!=null&&pwr!==0xFFFF?pwr:null);
+      const tmp=f[13];r.temperature.push(tmp!=null&&tmp!==0x7F?tmp:null);
     }
     r.startTime=t0; r.duration=r.time.length?r.time[r.time.length-1]:0;
     return r;
@@ -402,6 +421,17 @@ function valAt(arr, times, rel) {
   let lo=0,hi=times.length-1;
   while(lo<hi){const m=(lo+hi+1)>>1;times[m]<=rel?lo=m:hi=m-1;}
   return arr[lo]??null;
+}
+
+function avgAt(arr, times, rel, win=3) {
+  if(!arr||!arr.length)return null;
+  const lo=rel-win/2, hi=rel+win/2;
+  // binary search to lo
+  let i=0,j=times.length-1;
+  while(i<j){const m=(i+j)>>1;times[m]<lo?i=m+1:j=m;}
+  let sum=0,cnt=0;
+  while(i<times.length&&times[i]<=hi){const v=arr[i];if(v!=null){sum+=v;cnt++;}i++;}
+  return cnt?sum/cnt:null;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -536,13 +566,69 @@ function drawTimeline() {
   }
 
   // Keyframe diamond markers
+  const hovKf=S.hoveredKf;
   for(const kf of S.keyframes){
     const x=toX(kf.unix);
     if(x<0||x>W)continue;
-    const ky=grooveY+8, ks=4;
-    ctx.fillStyle='#fc5200';
+    const ky=grooveY+9, ks=kf===hovKf?6:4;
+    ctx.fillStyle=kf===hovKf?'#ff8a50':'#fc5200';
+    if(kf===hovKf){ctx.shadowColor='#fc520088';ctx.shadowBlur=8;}
     ctx.beginPath(); ctx.moveTo(x,ky-ks); ctx.lineTo(x+ks,ky); ctx.lineTo(x,ky+ks); ctx.lineTo(x-ks,ky); ctx.closePath(); ctx.fill();
+    ctx.shadowBlur=0;
   }
+}
+
+function initKfHit() {
+  const hit=$f('kf-hit'), tip=$f('kf-tip');
+  if(!hit||!tip)return;
+
+  function kfAtX(clientX) {
+    if(!S.keyframes.length||!S.tl.end||S.tl.end<=S.tl.start)return null;
+    const rect=hit.getBoundingClientRect();
+    const x=clientX-rect.left, W=rect.width;
+    const dur=S.tl.end-S.tl.start;
+    const THRESH=8;
+    let best=null,bestDx=Infinity;
+    for(const kf of S.keyframes){
+      const kx=((kf.unix-S.tl.start)/dur)*W;
+      const dx=Math.abs(x-kx);
+      if(dx<THRESH&&dx<bestDx){best=kf;bestDx=dx;}
+    }
+    return best;
+  }
+
+  hit.addEventListener('mousemove',e=>{
+    const kf=kfAtX(e.clientX);
+    if(kf!==S.hoveredKf){
+      S.hoveredKf=kf;
+      drawTimeline();
+    }
+    if(kf&&kf.caption){
+      const rect=hit.getBoundingClientRect();
+      const dur=S.tl.end-S.tl.start;
+      const x=((kf.unix-S.tl.start)/dur)*rect.width;
+      tip.textContent=`${kf.time} — ${kf.caption}`;
+      tip.style.left=x+'px';
+      tip.style.display='block';
+      hit.style.cursor='pointer';
+    } else {
+      tip.style.display='none';
+      hit.style.cursor='default';
+    }
+  });
+
+  hit.addEventListener('mouseleave',()=>{
+    S.hoveredKf=null; tip.style.display='none'; drawTimeline();
+  });
+
+  hit.addEventListener('click',e=>{
+    const kf=kfAtX(e.clientX);
+    if(kf){
+      S.lastKfUnix=null; // force reapply
+      seekTo(kf.unix);
+      toast(`${kf.time} — ${kf.caption||'keyframe'}`, 'info');
+    }
+  });
 }
 
 function fmtDur(sec){const h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),s=Math.floor(sec%60);return`${h}:${pad(m)}:${pad(s)}`;}
@@ -595,10 +681,11 @@ function seekTo(t) {
 function updateGauges() {
   const rel=S.me?S.tl.cur-S.me.startTime:null;
   if(!S.me||rel===null||rel<0||rel>S.me.duration){
-    GAUGE_META.forEach(m=>drawGauge(S.gauges[m.key],null,m.max,m.color,m.label));
+    GAUGE_META.forEach(m=>{if(S.gauges[m.key])drawGauge(S.gauges[m.key],null,m.max,m.color,m.label);});
   } else {
     GAUGE_META.forEach(m=>{
-      const v=valAt(S.me[m.src],S.me.time,rel);
+      if(!S.gauges[m.key])return;
+      const v=m.avg?avgAt(S.me[m.src],S.me.time,rel):valAt(S.me[m.src],S.me.time,rel);
       drawGauge(S.gauges[m.key],v,m.max,m.color,m.label);
     });
   }
@@ -648,9 +735,19 @@ function toggleFollow(){
 function initGauges(){
   GAUGE_META.forEach(m=>{
     const canvas=$f(m.canvasId);
+    if(!canvas)return;
     S.gauges[m.key]=canvas;
     drawGauge(canvas,null,m.max,m.color,m.label);
   });
+}
+
+function showTempGauge(hasTemp){
+  const cell=$f('temp-cell');
+  if(cell)cell.style.display=hasTemp?'':'none';
+  if(hasTemp&&!S.gauges.temp){
+    const c=$f('g-temp');S.gauges.temp=c;
+    drawGauge(c,null,45,'#00bcd4','°C');
+  }
 }
 
 function drawGauge(canvas, value, max, color, unit){
@@ -1026,13 +1123,16 @@ async function loadFit(e) {
     const data=new FitParser().parse(await file.arrayBuffer());
     if(!data.time.length)throw new Error('No GPS records found');
     S.me=data;
-    console.log(`[FIT] ${data.time.length} records  HR:${data.heartrate.some(v=>v!=null)}  Power:${data.power.some(v=>v!=null)}  Cadence:${data.cadence.some(v=>v!=null)}`);
+    const hasAlt=data.altitude.some(v=>v!=null);
+    const hasTemp=data.temperature.some(v=>v!=null);
+    console.log(`[FIT] ${data.time.length} records  HR:${data.heartrate.some(v=>v!=null)}  Power:${data.power.some(v=>v!=null)}  Cadence:${data.cadence.some(v=>v!=null)}  Alt:${hasAlt}  Temp:${hasTemp}`);
+    showTempGauge(hasTemp);
     redrawMe();
     recomputeRange();
     renderList();
     seekTo(S.tl.cur);
     $f('fit-rm').style.display='';
-    toast(`FIT loaded · ${data.time.length} pts`,'success');
+    toast(`FIT loaded · ${data.time.length} pts${hasTemp?' · 🌡️ temp':''}${hasAlt?' · ⛰️ alt':''}`);
   }catch(err){
     console.error(`[FIT] ${err.message}`);
     toast('FIT error: '+err.message,'error');
@@ -1040,7 +1140,7 @@ async function loadFit(e) {
 }
 
 function clearFit(){
-  S.me=null;
+  S.me=null; showTempGauge(false); S.gauges.temp=null;
   if(S.meMarker){S.meMarker.remove();S.meMarker=null;}
   if(S.meTrack){S.meTrack.remove();S.meTrack=null;}
   GAUGE_META.forEach(m=>drawGauge(S.gauges[m.key],null,m.max,m.color,m.label));
@@ -1164,6 +1264,7 @@ document.addEventListener('keydown', e => {
 function init(){
   initMap();
   initGauges();
+  initKfHit();
 
   // Set follow button state
   $f('follow-btn').classList.toggle('active',S.followCam);
