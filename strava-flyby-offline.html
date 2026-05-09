@@ -1338,6 +1338,13 @@ function trimFitStream(me, tStart, tEnd) {
   };
 }
 
+function _triggerDownload(blob, filename){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
 function exportStandalone(){
   const tStart = S.trim.start || S.tl.start;
   const tEnd   = S.trim.end   || S.tl.end;
@@ -1352,7 +1359,7 @@ function exportStandalone(){
     return {...a, streams};
   }
 
-  console.log(`[Export] Building standalone HTML… trim:${hasTrim?fmtTime(tStart)+'→'+fmtTime(tEnd):'none'}`);
+  console.log(`[Export] Building standalone… trim:${hasTrim?fmtTime(tStart)+'→'+fmtTime(tEnd):'none'}`);
 
   // Trim or keep athletes, then compact null-only stream arrays
   let athletes = hasTrim
@@ -1367,65 +1374,92 @@ function exportStandalone(){
   const keyframes = S.keyframes.filter(kf=>kf.unix>=tStart&&kf.unix<=tEnd);
 
   console.log(`[Export] ${athletes.length} athletes · ${me?'FIT ✓':'no FIT'} · ${keyframes.length} keyframes`);
-  if(hasTrim&&athletes.length<S.athletes.length)
-    console.log(`[Export] ${S.athletes.length-athletes.length} athlete(s) outside trim range excluded`);
 
   const data={
-    athletes,
-    me,
-    keyframes,
+    athletes, me, keyframes,
     myActivityId: MY_ACTIVITY_ID,
     trim: hasTrim?{start:tStart,end:tEnd}:null,
   };
 
-  // Escape end-script sequences in JSON so the HTML parser doesn't truncate the embedded data
-  const dataBlob=JSON.stringify(data).replace(/<\/script>/gi,'<\\/script>');
-  // Viewer CSS: hide author-only controls and drag-drop overlay
-  const viewerStyle=`<style id="__viewer_style__">.author-only{display:none!important}#drop-overlay{display:none!important}</style>`;
-  const inject=`\n<script id="__flyby_data__" type="application/json">\n${dataBlob}\n<\/script>\n`;
-  let html=document.documentElement.outerHTML;
-  html=html.replace(/<script id="__flyby_data__"[\s\S]*?<\/script>/,'');
-  html=html.replace(/<style id="__viewer_style__">[\s\S]*?<\/style>/,'');
-  html=html.replace('</head>',viewerStyle+'</head>');
-  html=html.replace('</body>',inject+'</body>');
+  // ── Two-file export ────────────────────────────────────────────
+  // Data goes to a companion JSON file; the HTML fetches it on load.
+  // This avoids embedding JSON inside <script> tags (which causes
+  // the HTML parser to truncate the JS source on </script> sequences).
 
-  const blob=new Blob([html],{type:'text/html'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='flyby-standalone-'+Date.now()+'.html';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  const ts = Date.now();
+  const dataFilename = `flyby-${ts}.json`;
+  const htmlFilename = `flyby-${ts}.html`;
 
-  const kb=Math.round(html.length/1024);
-  console.log(`[Export] ✓ ${kb} KB`);
-  toast(`Exported ${athletes.length} riders · ${keyframes.length} keyframes${hasTrim?' (trimmed)':''} · ${kb} KB`,'success');
+  // 1. Download JSON data file first
+  _triggerDownload(
+    new Blob([JSON.stringify(data)],{type:'application/json'}),
+    dataFilename
+  );
+
+  // 2. Build HTML via DOM manipulation so no regex needed
+  //    — remove any previously injected elements first
+  const prevDataEl  = document.getElementById('__flyby_data__');
+  const prevStyleEl = document.getElementById('__viewer_style__');
+  const prevFileEl  = document.getElementById('__flyby_datafile__');
+  if(prevDataEl)  prevDataEl.remove();
+  if(prevStyleEl) prevStyleEl.remove();
+  if(prevFileEl)  prevFileEl.remove();
+
+  //    — inject viewer style (hides author-only controls)
+  const styleEl = document.createElement('style');
+  styleEl.id = '__viewer_style__';
+  styleEl.textContent = '.author-only{display:none!important}#drop-overlay{display:none!important}';
+  document.head.appendChild(styleEl);
+
+  //    — inject data-file reference so init() knows what to fetch
+  const fileEl = document.createElement('script');
+  fileEl.id = '__flyby_datafile__';
+  fileEl.textContent = 'var __FLYBY_DATAFILE__=' + JSON.stringify(dataFilename) + ';';
+  document.body.appendChild(fileEl);
+
+  //    — serialise
+  const html = document.documentElement.outerHTML;
+
+  //    — restore DOM so current session keeps working
+  styleEl.remove();
+  fileEl.remove();
+  if(prevDataEl)  document.body.appendChild(prevDataEl);
+  if(prevStyleEl) document.head.appendChild(prevStyleEl);
+  if(prevFileEl)  document.body.appendChild(prevFileEl);
+
+  // 3. Download HTML viewer
+  _triggerDownload(new Blob([html],{type:'text/html'}), htmlFilename);
+
+  const kb=Math.round((html.length+JSON.stringify(data).length)/1024);
+  console.log(`[Export] ✓ ${htmlFilename} + ${dataFilename}  ~${kb} KB total`);
+  toast(`Exported ${athletes.length} riders · ${keyframes.length} kf · ${kb} KB`,'success');
+}
+
+function _applyData(d){
+  if(d.myActivityId) MY_ACTIVITY_ID=d.myActivityId;
+  if(d.athletes&&d.athletes.length){
+    S.athletes=d.athletes;
+    console.log(`[Data] ${S.athletes.length} athletes`);
+  }
+  if(d.me){
+    S.me=d.me;
+    showTempGauge(d.me.temperature&&d.me.temperature.some(v=>v!=null));
+    showSpeedGauge(d.me.speed&&d.me.speed.some(v=>v!=null));
+    console.log('[Data] FIT data present');
+  }
+  if(d.keyframes&&d.keyframes.length){
+    S.keyframes=d.keyframes;
+    console.log(`[Data] ${S.keyframes.length} keyframes`);
+  }
+  if(d.trim) console.log(`[Data] Pre-trimmed: ${fmtTime(d.trim.start)} → ${fmtTime(d.trim.end)}`);
 }
 
 function loadEmbedded(){
+  // Legacy: data embedded directly in a <script type="application/json"> element
   const el=document.getElementById('__flyby_data__');
-  if(!el)return;
-  try{
-    const d=JSON.parse(el.textContent);
-    if(d.myActivityId) MY_ACTIVITY_ID=d.myActivityId;
-    if(d.athletes&&d.athletes.length){
-      S.athletes=d.athletes;
-      console.log(`[Embedded] ${S.athletes.length} athletes`);
-    }
-    if(d.me){
-      S.me=d.me;
-      showTempGauge(d.me.temperature&&d.me.temperature.some(v=>v!=null));
-      showSpeedGauge(d.me.speed&&d.me.speed.some(v=>v!=null));
-      console.log('[Embedded] FIT data present');
-    }
-    if(d.keyframes&&d.keyframes.length){
-      S.keyframes=d.keyframes;
-      console.log(`[Embedded] ${S.keyframes.length} keyframes`);
-    }
-    // Trim is already baked into the stream data — don't restore S.trim
-    // (doing so would cause recomputeRange to double-clip to a zero range)
-    if(d.trim) console.log(`[Embedded] Pre-trimmed: ${fmtTime(d.trim.start)} → ${fmtTime(d.trim.end)}`);
-  }catch(err){
-    console.error('[Embedded] Parse error:',err);
-  }
+  if(!el)return false;
+  try{ _applyData(JSON.parse(el.textContent)); return true; }
+  catch(err){ console.error('[Embedded] Parse error:',err); return false; }
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -1516,11 +1550,9 @@ function init(){
   // Set follow button state
   $f('follow-btn').classList.toggle('active',S.followCam);
 
-  // Load embedded data (from standalone export)
-  loadEmbedded();
-
-  // If embedded data loaded, set up the viewer
-  if(S.athletes.length){
+  // Load data: prefer companion JSON file (two-file export), fall back to embedded element
+  function _setupViewer(){
+    if(!S.athletes.length) return;
     recomputeRange();
     redrawAthletes();
     if(S.me)redrawMe();
@@ -1528,13 +1560,22 @@ function init(){
     seekTo(S.tl.start);
     $f('nodatamsg').style.display='none';
     $f('mapbadge').style.display='block';
-    // Defer canvas draws until after the browser has computed layout
-    // (canvas width is 0 if drawn synchronously during script parse)
     requestAnimationFrame(()=>{
       resizeGauges();
       drawTimeline();
       if(S.keyframes.length) S.lastKfUnix=null;
     });
+  }
+
+  if(typeof __FLYBY_DATAFILE__ !== 'undefined'){
+    console.log('[Data] Fetching',__FLYBY_DATAFILE__);
+    fetch(__FLYBY_DATAFILE__)
+      .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(d=>{ _applyData(d); _setupViewer(); })
+      .catch(err=>{ console.error('[Data] Fetch failed:',err); toast('Could not load data file','error'); });
+  } else {
+    loadEmbedded();
+    _setupViewer();
   }
 
   window.addEventListener('resize',()=>{
