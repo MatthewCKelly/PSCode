@@ -1311,7 +1311,8 @@ function exportStandalone(){
     trim: hasTrim?{start:tStart,end:tEnd}:null,
   };
 
-  const dataBlob=JSON.stringify(data);
+  // Escape </script> so the HTML parser doesn't close the tag mid-JSON
+  const dataBlob=JSON.stringify(data).replace(/<\/script>/gi,'<\\/script>');
   // Viewer CSS: hide author-only controls and drag-drop overlay
   const viewerStyle=`<style id="__viewer_style__">.author-only{display:none!important}#drop-overlay{display:none!important}</style>`;
   const inject=`\n<script id="__flyby_data__" type="application/json">\n${dataBlob}\n<\/script>\n`;
