@@ -159,16 +159,16 @@
 <div id="topbar">
   <span class="logo">⚡ Flyby Offline</span>
   <div class="sep"></div>
-  <button class="btn pri" onclick="$f('load-ath').click()" title="Select one or more flyby-export JSON files, or drag & drop onto the page">Load Athletes JSON ✦</button>
+  <button class="btn pri author-only" onclick="$f('load-ath').click()" title="Select one or more flyby-export JSON files, or drag & drop onto the page">Load Athletes JSON ✦</button>
   <input type="file" id="load-ath" accept=".json" multiple onchange="loadAthletes(event)">
-  <button class="btn" onclick="$f('load-tl').click()">Load Timeline</button>
+  <button class="btn author-only" onclick="$f('load-tl').click()">Load Timeline</button>
   <input type="file" id="load-tl" accept=".js,.json" onchange="loadTimeline(event)">
-  <button class="btn" onclick="$f('load-fit').click()">Load My FIT</button>
+  <button class="btn author-only" onclick="$f('load-fit').click()">Load My FIT</button>
   <input type="file" id="load-fit" accept=".fit,.FIT" onchange="loadFit(event)">
-  <button class="btn" id="fit-rm" onclick="clearFit()" style="display:none">✕ FIT</button>
-  <div class="sep"></div>
-  <button class="btn" onclick="loadSample()">Sample</button>
-  <button class="btn" onclick="exportStandalone()">💾 Export HTML</button>
+  <button class="btn author-only" id="fit-rm" onclick="clearFit()" style="display:none">✕ FIT</button>
+  <div class="sep author-only"></div>
+  <button class="btn author-only" onclick="loadSample()">Sample</button>
+  <button class="btn author-only" onclick="exportStandalone()">💾 Export HTML</button>
   <button class="btn" id="follow-btn" onclick="toggleFollow()" title="Keep me in frame">📍 Follow</button>
   <button class="btn" onclick="fitBounds()" title="Fit all">⛶ Fit</button>
 </div>
@@ -1312,9 +1312,13 @@ function exportStandalone(){
   };
 
   const dataBlob=JSON.stringify(data);
+  // Viewer CSS: hide author-only controls and drag-drop overlay
+  const viewerStyle=`<style id="__viewer_style__">.author-only{display:none!important}#drop-overlay{display:none!important}</style>`;
   const inject=`\n<script id="__flyby_data__" type="application/json">\n${dataBlob}\n<\/script>\n`;
   let html=document.documentElement.outerHTML;
   html=html.replace(/<script id="__flyby_data__"[\s\S]*?<\/script>/,'');
+  html=html.replace(/<style id="__viewer_style__">[\s\S]*?<\/style>/,'');
+  html=html.replace('</head>',viewerStyle+'</head>');
   html=html.replace('</body>',inject+'</body>');
 
   const blob=new Blob([html],{type:'text/html'});
