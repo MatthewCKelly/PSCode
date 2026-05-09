@@ -400,8 +400,8 @@ class FitParser {
       const dist=f[5];r.distance.push(dist!=null&&dist!==0xFFFFFFFF?dist/100:null);
       const pwr=f[7];r.power.push(pwr!=null&&pwr!==0xFFFF?pwr:null);
       const tmp=f[13];r.temperature.push(tmp!=null&&tmp!==0x7F?tmp:null);
-      // enhanced_speed (field 70, UINT32, mm/s) preferred; fallback to speed (field 6, UINT16, mm/s)
-      const espd=f[70],bspd=f[6];
+      // enhanced_speed (field 68, UINT32, m/s×1000) preferred; fallback to speed (field 6, UINT16, m/s×1000)
+      const espd=f[68],bspd=f[6];
       let spdVal=null;
       if(espd!=null&&espd!==0xFFFFFFFF) spdVal=espd/277.778;
       else if(bspd!=null&&bspd!==0xFFFF) spdVal=bspd/277.778;
