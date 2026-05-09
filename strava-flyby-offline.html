@@ -408,6 +408,9 @@ class FitParser {
       r.speed.push(spdVal!=null?Math.round(spdVal*10)/10:null);
     }
     r.startTime=t0; r.duration=r.time.length?r.time[r.time.length-1]:0;
+    // Debug: log actual field numbers present so missing streams can be diagnosed
+    const sample=recs.find(r=>r.gm===20);
+    if(sample) console.log('[FIT] Record field numbers:',Object.keys(sample.f).map(Number).sort((a,b)=>a-b).join(', '));
     return r;
   }
 }
@@ -1383,8 +1386,6 @@ function exportStandalone(){
 
   // ── Two-file export ────────────────────────────────────────────
   // Data goes to a companion JSON file; the HTML fetches it on load.
-  // This avoids embedding JSON inside <script> tags (which causes
-  // the HTML parser to truncate the JS source on </script> sequences).
 
   const ts = Date.now();
   const dataFilename = `flyby-${ts}.json`;
