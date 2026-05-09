@@ -400,17 +400,21 @@ class FitParser {
       const dist=f[5];r.distance.push(dist!=null&&dist!==0xFFFFFFFF?dist/100:null);
       const pwr=f[7];r.power.push(pwr!=null&&pwr!==0xFFFF?pwr:null);
       const tmp=f[13];r.temperature.push(tmp!=null&&tmp!==0x7F?tmp:null);
-      // enhanced_speed (field 68, UINT32, m/s×1000) preferred; fallback to speed (field 6, UINT16, m/s×1000)
-      const espd=f[68],bspd=f[6];
+      // Speed: try field 68 (enhanced_speed UINT32), 73 (newer Garmin), 6 (legacy UINT16) — all m/s×1000
+      const espd=f[68],gspd=f[73],bspd=f[6];
       let spdVal=null;
-      if(espd!=null&&espd!==0xFFFFFFFF) spdVal=espd/277.778;
-      else if(bspd!=null&&bspd!==0xFFFF) spdVal=bspd/277.778;
+      if(espd!=null&&espd!==0xFFFFFFFF)       spdVal=espd/277.778;
+      else if(gspd!=null&&gspd!==0xFFFF&&gspd!==0xFFFFFFFF) spdVal=gspd/277.778;
+      else if(bspd!=null&&bspd!==0xFFFF)       spdVal=bspd/277.778;
       r.speed.push(spdVal!=null?Math.round(spdVal*10)/10:null);
     }
     r.startTime=t0; r.duration=r.time.length?r.time[r.time.length-1]:0;
     // Debug: log actual field numbers present so missing streams can be diagnosed
     const sample=recs.find(r=>r.gm===20);
-    if(sample) console.log('[FIT] Record field numbers:',Object.keys(sample.f).map(Number).sort((a,b)=>a-b).join(', '));
+    if(sample){
+      console.log('[FIT] Record field numbers:',Object.keys(sample.f).map(Number).sort((a,b)=>a-b).join(', '));
+      console.log('[FIT] Speed raw — f6:',sample.f[6],'f68:',sample.f[68],'f73:',sample.f[73]);
+    }
     return r;
   }
 }
