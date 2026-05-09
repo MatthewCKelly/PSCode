@@ -276,6 +276,10 @@
     <div class="gauge-label">Temp</div>
     <div class="gauge-canvas-wrap"><canvas id="g-temp"></canvas></div>
   </div>
+  <div class="gauge-cell" id="spd-cell" style="display:none">
+    <div class="gauge-label">Speed</div>
+    <div class="gauge-canvas-wrap"><canvas id="g-spd"></canvas></div>
+  </div>
   <div class="gauge-cell" id="alt-cell">
     <div class="gauge-label">Elevation</div>
     <div class="gauge-canvas-wrap"><canvas id="g-alt"></canvas></div>
@@ -310,6 +314,7 @@ const GAUGE_META = [
   { key:'pwr',  canvasId:'g-pwr',  color:'#f39c12', label:'W',   src:'power',       max:600, avg:true  },
   { key:'cad',  canvasId:'g-cad',  color:'#2ecc71', label:'rpm', src:'cadence',     max:130, avg:true  },
   { key:'temp', canvasId:'g-temp', color:'#00bcd4', label:'°C',  src:'temperature', max:45,  avg:false },
+  { key:'spd',  canvasId:'g-spd', color:'#9b59b6', label:'km/h',src:'speed',        max:80,  avg:false },
 ];
 
 const FIT_EPOCH = 631065600;
@@ -376,7 +381,7 @@ class FitParser {
   _data(v,off,def){const f={};let p=off;for(const fd of def.fields){f[fd.fn]=this._val(v,p,fd.fs,fd.ft,def.le);p+=fd.fs;}return{gm:def.gm,f};}
   _val(v,off,sz,bt,le){const t=bt&0x9F;try{switch(t){case 0:case 2:case 0x0A:return v.getUint8(off);case 1:return v.getInt8(off);case 0x83:return v.getInt16(off,le);case 0x84:case 0x8B:return v.getUint16(off,le);case 0x85:return v.getInt32(off,le);case 0x86:case 0x8C:return v.getUint32(off,le);case 0x88:return v.getFloat32(off,le);case 0x89:return v.getFloat64(off,le);case 7:{let s='';for(let i=0;i<sz;i++){const c=v.getUint8(off+i);if(!c)break;s+=String.fromCharCode(c);}return s;}default:return v.getUint8(off);}}catch(_){return null;}}
   _process(recs){
-    const r={latlng:[],time:[],altitude:[],heartrate:[],cadence:[],power:[],distance:[],temperature:[]};
+    const r={latlng:[],time:[],altitude:[],heartrate:[],cadence:[],power:[],distance:[],temperature:[],speed:[]};
     let t0=null;
     for(const rec of recs){
       if(rec.gm!==20)continue;const f=rec.f;
@@ -395,6 +400,12 @@ class FitParser {
       const dist=f[5];r.distance.push(dist!=null&&dist!==0xFFFFFFFF?dist/100:null);
       const pwr=f[7];r.power.push(pwr!=null&&pwr!==0xFFFF?pwr:null);
       const tmp=f[13];r.temperature.push(tmp!=null&&tmp!==0x7F?tmp:null);
+      // enhanced_speed (field 70, UINT32, mm/s) preferred; fallback to speed (field 6, UINT16, mm/s)
+      const espd=f[70],bspd=f[6];
+      let spdVal=null;
+      if(espd!=null&&espd!==0xFFFFFFFF) spdVal=espd/277.778;
+      else if(bspd!=null&&bspd!==0xFFFF) spdVal=bspd/277.778;
+      r.speed.push(spdVal!=null?Math.round(spdVal*10)/10:null);
     }
     r.startTime=t0; r.duration=r.time.length?r.time[r.time.length-1]:0;
     return r;
@@ -858,6 +869,15 @@ function showTempGauge(hasTemp){
   }
 }
 
+function showSpeedGauge(hasSpd){
+  const cell=$f('spd-cell');
+  if(cell)cell.style.display=hasSpd?'':'none';
+  if(hasSpd&&!S.gauges.spd){
+    const c=$f('g-spd');S.gauges.spd=c;
+    drawGauge(c,null,80,'#9b59b6','km/h');
+  }
+}
+
 function drawGauge(canvas, value, max, color, unit){
   const wrap=canvas.parentElement;
   const dpr=window.devicePixelRatio||1;
@@ -1233,14 +1253,16 @@ async function loadFit(e) {
     S.me=data;
     const hasAlt=data.altitude.some(v=>v!=null);
     const hasTemp=data.temperature.some(v=>v!=null);
-    console.log(`[FIT] ${data.time.length} records  HR:${data.heartrate.some(v=>v!=null)}  Power:${data.power.some(v=>v!=null)}  Cadence:${data.cadence.some(v=>v!=null)}  Alt:${hasAlt}  Temp:${hasTemp}`);
+    const hasSpd=data.speed.some(v=>v!=null);
+    console.log(`[FIT] ${data.time.length} records  HR:${data.heartrate.some(v=>v!=null)}  Power:${data.power.some(v=>v!=null)}  Cadence:${data.cadence.some(v=>v!=null)}  Alt:${hasAlt}  Temp:${hasTemp}  Speed:${hasSpd}`);
     showTempGauge(hasTemp);
+    showSpeedGauge(hasSpd);
     redrawMe();
     recomputeRange();
     renderList();
     seekTo(S.tl.cur);
     $f('fit-rm').style.display='';
-    toast(`FIT loaded · ${data.time.length} pts${hasTemp?' · 🌡️ temp':''}${hasAlt?' · ⛰️ alt':''}`);
+    toast(`FIT loaded · ${data.time.length} pts${hasTemp?' · 🌡️ temp':''}${hasAlt?' · ⛰️ alt':''}${hasSpd?' · 💨 speed':''}`);
   }catch(err){
     console.error(`[FIT] ${err.message}`);
     toast('FIT error: '+err.message,'error');
@@ -1248,7 +1270,7 @@ async function loadFit(e) {
 }
 
 function clearFit(){
-  S.me=null; showTempGauge(false); S.gauges.temp=null;
+  S.me=null; showTempGauge(false); S.gauges.temp=null; showSpeedGauge(false); S.gauges.spd=null;
   if(S.meMarker){S.meMarker.remove();S.meMarker=null;}
   if(S.meTrack){S.meTrack.remove();S.meTrack=null;}
   GAUGE_META.forEach(m=>drawGauge(S.gauges[m.key],null,m.max,m.color,m.label));
@@ -1318,7 +1340,7 @@ function trimFitStream(me, tStart, tEnd) {
     latlng:    sl(me.latlng),    altitude:   sl(me.altitude),
     heartrate: sl(me.heartrate), cadence:    sl(me.cadence),
     power:     sl(me.power),     distance:   sl(me.distance),
-    temperature: sl(me.temperature),
+    temperature: sl(me.temperature), speed: sl(me.speed||[]),
   };
 }
 
@@ -1352,7 +1374,7 @@ function exportStandalone(){
     trim: hasTrim?{start:tStart,end:tEnd}:null,
   };
 
-  // Escape </script> so the HTML parser doesn't close the tag mid-JSON
+  // Escape end-script sequences in JSON so the HTML parser doesn't truncate the embedded data
   const dataBlob=JSON.stringify(data).replace(/<\/script>/gi,'<\\/script>');
   // Viewer CSS: hide author-only controls and drag-drop overlay
   const viewerStyle=`<style id="__viewer_style__">.author-only{display:none!important}#drop-overlay{display:none!important}</style>`;
@@ -1387,6 +1409,7 @@ function loadEmbedded(){
     if(d.me){
       S.me=d.me;
       showTempGauge(d.me.temperature&&d.me.temperature.some(v=>v!=null));
+      showSpeedGauge(d.me.speed&&d.me.speed.some(v=>v!=null));
       console.log('[Embedded] FIT data present');
     }
     if(d.keyframes&&d.keyframes.length){
