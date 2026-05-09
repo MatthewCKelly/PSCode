@@ -234,6 +234,7 @@
 // ────────────────────────────────────────────────────────────────
 
 let MY_ACTIVITY_ID = '18340006598';
+const CAPTION_TIMEOUT_SEC = 10;  // seconds before keyframe captions fade; 0 = stay forever
 
 const COLORS = [
   '#fc5200','#4fc3f7','#81c784','#ffb74d','#f48fb1',
@@ -469,15 +470,23 @@ function getActiveKf(t) {
   return active;
 }
 
+let _captionTmr=null;
+
 function applyKf(kf) {
   if (!kf || kf.unix===S.lastKfUnix) return;
   S.lastKfUnix = kf.unix;
   console.log(`[KF] ${kf.time}  "${kf.caption}"`);
 
   // Caption
+  clearTimeout(_captionTmr);
   const cap=$f('caption');
-  if(kf.caption&&kf.caption.trim()){cap.textContent=kf.caption;cap.style.display='block';}
-  else cap.style.display='none';
+  if(kf.caption&&kf.caption.trim()){
+    cap.textContent=kf.caption; cap.style.display='block';
+    if(CAPTION_TIMEOUT_SEC>0)
+      _captionTmr=setTimeout(()=>cap.style.display='none', CAPTION_TIMEOUT_SEC*1000);
+  } else {
+    cap.style.display='none';
+  }
 
   // Speed
   S.tl.speed = kf.speed;
