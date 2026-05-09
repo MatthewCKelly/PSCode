@@ -49,6 +49,11 @@
       transform:translateX(-50%)}
     #spd{background:var(--surface2);border:1px solid var(--border);color:var(--text);
       padding:3px 5px;border-radius:4px;font-size:12px;cursor:pointer;flex-shrink:0}
+    .trim-btn{padding:3px 8px;border:1px solid var(--border);background:var(--surface2);
+      color:var(--dim);border-radius:4px;cursor:pointer;font-size:11px;flex-shrink:0}
+    .trim-btn:hover{background:var(--border)}
+    .trim-btn.set{border-color:#f39c12;color:#f39c12}
+    #trim-range{font-size:10px;color:#f39c12;white-space:nowrap;flex-shrink:0;font-variant-numeric:tabular-nums}
 
     /* ── MAIN ── */
     #main{display:flex;flex:1;overflow:hidden}
@@ -154,16 +159,16 @@
 <div id="topbar">
   <span class="logo">⚡ Flyby Offline</span>
   <div class="sep"></div>
-  <button class="btn pri" onclick="$f('load-ath').click()" title="Select one or more flyby-export JSON files, or drag & drop onto the page">Load Athletes JSON ✦</button>
+  <button class="btn pri author-only" onclick="$f('load-ath').click()" title="Select one or more flyby-export JSON files, or drag & drop onto the page">Load Athletes JSON ✦</button>
   <input type="file" id="load-ath" accept=".json" multiple onchange="loadAthletes(event)">
-  <button class="btn" onclick="$f('load-tl').click()">Load Timeline</button>
+  <button class="btn author-only" onclick="$f('load-tl').click()">Load Timeline</button>
   <input type="file" id="load-tl" accept=".js,.json" onchange="loadTimeline(event)">
-  <button class="btn" onclick="$f('load-fit').click()">Load My FIT</button>
+  <button class="btn author-only" onclick="$f('load-fit').click()">Load My FIT</button>
   <input type="file" id="load-fit" accept=".fit,.FIT" onchange="loadFit(event)">
-  <button class="btn" id="fit-rm" onclick="clearFit()" style="display:none">✕ FIT</button>
-  <div class="sep"></div>
-  <button class="btn" onclick="loadSample()">Sample</button>
-  <button class="btn" onclick="exportStandalone()">💾 Export HTML</button>
+  <button class="btn author-only" id="fit-rm" onclick="clearFit()" style="display:none">✕ FIT</button>
+  <div class="sep author-only"></div>
+  <button class="btn author-only" onclick="loadSample()">Sample</button>
+  <button class="btn author-only" onclick="exportStandalone()">💾 Export HTML</button>
   <button class="btn" id="follow-btn" onclick="toggleFollow()" title="Keep me in frame">📍 Follow</button>
   <button class="btn" onclick="fitBounds()" title="Fit all">⛶ Fit</button>
 </div>
@@ -179,6 +184,12 @@
     <div id="kf-hit"></div>
   </div>
   <span class="tlabel" id="t-tot">0:00:00</span>
+  <div class="sep" style="width:1px;height:20px;background:var(--border);flex-shrink:0"></div>
+  <button class="trim-btn" id="trim-in-btn"  onclick="setTrimStart()" title="Set trim start here [I]">⬤ In</button>
+  <span id="trim-range" style="display:none"></span>
+  <button class="trim-btn" id="trim-out-btn" onclick="setTrimEnd()"   title="Set trim end here [O]">⬤ Out</button>
+  <button class="trim-btn" id="trim-clr-btn" onclick="clearTrim()"    title="Clear trim" style="display:none">✕ Trim</button>
+  <div class="sep" style="width:1px;height:20px;background:var(--border);flex-shrink:0"></div>
   <select id="spd" onchange="setSpeed(this.value)">
     <option value="1">1×</option>
     <option value="5">5×</option>
@@ -275,6 +286,7 @@ const S = {
   sortMode:    'load',   // 'load' | 'position'
   sidebarOpen: true,
   hoveredKf:   null,
+  trim:        { start:null, end:null },
   tl: { start:0, end:0, cur:0, playing:false, speed:10, lastTick:null },
   map:        null,
   markers:    {},
@@ -542,11 +554,46 @@ function recomputeRange() {
   }
   if(S.me?.startTime){starts.push(S.me.startTime);ends.push(S.me.startTime+S.me.duration);}
   if(!starts.length)return;
-  S.tl.start=Math.min(...starts); S.tl.end=Math.max(...ends);
+  const dataStart=Math.min(...starts), dataEnd=Math.max(...ends);
+  S.tl.start = S.trim.start ? Math.max(S.trim.start, dataStart) : dataStart;
+  S.tl.end   = S.trim.end   ? Math.min(S.trim.end,   dataEnd)   : dataEnd;
   if(S.tl.cur<S.tl.start)S.tl.cur=S.tl.start;
   $f('t-tot').textContent=fmtDur(S.tl.end-S.tl.start);
   S.lastKfUnix=null;
   drawTimeline();
+}
+
+function setTrimStart() {
+  S.trim.start=S.tl.cur;
+  if(S.trim.end&&S.trim.end<=S.trim.start) S.trim.end=null;
+  recomputeRange(); updateTrimUI();
+  toast('Trim start: '+fmtTime(S.trim.start),'info');
+}
+function setTrimEnd() {
+  S.trim.end=S.tl.cur;
+  if(S.trim.start&&S.trim.start>=S.trim.end) S.trim.start=null;
+  recomputeRange(); updateTrimUI();
+  toast('Trim end: '+fmtTime(S.trim.end),'info');
+}
+function clearTrim() {
+  S.trim={start:null,end:null};
+  recomputeRange(); updateTrimUI();
+  toast('Trim cleared','warn');
+}
+function updateTrimUI() {
+  const hasIn=S.trim.start!=null, hasOut=S.trim.end!=null, hasTrim=hasIn||hasOut;
+  $f('trim-in-btn').classList.toggle('set',hasIn);
+  $f('trim-out-btn').classList.toggle('set',hasOut);
+  $f('trim-clr-btn').style.display=hasTrim?'':'none';
+  const rng=$f('trim-range');
+  if(hasTrim){
+    const s=hasIn?fmtTime(S.trim.start):'start';
+    const e=hasOut?fmtTime(S.trim.end):'end';
+    rng.textContent=s+' → '+e;
+    rng.style.display='';
+  } else {
+    rng.style.display='none';
+  }
 }
 
 function drawTimeline() {
@@ -1193,24 +1240,86 @@ function loadSample(){
 // STANDALONE EXPORT
 // ────────────────────────────────────────────────────────────────
 
-function exportStandalone(){
-  console.log('[Export] Building standalone HTML...');
-  const data={
-    athletes: S.athletes,
-    me:       S.me,
-    keyframes:S.keyframes,
-    myActivityId: MY_ACTIVITY_ID,
-  };
-  const dataBlob=JSON.stringify(data);
-  const inject=`\n<script id="__flyby_data__" type="application/json">\n${dataBlob}\n<\/script>\n`;
+// ── stream trimming helpers ───────────────────────────────────────
 
-  // Get current page HTML and inject data block before </body>
+function trimAthleteStream(a, tStart, tEnd) {
+  const times=a.streams.time, n=times.length;
+  const relS=tStart-a.startTime, relE=tEnd-a.startTime;
+  let i0=0; while(i0<n&&times[i0]<relS)i0++;
+  let i1=n-1; while(i1>i0&&times[i1]>relE)i1--;
+  if(i0>i1)return null;
+  const offset=times[i0];
+  const sl=(arr)=>arr?arr.slice(i0,i1+1):[];
+  return{...a,
+    startTime: a.startTime+offset,
+    endTime:   a.startTime+times[i1],
+    streams:{
+      latlng:   sl(a.streams.latlng),
+      time:     sl(times).map(t=>t-offset),
+      altitude: sl(a.streams.altitude),
+    }
+  };
+}
+
+function trimFitStream(me, tStart, tEnd) {
+  if(!me)return null;
+  const times=me.time, n=times.length;
+  const relS=tStart-me.startTime, relE=tEnd-me.startTime;
+  let i0=0; while(i0<n&&times[i0]<relS)i0++;
+  let i1=n-1; while(i1>i0&&times[i1]>relE)i1--;
+  if(i0>i1)return null;
+  const offset=times[i0];
+  const sl=(arr)=>arr?arr.slice(i0,i1+1):[];
+  return{...me,
+    startTime: me.startTime+offset,
+    duration:  times[i1]-times[i0],
+    time:      sl(times).map(t=>t-offset),
+    latlng:    sl(me.latlng),    altitude:   sl(me.altitude),
+    heartrate: sl(me.heartrate), cadence:    sl(me.cadence),
+    power:     sl(me.power),     distance:   sl(me.distance),
+    temperature: sl(me.temperature),
+  };
+}
+
+function exportStandalone(){
+  const tStart = S.trim.start || S.tl.start;
+  const tEnd   = S.trim.end   || S.tl.end;
+  const hasTrim= S.trim.start!=null || S.trim.end!=null;
+
+  console.log(`[Export] Building standalone HTML… trim:${hasTrim?fmtTime(tStart)+'→'+fmtTime(tEnd):'none'}`);
+
+  // Trim or keep athletes
+  let athletes = hasTrim
+    ? S.athletes.map(a=>trimAthleteStream(a,tStart,tEnd)).filter(Boolean)
+    : S.athletes;
+
+  // Trim or keep FIT
+  const me = hasTrim ? trimFitStream(S.me,tStart,tEnd) : S.me;
+
+  // Keep only keyframes within trim range
+  const keyframes = S.keyframes.filter(kf=>kf.unix>=tStart&&kf.unix<=tEnd);
+
+  console.log(`[Export] ${athletes.length} athletes · ${me?'FIT ✓':'no FIT'} · ${keyframes.length} keyframes`);
+  if(hasTrim&&athletes.length<S.athletes.length)
+    console.log(`[Export] ${S.athletes.length-athletes.length} athlete(s) outside trim range excluded`);
+
+  const data={
+    athletes,
+    me,
+    keyframes,
+    myActivityId: MY_ACTIVITY_ID,
+    trim: hasTrim?{start:tStart,end:tEnd}:null,
+  };
+
+  const dataBlob=JSON.stringify(data);
+  // Viewer CSS: hide author-only controls and drag-drop overlay
+  const viewerStyle=`<style id="__viewer_style__">.author-only{display:none!important}#drop-overlay{display:none!important}</style>`;
+  const inject=`\n<script id="__flyby_data__" type="application/json">\n${dataBlob}\n<\/script>\n`;
   let html=document.documentElement.outerHTML;
-  // Remove any previously embedded data block
   html=html.replace(/<script id="__flyby_data__"[\s\S]*?<\/script>/,'');
+  html=html.replace(/<style id="__viewer_style__">[\s\S]*?<\/style>/,'');
+  html=html.replace('</head>',viewerStyle+'</head>');
   html=html.replace('</body>',inject+'</body>');
-  // Fix relative script src if needed
-  html=html.replace('src="https://unpkg.com/leaflet','src="https://unpkg.com/leaflet');
 
   const blob=new Blob([html],{type:'text/html'});
   const a=document.createElement('a');
@@ -1219,8 +1328,8 @@ function exportStandalone(){
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 
   const kb=Math.round(html.length/1024);
-  console.log(`[Export] ✓ ${S.athletes.length} athletes · ${S.keyframes.length} keyframes · ${kb} KB`);
-  toast(`Standalone saved (${kb} KB)`,'success');
+  console.log(`[Export] ✓ ${kb} KB`);
+  toast(`Exported ${athletes.length} riders · ${keyframes.length} keyframes${hasTrim?' (trimmed)':''} · ${kb} KB`,'success');
 }
 
 function loadEmbedded(){
@@ -1235,11 +1344,17 @@ function loadEmbedded(){
     }
     if(d.me){
       S.me=d.me;
+      showTempGauge(d.me.temperature&&d.me.temperature.some(v=>v!=null));
       console.log('[Embedded] FIT data present');
     }
     if(d.keyframes&&d.keyframes.length){
       S.keyframes=d.keyframes;
       console.log(`[Embedded] ${S.keyframes.length} keyframes`);
+    }
+    if(d.trim){
+      S.trim={start:d.trim.start||null,end:d.trim.end||null};
+      updateTrimUI();
+      console.log(`[Embedded] Trim: ${fmtTime(d.trim.start)}→${fmtTime(d.trim.end)}`);
     }
   }catch(err){
     console.error('[Embedded] Parse error:',err);
@@ -1317,6 +1432,8 @@ document.addEventListener('keydown', e => {
     case 'h': case 'H': toggleSidebar(); break;
     case 'f': case 'F': toggleFollow(); break;
     case 'p': case 'P': toggleSort(); break;
+    case 'i': case 'I': setTrimStart(); break;
+    case 'o': case 'O': setTrimEnd(); break;
   }
 });
 
