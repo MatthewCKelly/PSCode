@@ -184,12 +184,12 @@
     <div id="kf-hit"></div>
   </div>
   <span class="tlabel" id="t-tot">0:00:00</span>
-  <div class="sep" style="width:1px;height:20px;background:var(--border);flex-shrink:0"></div>
-  <button class="trim-btn" id="trim-in-btn"  onclick="setTrimStart()" title="Set trim start here [I]">⬤ In</button>
-  <span id="trim-range" style="display:none"></span>
-  <button class="trim-btn" id="trim-out-btn" onclick="setTrimEnd()"   title="Set trim end here [O]">⬤ Out</button>
-  <button class="trim-btn" id="trim-clr-btn" onclick="clearTrim()"    title="Clear trim" style="display:none">✕ Trim</button>
-  <div class="sep" style="width:1px;height:20px;background:var(--border);flex-shrink:0"></div>
+  <div class="sep author-only" style="width:1px;height:20px;background:var(--border);flex-shrink:0"></div>
+  <button class="trim-btn author-only" id="trim-in-btn"  onclick="setTrimStart()" title="Set trim start here [I]">⬤ In</button>
+  <span id="trim-range" class="author-only" style="display:none"></span>
+  <button class="trim-btn author-only" id="trim-out-btn" onclick="setTrimEnd()"   title="Set trim end here [O]">⬤ Out</button>
+  <button class="trim-btn author-only" id="trim-clr-btn" onclick="clearTrim()"    title="Clear trim" style="display:none">✕ Trim</button>
+  <div class="sep author-only" style="width:1px;height:20px;background:var(--border);flex-shrink:0"></div>
   <select id="spd" onchange="setSpeed(this.value)">
     <option value="1">1×</option>
     <option value="5">5×</option>
@@ -1351,11 +1351,9 @@ function loadEmbedded(){
       S.keyframes=d.keyframes;
       console.log(`[Embedded] ${S.keyframes.length} keyframes`);
     }
-    if(d.trim){
-      S.trim={start:d.trim.start||null,end:d.trim.end||null};
-      updateTrimUI();
-      console.log(`[Embedded] Trim: ${fmtTime(d.trim.start)}→${fmtTime(d.trim.end)}`);
-    }
+    // Trim is already baked into the stream data — don't restore S.trim
+    // (doing so would cause recomputeRange to double-clip to a zero range)
+    if(d.trim) console.log(`[Embedded] Pre-trimmed: ${fmtTime(d.trim.start)} → ${fmtTime(d.trim.end)}`);
   }catch(err){
     console.error('[Embedded] Parse error:',err);
   }
@@ -1457,11 +1455,17 @@ function init(){
     recomputeRange();
     redrawAthletes();
     if(S.me)redrawMe();
-    if(S.keyframes.length){S.lastKfUnix=null;drawTimeline();}
     renderList();
     seekTo(S.tl.start);
     $f('nodatamsg').style.display='none';
     $f('mapbadge').style.display='block';
+    // Defer canvas draws until after the browser has computed layout
+    // (canvas width is 0 if drawn synchronously during script parse)
+    requestAnimationFrame(()=>{
+      resizeGauges();
+      drawTimeline();
+      if(S.keyframes.length) S.lastKfUnix=null;
+    });
   }
 
   window.addEventListener('resize',()=>{ resizeGauges(); drawTimeline(); });
