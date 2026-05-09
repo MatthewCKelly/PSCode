@@ -1349,12 +1349,22 @@ function exportStandalone(){
   const tEnd   = S.trim.end   || S.tl.end;
   const hasTrim= S.trim.start!=null || S.trim.end!=null;
 
+  // Drop stream arrays that are entirely null — saves significant space when
+  // e.g. Strava GPS altitude is absent but FIT altitude is present
+  function compactAthlete(a){
+    const streams={};
+    for(const [k,arr] of Object.entries(a.streams||{}))
+      streams[k]=Array.isArray(arr)&&arr.every(v=>v===null)?[]:arr;
+    return {...a, streams};
+  }
+
   console.log(`[Export] Building standalone HTML… trim:${hasTrim?fmtTime(tStart)+'→'+fmtTime(tEnd):'none'}`);
 
-  // Trim or keep athletes
+  // Trim or keep athletes, then compact null-only stream arrays
   let athletes = hasTrim
     ? S.athletes.map(a=>trimAthleteStream(a,tStart,tEnd)).filter(Boolean)
     : S.athletes;
+  athletes = athletes.map(compactAthlete);
 
   // Trim or keep FIT
   const me = hasTrim ? trimFitStream(S.me,tStart,tEnd) : S.me;
