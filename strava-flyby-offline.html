@@ -130,6 +130,14 @@
       color:var(--green);margin:6px 0;overflow-x:auto}
     .mfooter{margin-top:14px;display:flex;gap:8px;justify-content:flex-end}
 
+    /* ── DRAG-DROP OVERLAY ── */
+    #drop-overlay{position:fixed;inset:0;background:rgba(252,82,0,.18);
+      border:4px dashed var(--accent);z-index:8000;
+      display:none;align-items:center;justify-content:center;pointer-events:none}
+    #drop-overlay.active{display:flex}
+    #drop-overlay span{background:rgba(0,0,0,.85);color:#fff;font-size:18px;
+      font-weight:700;padding:18px 36px;border-radius:12px;border:2px solid var(--accent)}
+
     /* ── TOAST ── */
     #toast{position:fixed;bottom:18px;right:18px;background:var(--surface2);border:1px solid var(--border);
       border-radius:6px;padding:8px 14px;font-size:12px;z-index:9998;
@@ -146,7 +154,7 @@
 <div id="topbar">
   <span class="logo">⚡ Flyby Offline</span>
   <div class="sep"></div>
-  <button class="btn pri" onclick="$f('load-ath').click()">Load Athletes JSON</button>
+  <button class="btn pri" onclick="$f('load-ath').click()" title="Select one or more flyby-export JSON files, or drag & drop onto the page">Load Athletes JSON ✦</button>
   <input type="file" id="load-ath" accept=".json" multiple onchange="loadAthletes(event)">
   <button class="btn" onclick="$f('load-tl').click()">Load Timeline</button>
   <input type="file" id="load-tl" accept=".js,.json" onchange="loadTimeline(event)">
@@ -192,7 +200,7 @@
   </div>
   <div id="mapwrap">
     <div id="map"></div>
-    <div id="nodatamsg"><div class="ico">🗺️</div><p>Load Athletes JSON to see tracks</p></div>
+    <div id="nodatamsg"><div class="ico">🗺️</div><p>Load Athletes JSON or drag &amp; drop files here</p></div>
     <div id="mapbadge"><span id="badge-t">—</span></div>
     <div id="caption"></div>
   </div>
@@ -221,6 +229,9 @@
     <div class="gauge-canvas-wrap"><canvas id="g-alt"></canvas></div>
   </div>
 </div>
+
+<!-- DRAG-DROP OVERLAY -->
+<div id="drop-overlay"><span>Drop athlete JSON files here</span></div>
 
 <!-- TOAST -->
 <div id="toast"></div>
@@ -1246,6 +1257,49 @@ function toast(msg,type='info'){
   clearTimeout(toastTmr);
   toastTmr=setTimeout(()=>el.className='',3800);
 }
+
+// ────────────────────────────────────────────────────────────────
+// DRAG-AND-DROP  (JSON files onto anywhere on the page)
+// ────────────────────────────────────────────────────────────────
+
+(function(){
+  let depth=0;
+  const ov=$f('drop-overlay');
+
+  function isJson(f){ return f.type==='application/json'||f.name.endsWith('.json'); }
+  function isFit(f){ return f.name.toLowerCase().endsWith('.fit'); }
+  function hasAccepted(dt){ return Array.from(dt.items||[]).some(i=>isJson({name:i.type==='application/json'?'a.json':''})||i.kind==='file'); }
+
+  document.addEventListener('dragenter',e=>{
+    if(!e.dataTransfer.types.includes('Files'))return;
+    depth++;
+    ov.classList.add('active');
+    e.preventDefault();
+  });
+  document.addEventListener('dragleave',e=>{
+    depth--;
+    if(depth<=0){depth=0;ov.classList.remove('active');}
+  });
+  document.addEventListener('dragover',e=>{ e.preventDefault(); });
+  document.addEventListener('drop',e=>{
+    e.preventDefault();
+    depth=0; ov.classList.remove('active');
+    const files=Array.from(e.dataTransfer.files);
+    const jsonFiles=files.filter(isJson);
+    const fitFiles=files.filter(isFit);
+    if(jsonFiles.length){
+      // Synthesise a fake event to reuse loadAthletes
+      loadAthletes({ target:{ files:jsonFiles, value:'' } });
+    }
+    if(fitFiles.length){
+      // Load the first FIT (only one supported at a time)
+      loadFit({ target:{ files:fitFiles, value:'' } });
+    }
+    if(!jsonFiles.length&&!fitFiles.length){
+      toast('Drop JSON (athletes) or FIT (your ride) files','warn');
+    }
+  });
+})();
 
 // ────────────────────────────────────────────────────────────────
 // KEYBOARD SHORTCUTS
