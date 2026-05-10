@@ -192,6 +192,17 @@
     .route-chk{accent-color:var(--accent);cursor:pointer;flex-shrink:0;width:13px;height:13px}
     #sidebar.playing .route-chk{pointer-events:none;opacity:.3;cursor:default}
 
+    /* ── INTRO MODAL ── */
+    .intro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
+    .intro-panel{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px}
+    .intro-panel .ip-icon{font-size:22px;margin-bottom:4px}
+    .intro-panel .ip-title{font-size:11px;font-weight:700;color:var(--text);margin-bottom:3px}
+    .intro-panel .ip-desc{font-size:11px;color:var(--dim);line-height:1.5}
+    .intro-who{background:var(--bg);border:1px solid var(--accent);border-radius:6px;padding:12px 14px;margin-bottom:14px}
+    .intro-who .iw-name{font-size:15px;font-weight:700;color:var(--accent);margin-bottom:2px}
+    .intro-who .iw-tag{font-size:11px;color:var(--dim);margin-bottom:6px}
+    .intro-who .iw-bio{font-size:12px;line-height:1.55;color:var(--text)}
+
     /* ── DRAG-DROP OVERLAY ── */
     #drop-overlay{position:fixed;inset:0;background:rgba(252,82,0,.18);
       border:4px dashed var(--accent);z-index:8000;
@@ -239,6 +250,8 @@
   <button class="btn" onclick="exportData()">💾 Export JSON</button>
   <button class="btn" id="follow-btn" onclick="toggleFollow()" title="Keep me in frame">📍 Follow</button>
   <button class="btn" onclick="fitBounds()" title="Fit all">⛶ Fit</button>
+  <div style="flex:1"></div>
+  <button class="btn" onclick="showIntro()" title="About / Help" style="opacity:.7">?</button>
 </div>
 
 <!-- TIMELINE BAR -->
@@ -337,6 +350,49 @@
   </div>
 </div>
 
+<!-- INTRO MODAL -->
+<div id="intro-overlay" class="overlay hide">
+  <div class="modal" style="max-width:600px">
+    <h2>⚡ Flyby Editor</h2>
+    <div class="intro-who">
+      <div class="iw-name" id="intro-name"></div>
+      <div class="iw-tag" id="intro-tag"></div>
+      <div class="iw-bio" id="intro-bio"></div>
+    </div>
+    <h3>Layout Guide</h3>
+    <div class="intro-grid">
+      <div class="intro-panel">
+        <div class="ip-icon">📂</div>
+        <div class="ip-title">Top Bar</div>
+        <div class="ip-desc">Load athlete JSON files and your FIT ride data. Export builds a shareable viewer package — adjust the time range and exclude riders before exporting.</div>
+      </div>
+      <div class="intro-panel">
+        <div class="ip-icon">⏱</div>
+        <div class="ip-title">Timeline</div>
+        <div class="ip-desc">Play, pause, scrub and speed up the replay. Set In / Out trim points to clip the flyby range. Diamonds mark keyframe captions.</div>
+      </div>
+      <div class="intro-panel">
+        <div class="ip-icon">🚴</div>
+        <div class="ip-title">Riders</div>
+        <div class="ip-desc">All athletes in the flyby. Click a row to toggle visibility. When stopped, tick the checkbox to highlight that rider's route and zoom the map to it.</div>
+      </div>
+      <div class="intro-panel">
+        <div class="ip-icon">🗺️</div>
+        <div class="ip-title">Map</div>
+        <div class="ip-desc">Live positions during playback. ⛶ Fit zooms to all riders; 📍 Follow keeps your position centred. Drag to pan freely.</div>
+      </div>
+      <div class="intro-panel">
+        <div class="ip-icon">📊</div>
+        <div class="ip-title">Metrics / Gauges</div>
+        <div class="ip-desc">Your power, heart rate, cadence and elevation — only shown after loading a FIT file from your own Strava activity.</div>
+      </div>
+    </div>
+    <div class="mfooter">
+      <button class="btn pri" onclick="dismissIntro()">Got it →</button>
+    </div>
+  </div>
+</div>
+
 <!-- DRAG-DROP OVERLAY -->
 <div id="drop-overlay"><span>Drop athlete JSON files here</span></div>
 
@@ -347,6 +403,13 @@
 <script src="flyby-shared.js"></script>
 <script>
 'use strict';
+
+// ── Personalise this flyby editor page ──────────────────────────
+const OWNER = {
+  name:    'Your Name',
+  tagline: 'Cyclist · Adventurer',
+  bio:     'Add a short bio here so visitors know whose rides they are watching.',
+};
 
 const _excludedIds = new Set(); // riders manually excluded from export
 
@@ -860,8 +923,31 @@ function doExport(){
 // INIT
 // ────────────────────────────────────────────────────────────────
 
+// ────────────────────────────────────────────────────────────────
+// INTRO
+// ────────────────────────────────────────────────────────────────
+
+function showIntro(){
+  const el=$f('intro-overlay');
+  if(!el)return;
+  $f('intro-name').textContent=OWNER.name;
+  $f('intro-tag').textContent=OWNER.tagline;
+  $f('intro-bio').textContent=OWNER.bio;
+  el.classList.remove('hide');
+}
+function dismissIntro(){
+  localStorage.setItem('flyby-intro-editor-seen','1');
+  const el=$f('intro-overlay');
+  if(el)el.classList.add('hide');
+}
+
+// ────────────────────────────────────────────────────────────────
+// INIT
+// ────────────────────────────────────────────────────────────────
+
 function init(){
   initShared();
+  if(!localStorage.getItem('flyby-intro-editor-seen'))showIntro();
 }
 init();
 updateRotatePrompt();
