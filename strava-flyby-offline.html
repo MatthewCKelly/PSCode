@@ -825,8 +825,14 @@ function updateGauges() {
 let raf=null;
 
 function togglePlay(){
+  if(!S.tl.end||S.tl.end<=S.tl.start){
+    console.warn('[Viewer] play blocked — data not loaded (start='+S.tl.start+' end='+S.tl.end+')');
+    toast('Data not loaded yet','warn'); return;
+  }
   S.tl.playing=!S.tl.playing;
   $f('play-btn').innerHTML=S.tl.playing?'⏸':'▶';
+  console.log('[Viewer] play:',S.tl.playing,'cur:',fmtTime(S.tl.cur),
+    'range:',fmtTime(S.tl.start),'→',fmtTime(S.tl.end),'speed:',S.tl.speed+'x');
   if(S.tl.playing){S.tl.lastTick=performance.now();raf=requestAnimationFrame(tick);}
   else if(raf)cancelAnimationFrame(raf);
 }
@@ -834,7 +840,8 @@ function togglePlay(){
 function tick(now){
   if(!S.tl.playing)return;
   const dt=(now-S.tl.lastTick)/1000;S.tl.lastTick=now;
-  const next=S.tl.cur+dt*S.tl.speed;
+  const spd=S.tl.speed||10;
+  const next=S.tl.cur+dt*spd;
   if(next>=S.tl.end){seekTo(S.tl.end);S.tl.playing=false;$f('play-btn').innerHTML='▶';return;}
   seekTo(next);raf=requestAnimationFrame(tick);
 }
@@ -1352,7 +1359,7 @@ function _triggerDownload(blob, filename){
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
-function exportStandalone(){
+async function exportStandalone(){
   const tStart = S.trim.start || S.tl.start;
   const tEnd   = S.trim.end   || S.tl.end;
   const hasTrim= S.trim.start!=null || S.trim.end!=null;
@@ -1388,51 +1395,42 @@ function exportStandalone(){
     trim: hasTrim?{start:tStart,end:tEnd}:null,
   };
 
-  // ── Two-file export ────────────────────────────────────────────
-  // Data goes to a companion JSON file; the HTML fetches it on load.
-
   const ts = Date.now();
   const dataFilename = `flyby-${ts}.json`;
   const htmlFilename = `flyby-${ts}.html`;
 
-  // 1. Download JSON data file first
-  _triggerDownload(
-    new Blob([JSON.stringify(data)],{type:'application/json'}),
-    dataFilename
-  );
+  // 1. Download JSON data file
+  _triggerDownload(new Blob([JSON.stringify(data)],{type:'application/json'}), dataFilename);
 
-  // 2. Build HTML via DOM manipulation so no regex needed
-  //    — remove any previously injected elements first
-  const prevDataEl  = document.getElementById('__flyby_data__');
-  const prevStyleEl = document.getElementById('__viewer_style__');
-  const prevFileEl  = document.getElementById('__flyby_datafile__');
-  if(prevDataEl)  prevDataEl.remove();
-  if(prevStyleEl) prevStyleEl.remove();
-  if(prevFileEl)  prevFileEl.remove();
+  // 2. Fetch the original HTML source — avoids the live DOM (Leaflet SVGs,
+  //    rendered rider list, stale toast state) that outerHTML would capture.
+  let html;
+  try {
+    const resp = await fetch(location.href, {cache:'no-cache'});
+    if(!resp.ok) throw new Error('HTTP '+resp.status);
+    html = await resp.text();
+    console.log('[Export] Fetched source HTML:',html.length,'chars');
+  } catch(e) {
+    console.warn('[Export] fetch failed, falling back to outerHTML:',e.message);
+    const toastEl=$f('toast');
+    const savedCls=toastEl.className, savedTxt=toastEl.textContent;
+    toastEl.className=''; toastEl.textContent='';
+    html = document.documentElement.outerHTML;
+    toastEl.className=savedCls; toastEl.textContent=savedTxt;
+  }
 
-  //    — inject viewer style (hides author-only controls)
-  const styleEl = document.createElement('style');
-  styleEl.id = '__viewer_style__';
-  styleEl.textContent = '.author-only{display:none!important}#drop-overlay{display:none!important}';
-  document.head.appendChild(styleEl);
+  // 3. Remove any previously injected elements (handles re-export from a viewer)
+  html = html.replace(/<style id="__viewer_style__">[\s\S]*?<\/style>\n?/,'');
+  html = html.replace(/<script id="__flyby_datafile__">[\s\S]*?<\/script>\n?/,'');
 
-  //    — inject data-file reference so init() knows what to fetch
-  const fileEl = document.createElement('script');
-  fileEl.id = '__flyby_datafile__';
-  fileEl.textContent = 'var __FLYBY_DATAFILE__=' + JSON.stringify(dataFilename) + ';';
-  document.body.appendChild(fileEl);
+  // 4. Inject viewer CSS and data-file reference via simple string replacement.
+  //    These IDs don't appear as HTML tag literals in the JS source, so regex is safe.
+  const viewerCss='.author-only{display:none!important}#drop-overlay{display:none!important}';
+  html = html.replace('</head>','<style id="__viewer_style__">'+viewerCss+'</style></head>');
+  html = html.replace('</body>',
+    '<script id="__flyby_datafile__">var __FLYBY_DATAFILE__='+JSON.stringify(dataFilename)+';<'+'\/script></body>');
 
-  //    — serialise
-  const html = document.documentElement.outerHTML;
-
-  //    — restore DOM so current session keeps working
-  styleEl.remove();
-  fileEl.remove();
-  if(prevDataEl)  document.body.appendChild(prevDataEl);
-  if(prevStyleEl) document.head.appendChild(prevStyleEl);
-  if(prevFileEl)  document.body.appendChild(prevFileEl);
-
-  // 3. Download HTML viewer
+  // 5. Download HTML viewer
   _triggerDownload(new Blob([html],{type:'text/html'}), htmlFilename);
 
   const kb=Math.round((html.length+JSON.stringify(data).length)/1024);
@@ -1441,22 +1439,24 @@ function exportStandalone(){
 }
 
 function _applyData(d){
+  console.log('[Viewer] _applyData: athletes='+((d.athletes||[]).length)+' fit='+(!!d.me)+' kf='+((d.keyframes||[]).length));
   if(d.myActivityId) MY_ACTIVITY_ID=d.myActivityId;
   if(d.athletes&&d.athletes.length){
     S.athletes=d.athletes;
-    console.log(`[Data] ${S.athletes.length} athletes`);
+    console.log('[Viewer] athletes loaded:',S.athletes.length,
+      '| first startTime:',S.athletes[0]?.startTime,'=',fmtTime(S.athletes[0]?.startTime));
   }
   if(d.me){
     S.me=d.me;
     showTempGauge(d.me.temperature&&d.me.temperature.some(v=>v!=null));
     showSpeedGauge(d.me.speed&&d.me.speed.some(v=>v!=null));
-    console.log('[Data] FIT data present');
+    console.log('[Viewer] FIT loaded: startTime='+d.me.startTime+' duration='+d.me.duration+'s pts='+d.me.time.length);
   }
   if(d.keyframes&&d.keyframes.length){
     S.keyframes=d.keyframes;
-    console.log(`[Data] ${S.keyframes.length} keyframes`);
+    console.log('[Viewer] keyframes:',S.keyframes.length);
   }
-  if(d.trim) console.log(`[Data] Pre-trimmed: ${fmtTime(d.trim.start)} → ${fmtTime(d.trim.end)}`);
+  if(d.trim) console.log(`[Viewer] pre-trimmed: ${fmtTime(d.trim.start)} → ${fmtTime(d.trim.end)}`);
 }
 
 function loadEmbedded(){
@@ -1557,10 +1557,13 @@ function init(){
 
   // Load data: prefer companion JSON file (two-file export), fall back to embedded element
   function _setupViewer(){
-    if(!S.athletes.length) return;
+    if(!S.athletes.length){ console.warn('[Viewer] _setupViewer: no athletes'); return; }
     recomputeRange();
+    console.log('[Viewer] range:',fmtTime(S.tl.start),'→',fmtTime(S.tl.end),
+      '('+(S.tl.end-S.tl.start)+'s)  athletes:',S.athletes.length);
     redrawAthletes();
-    if(S.me)redrawMe();
+    if(S.me) redrawMe();
+    fitBounds();
     renderList();
     seekTo(S.tl.start);
     $f('nodatamsg').style.display='none';
@@ -1570,15 +1573,17 @@ function init(){
       drawTimeline();
       if(S.keyframes.length) S.lastKfUnix=null;
     });
+    console.log('[Viewer] ready — press play or space to start');
   }
 
   if(typeof __FLYBY_DATAFILE__ !== 'undefined'){
-    console.log('[Data] Fetching',__FLYBY_DATAFILE__);
+    console.log('[Viewer] fetching data file:',__FLYBY_DATAFILE__);
     fetch(__FLYBY_DATAFILE__)
       .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(d=>{ _applyData(d); _setupViewer(); })
-      .catch(err=>{ console.error('[Data] Fetch failed:',err); toast('Could not load data file','error'); });
+      .catch(err=>{ console.error('[Viewer] data fetch failed:',err); toast('Could not load data file','error'); });
   } else {
+    console.log('[Viewer] no data file ref — trying embedded element');
     loadEmbedded();
     _setupViewer();
   }
