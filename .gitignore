@@ -4,6 +4,14 @@ liquidfiles-config.json
 # Other sensitive configuration files
 *-config.json
 !*.template
+!*.sample
+
+# Strava downloaded ride data (large JSON files, personal data)
+Strava/Data/*.json
+Strava/StravaAnalysis-Report.html
+
+# Garmin raw .fit files (personal data, can be large)
+Strava/GarminExport/*.fit
 
 # PowerShell logs
 *.log
