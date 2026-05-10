@@ -169,6 +169,21 @@
       color:var(--text);padding:6px 9px;border-radius:4px;font-size:12px}
     .modal input[type=datetime-local]:focus{outline:none;border-color:var(--accent)}
 
+    /* ── EXPORT RIDER PREVIEW ── */
+    #export-riders{margin-top:16px;max-height:240px;overflow-y:auto}
+    .exp-row{display:flex;align-items:center;gap:7px;padding:3px 0}
+    .exp-row.excl{opacity:.38}
+    .exp-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+    .exp-name{font-size:10px;width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0;color:var(--text)}
+    .exp-bar-wrap{flex:1;position:relative;height:10px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden}
+    .exp-win{position:absolute;top:0;height:100%;background:rgba(252,82,0,.18);border-left:1px solid rgba(252,82,0,.6);border-right:1px solid rgba(252,82,0,.6);pointer-events:none}
+    .exp-bar{position:absolute;top:0;height:100%;border-radius:3px}
+    .exp-tick{position:absolute;top:0;height:100%;width:1px;background:rgba(252,82,0,.7)}
+    .exp-stat{font-size:11px;width:12px;flex-shrink:0;text-align:center}
+    .exp-row.excl .exp-stat{color:var(--dim)}
+    .exp-row:not(.excl) .exp-stat{color:var(--green)}
+    .exp-hdr{display:flex;justify-content:space-between;font-size:9px;color:var(--dim);margin-bottom:4px;padding:0 0 0 97px}
+
     /* ── ROUTE CHECKBOX ── */
     .route-chk{accent-color:var(--accent);cursor:pointer;flex-shrink:0;width:13px;height:13px}
     #sidebar.playing .route-chk{pointer-events:none;opacity:.3;cursor:default}
@@ -296,19 +311,20 @@
 
 <!-- EXPORT DIALOG -->
 <div id="export-modal" class="overlay hide">
-  <div class="modal" style="max-width:400px">
+  <div class="modal" style="max-width:520px">
     <h2>Export Data</h2>
-    <p>Adjust start and end times then click Export.</p>
-    <div style="display:grid;gap:14px;margin-top:14px">
+    <p>Adjust start and end times — the rider bars show who is included.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px">
       <div>
         <div class="modal-lbl">Start</div>
-        <input type="datetime-local" id="export-start">
+        <input type="datetime-local" id="export-start" oninput="updateExportPreview()">
       </div>
       <div>
         <div class="modal-lbl">End</div>
-        <input type="datetime-local" id="export-end">
+        <input type="datetime-local" id="export-end" oninput="updateExportPreview()">
       </div>
     </div>
+    <div id="export-riders"></div>
     <div class="mfooter">
       <button class="btn" onclick="$f('export-modal').classList.add('hide')">Cancel</button>
       <button class="btn pri" onclick="doExport()">💾 Export JSON</button>
@@ -687,7 +703,62 @@ function exportData(){
   const tStart=S.trim.start||S.tl.start, tEnd=S.trim.end||S.tl.end;
   $f('export-start').value=_toDatetimeLocal(tStart);
   $f('export-end').value=_toDatetimeLocal(tEnd);
+  updateExportPreview();
   $f('export-modal').classList.remove('hide');
+}
+
+function updateExportPreview(){
+  const el=$f('export-riders');
+  if(!el||!S.athletes.length)return;
+  const sv=$f('export-start').value, ev=$f('export-end').value;
+  const winS=sv?new Date(sv).getTime()/1000:null;
+  const winE=ev?new Date(ev).getTime()/1000:null;
+
+  // Full span across all athletes
+  const minT=Math.min(...S.athletes.map(a=>a.startTime));
+  const maxT=Math.max(...S.athletes.map(a=>a.endTime));
+  const span=Math.max(1,maxT-minT);
+  const pct=t=>Math.max(0,Math.min(100,(t-minT)/span*100));
+
+  const wL=winS!=null?pct(winS):0;
+  const wR=winE!=null?pct(winE):100;
+  const wW=Math.max(0,wR-wL);
+
+  // Header: start / end labels above bar area
+  let html='<div class="exp-hdr"><span>'+(winS?fmtTime(winS):'—')+'</span><span>'+(winE?fmtTime(winE):'—')+'</span></div>';
+
+  S.athletes.forEach(a=>{
+    const aL=pct(a.startTime), aR=pct(a.endTime);
+    const aW=Math.max(0.5,aR-aL);
+    const included=(winS==null||a.endTime>winS)&&(winE==null||a.startTime<winE);
+    html+='<div class="exp-row'+(included?'':' excl')+'">'
+      +'<div class="exp-dot" style="background:'+a.color+'"></div>'
+      +'<div class="exp-name" title="'+esc(a.name)+'">'+esc(a.name)+'</div>'
+      +'<div class="exp-bar-wrap">'
+      +'<div class="exp-win" style="left:'+wL+'%;width:'+wW+'%"></div>'
+      +'<div class="exp-bar" style="left:'+aL+'%;width:'+aW+'%;background:'+a.color+(included?'':';opacity:.3')+'"></div>'
+      +'</div>'
+      +'<div class="exp-stat">'+(included?'✓':'✕')+'</div>'
+      +'</div>';
+  });
+
+  // FIT data row if present
+  if(S.me&&S.me.startTime){
+    const mL=pct(S.me.startTime), mR=pct(S.me.startTime+S.me.duration);
+    const mW=Math.max(0.5,mR-mL);
+    const included=(winS==null||S.me.startTime+S.me.duration>winS)&&(winE==null||S.me.startTime<winE);
+    html+='<div class="exp-row'+(included?'':' excl')+'" style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px">'
+      +'<div class="exp-dot" style="background:#fc5200;border:2px solid #fff;box-sizing:border-box"></div>'
+      +'<div class="exp-name" style="color:var(--accent)">You (FIT)</div>'
+      +'<div class="exp-bar-wrap">'
+      +'<div class="exp-win" style="left:'+wL+'%;width:'+wW+'%"></div>'
+      +'<div class="exp-bar" style="left:'+mL+'%;width:'+mW+'%;background:#fc5200;opacity:'+(included?'0.8':'0.25')+'"></div>'
+      +'</div>'
+      +'<div class="exp-stat">'+(included?'✓':'✕')+'</div>'
+      +'</div>';
+  }
+
+  el.innerHTML=html;
 }
 
 function doExport(){
