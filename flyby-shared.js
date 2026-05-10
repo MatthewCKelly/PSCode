@@ -98,10 +98,9 @@ function redrawAthletes() {
   Object.values(S.tracks).forEach(t=>t.remove());
   S.markers={}; S.tracks={};
   if(!S.athletes.length)return;
-  // Reveal panels that are hidden until data arrives
+  // Reveal map panels when athletes first arrive (metrics stays hidden until FIT loads)
   const nm=$f('nodatamsg');if(nm)nm.style.display='none';
   const mb=$f('mapbadge');if(mb)mb.style.display='block';
-  const metrics=$f('metrics');if(metrics)metrics.style.display='flex';
   if(!S.sidebarOpen){
     S.sidebarOpen=true;
     const sb=$f('sidebar');
@@ -685,6 +684,7 @@ function _applyData(d) {
   }
   if(d.me){
     S.me=d.me;
+    const metrics=$f('metrics');if(metrics)metrics.style.display='flex';
     showTempGauge(d.me.temperature&&d.me.temperature.some(v=>v!=null));
     showSpeedGauge(d.me.speed&&d.me.speed.some(v=>v!=null));
     console.log('[Viewer] FIT: startTime='+d.me.startTime+' duration='+d.me.duration+'s pts='+d.me.time.length);
