@@ -22,7 +22,7 @@ const GAUGE_META = [
 
 const S = {
   athletes:[], me:null, keyframes:[], hidden:new Set(), selectedTracks:new Set(),
-  followCam:true, sortMode:'load', sidebarOpen:true, hoveredKf:null,
+  followCam:true, sortMode:'load', sidebarOpen:false, hoveredKf:null,
   trim:{start:null,end:null},
   tl:{start:0,end:0,cur:0,playing:false,speed:10,lastTick:null},
   map:null, markers:{}, tracks:{}, meMarker:null, meTrack:null,
@@ -76,8 +76,14 @@ function avgAt(arr, times, rel, win=3) {
 // ────────────────────────────────────────────────────────────────
 
 function initMap() {
-  S.map=L.map('map',{center:[51.505,-0.09],zoom:13});
+  S.map=L.map('map',{center:[-42.7167,170.9667],zoom:12});
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(S.map);
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(
+      pos=>{ if(!S.athletes.length&&!S.me)S.map.setView([pos.coords.latitude,pos.coords.longitude],13); },
+      ()=>{}
+    );
+  }
 }
 
 function mkIcon(color,size=12,ring=false){
@@ -92,6 +98,16 @@ function redrawAthletes() {
   Object.values(S.tracks).forEach(t=>t.remove());
   S.markers={}; S.tracks={};
   if(!S.athletes.length)return;
+  // Reveal panels that are hidden until data arrives
+  const nm=$f('nodatamsg');if(nm)nm.style.display='none';
+  const mb=$f('mapbadge');if(mb)mb.style.display='block';
+  const metrics=$f('metrics');if(metrics)metrics.style.display='flex';
+  if(!S.sidebarOpen){
+    S.sidebarOpen=true;
+    const sb=$f('sidebar');
+    if(sb){sb.classList.remove('collapsed');setTimeout(()=>S.map&&S.map.invalidateSize(),220);}
+    const tab=$f('sidebar-tab');if(tab)tab.textContent='‹';
+  }
   for(const a of S.athletes){
     const coords=a.streams.latlng.filter(Boolean);
     if(!coords.length)continue;
@@ -237,9 +253,10 @@ function drawTimeline() {
     }
   }
 
-  // Keyframe diamond markers
+  // Keyframe diamond markers — only draw if caption is non-empty
   const hovKf=S.hoveredKf;
   for(const kf of S.keyframes){
+    if(!kf.caption||!kf.caption.trim())continue;
     const x=toX(kf.unix);
     if(x<0||x>W)continue;
     const ky=grooveY+9, ks=kf===hovKf?6:4;
@@ -376,7 +393,12 @@ function tick(now){
 function setSpeed(v){S.tl.speed=parseFloat(v);}
 function scrub(e){if(S.tl.playing)togglePlay();S.lastKfUnix=null;seekTo(S.tl.start+(e.target.value/100)*(S.tl.end-S.tl.start));}
 function toggleFollow(){S.followCam=!S.followCam;$f('follow-btn').classList.toggle('active',S.followCam);toast(S.followCam?'Follow-cam ON':'Follow-cam OFF',S.followCam?'success':'warn');}
-function toggleSidebar(){S.sidebarOpen=!S.sidebarOpen;$f('sidebar').classList.toggle('collapsed',!S.sidebarOpen);setTimeout(()=>S.map&&S.map.invalidateSize(),220);}
+function toggleSidebar(){
+  S.sidebarOpen=!S.sidebarOpen;
+  $f('sidebar').classList.toggle('collapsed',!S.sidebarOpen);
+  const tab=$f('sidebar-tab');if(tab)tab.textContent=S.sidebarOpen?'‹':'›';
+  setTimeout(()=>S.map&&S.map.invalidateSize(),220);
+}
 function toggleSort(){S.sortMode=S.sortMode==='position'?'load':'position';$f('sort-btn').classList.toggle('active',S.sortMode==='position');renderList();}
 
 // ────────────────────────────────────────────────────────────────
@@ -724,6 +746,8 @@ function initShared(){
   initGauges();
   initKfHit();
   $f('follow-btn').classList.toggle('active',S.followCam);
+  // Start with sidebar collapsed; redrawAthletes expands it on first data load
+  const sb=$f('sidebar');if(sb)sb.classList.add('collapsed');
 
   document.addEventListener('keydown',function(e){
     if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT'||e.target.tagName==='TEXTAREA')return;
