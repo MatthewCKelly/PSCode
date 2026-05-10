@@ -560,6 +560,7 @@ async function loadFit(e) {
     const hasTemp=data.temperature.some(v=>v!=null);
     const hasSpd=data.speed.some(v=>v!=null);
     console.log('[FIT] '+data.time.length+' records  HR:'+data.heartrate.some(v=>v!=null)+'  Power:'+data.power.some(v=>v!=null)+'  Cadence:'+data.cadence.some(v=>v!=null)+'  Alt:'+hasAlt+'  Temp:'+hasTemp+'  Speed:'+hasSpd);
+    const metrics=$f('metrics');if(metrics)metrics.style.display='flex';
     showTempGauge(hasTemp);
     showSpeedGauge(hasSpd);
     redrawMe();
@@ -787,11 +788,13 @@ function doExport(){
   $f('export-modal').classList.add('hide');
 
   function compactAthlete(a){const streams={};for(const[k,arr]of Object.entries(a.streams||{}))streams[k]=Array.isArray(arr)&&arr.every(v=>v===null)?[]:arr;return{...a,streams};}
+  const me=trimFitStream(S.me,tStart,tEnd);
   let athletes=S.athletes
     .filter(a=>!_excludedIds.has(a.id))
+    // If FIT data is present, drop the matching Strava GPS track to avoid showing the user twice
+    .filter(a=>!me||!MY_ACTIVITY_ID||(a.id!==MY_ACTIVITY_ID&&a.athleteId!==MY_ACTIVITY_ID))
     .map(a=>trimAthleteStream(a,tStart,tEnd)).filter(Boolean);
   athletes=athletes.map(compactAthlete);
-  const me=trimFitStream(S.me,tStart,tEnd);
   const keyframes=S.keyframes.filter(kf=>kf.unix>=tStart&&kf.unix<=tEnd);
   const data={athletes,me,keyframes,myActivityId:MY_ACTIVITY_ID,trim:{start:tStart,end:tEnd}};
 
