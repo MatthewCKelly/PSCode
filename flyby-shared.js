@@ -106,6 +106,7 @@ function redrawAthletes() {
     S.sidebarOpen=true;
     const sb=$f('sidebar');
     if(sb){sb.classList.remove('collapsed');setTimeout(()=>S.map&&S.map.invalidateSize(),220);}
+    const tab=$f('sidebar-tab');if(tab)tab.textContent='‹';
   }
   for(const a of S.athletes){
     const coords=a.streams.latlng.filter(Boolean);
@@ -252,9 +253,10 @@ function drawTimeline() {
     }
   }
 
-  // Keyframe diamond markers
+  // Keyframe diamond markers — only draw if caption is non-empty
   const hovKf=S.hoveredKf;
   for(const kf of S.keyframes){
+    if(!kf.caption||!kf.caption.trim())continue;
     const x=toX(kf.unix);
     if(x<0||x>W)continue;
     const ky=grooveY+9, ks=kf===hovKf?6:4;
@@ -391,7 +393,12 @@ function tick(now){
 function setSpeed(v){S.tl.speed=parseFloat(v);}
 function scrub(e){if(S.tl.playing)togglePlay();S.lastKfUnix=null;seekTo(S.tl.start+(e.target.value/100)*(S.tl.end-S.tl.start));}
 function toggleFollow(){S.followCam=!S.followCam;$f('follow-btn').classList.toggle('active',S.followCam);toast(S.followCam?'Follow-cam ON':'Follow-cam OFF',S.followCam?'success':'warn');}
-function toggleSidebar(){S.sidebarOpen=!S.sidebarOpen;$f('sidebar').classList.toggle('collapsed',!S.sidebarOpen);setTimeout(()=>S.map&&S.map.invalidateSize(),220);}
+function toggleSidebar(){
+  S.sidebarOpen=!S.sidebarOpen;
+  $f('sidebar').classList.toggle('collapsed',!S.sidebarOpen);
+  const tab=$f('sidebar-tab');if(tab)tab.textContent=S.sidebarOpen?'‹':'›';
+  setTimeout(()=>S.map&&S.map.invalidateSize(),220);
+}
 function toggleSort(){S.sortMode=S.sortMode==='position'?'load':'position';$f('sort-btn').classList.toggle('active',S.sortMode==='position');renderList();}
 
 // ────────────────────────────────────────────────────────────────

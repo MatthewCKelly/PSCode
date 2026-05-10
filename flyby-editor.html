@@ -89,10 +89,14 @@
     #main{display:flex;flex:1;overflow:hidden}
 
     /* sidebar */
-    #sidebar{width:var(--sidebar-w);background:var(--surface);border-right:1px solid var(--border);
+    #sidebar{width:var(--sidebar-w);background:var(--surface);border-right:none;
       display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto;
       transition:width .2s}
     #sidebar.collapsed{width:0;overflow:hidden}
+    #sidebar-tab{width:14px;background:var(--surface);border-right:1px solid var(--border);
+      display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;
+      color:var(--dim);font-size:11px;user-select:none;transition:background .12s}
+    #sidebar-tab:hover{background:var(--surface2);color:var(--text)}
     .ph{padding:7px 12px 4px;font-size:10px;font-weight:600;color:var(--dim);
       text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);
       flex-shrink:0;display:flex;align-items:center;justify-content:space-between}
@@ -273,6 +277,7 @@
     </div>
     <div id="alist"><div style="padding:10px 12px;font-size:11px;color:var(--dim)">Load athletes JSON or click Sample</div></div>
   </div>
+  <div id="sidebar-tab" onclick="toggleSidebar()" title="Toggle riders panel">›</div>
   <div id="mapwrap">
     <div id="map"></div>
     <div id="nodatamsg"><div class="ico">🗺️</div><p>Load Athletes JSON or drag &amp; drop files here</p></div>
@@ -342,6 +347,8 @@
 <script src="flyby-shared.js"></script>
 <script>
 'use strict';
+
+const _excludedIds = new Set(); // riders manually excluded from export
 
 // ────────────────────────────────────────────────────────────────
 // FIT PARSER
@@ -730,8 +737,14 @@ function updateExportPreview(){
   S.athletes.forEach(a=>{
     const aL=pct(a.startTime), aR=pct(a.endTime);
     const aW=Math.max(0.5,aR-aL);
-    const included=(winS==null||a.endTime>winS)&&(winE==null||a.startTime<winE);
+    const inWindow=(winS==null||a.endTime>winS)&&(winE==null||a.startTime<winE);
+    const manualExcl=_excludedIds.has(a.id);
+    const included=inWindow&&!manualExcl;
     html+='<div class="exp-row'+(included?'':' excl')+'">'
+      +'<input type="checkbox" class="route-chk" title="Include in export"'
+      +(manualExcl?'':' checked')
+      +(inWindow?'':' disabled')
+      +' onchange="toggleExclude(\''+a.id+'\')">'
       +'<div class="exp-dot" style="background:'+a.color+'"></div>'
       +'<div class="exp-name" title="'+esc(a.name)+'">'+esc(a.name)+'</div>'
       +'<div class="exp-bar-wrap">'
@@ -761,6 +774,11 @@ function updateExportPreview(){
   el.innerHTML=html;
 }
 
+function toggleExclude(id){
+  _excludedIds.has(id)?_excludedIds.delete(id):_excludedIds.add(id);
+  updateExportPreview();
+}
+
 function doExport(){
   const sv=$f('export-start').value, ev=$f('export-end').value;
   if(!sv||!ev){toast('Set both start and end times','warn');return;}
@@ -769,7 +787,9 @@ function doExport(){
   $f('export-modal').classList.add('hide');
 
   function compactAthlete(a){const streams={};for(const[k,arr]of Object.entries(a.streams||{}))streams[k]=Array.isArray(arr)&&arr.every(v=>v===null)?[]:arr;return{...a,streams};}
-  let athletes=S.athletes.map(a=>trimAthleteStream(a,tStart,tEnd)).filter(Boolean);
+  let athletes=S.athletes
+    .filter(a=>!_excludedIds.has(a.id))
+    .map(a=>trimAthleteStream(a,tStart,tEnd)).filter(Boolean);
   athletes=athletes.map(compactAthlete);
   const me=trimFitStream(S.me,tStart,tEnd);
   const keyframes=S.keyframes.filter(kf=>kf.unix>=tStart&&kf.unix<=tEnd);
@@ -777,9 +797,20 @@ function doExport(){
 
   const filename='flyby-'+Date.now()+'.json';
   _triggerDownload(new Blob([JSON.stringify(data)],{type:'application/json'}),filename);
-  const kb=Math.round(JSON.stringify(data).length/1024);
-  console.log('[Export] '+filename+' ~'+kb+' KB  athletes:'+athletes.length+' kf:'+keyframes.length);
-  toast('Exported '+athletes.length+' riders · '+keyframes.length+' kf · '+kb+' KB — upload with flyby-viewer.html as ?data='+filename,'success');
+  const json=JSON.stringify(data);
+  const kb=Math.round(json.length/1024);
+  const skipped=S.athletes.filter(a=>_excludedIds.has(a.id)).map(a=>a.name);
+  console.log('[Export] ─────────────────────────────────');
+  console.log('[Export] File     :', filename);
+  console.log('[Export] Range    :', fmtTime(tStart), '→', fmtTime(tEnd), '('+(Math.round((tEnd-tStart)/60))+'min)');
+  console.log('[Export] Riders   :', athletes.length, 'included' + (skipped.length?' | skipped: '+skipped.join(', '):''));
+  athletes.forEach(a=>console.log('[Export]   ✓', a.name, '('+a.streams.time.length+' pts)'));
+  if(me)console.log('[Export] FIT      :', me.time.length,'pts  duration:'+Math.round(me.duration/60)+'min');
+  console.log('[Export] Keyframes:', keyframes.length);
+  console.log('[Export] Size     :', kb,'KB');
+  console.log('[Export] Open as  : flyby-viewer.html?data='+filename);
+  console.log('[Export] ─────────────────────────────────');
+  toast('Exported '+athletes.length+' riders · '+keyframes.length+' kf · '+kb+' KB — see console for details','success');
 }
 
 // ────────────────────────────────────────────────────────────────
