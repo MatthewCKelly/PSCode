@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flyby Editor</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#1a1a1a;--surface:#242424;--surface2:#2e2e2e;--border:#3a3a3a;
+      --text:#e8e8e8;--dim:#888;--accent:#fc5200;--accent2:#cc4400;
+      --green:#2ecc71;--blue:#3498db;--yellow:#f39c12;--red:#e74c3c;
+      --metrics-h:160px;--sidebar-w:200px;
+    }
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+      background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+    /* ── ROTATE PROMPT (portrait mobile) ── */
+    #rotate-prompt{display:none;position:fixed;inset:0;z-index:99999;
+      background:var(--bg);flex-direction:column;align-items:center;justify-content:center;gap:16px;
+      color:var(--text);text-align:center;padding:32px}
+    #rotate-prompt svg{animation:rotate-hint 2s ease-in-out infinite}
+    @keyframes rotate-hint{
+      0%,100%{transform:rotate(0deg)}
+      40%{transform:rotate(-90deg)}
+      60%{transform:rotate(-90deg)}
+    }
+    #rotate-prompt p{font-size:15px;color:var(--dim);max-width:240px;line-height:1.5}
+    @media (orientation:portrait) and (hover:none) and (pointer:coarse){
+      #rotate-prompt{display:flex}
+    }
+
+    /* ── Responsive scaling ── */
+    @media (max-height:500px){
+      :root{--metrics-h:clamp(80px,24vh,130px)}
+    }
+    @media (max-width:700px){
+      :root{--sidebar-w:clamp(120px,28vw,180px)}
+      .aname{font-size:10px!important}
+      .ameta{font-size:8px!important}
+      .gauge-label{font-size:9px!important}
+    }
+    @media (max-width:480px){
+      :root{--sidebar-w:clamp(100px,32vw,150px)}
+    }
+
+    /* ── TOP BUTTONS BAR ── */
+    #topbar{background:var(--surface);border-bottom:1px solid var(--border);
+      padding:6px 12px;display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap}
+    .logo{font-weight:700;font-size:13px;color:var(--accent);white-space:nowrap}
+    .sep{width:1px;height:20px;background:var(--border);flex-shrink:0}
+    .btn{padding:4px 10px;border:1px solid var(--border);background:var(--surface2);color:var(--text);
+      border-radius:4px;cursor:pointer;font-size:12px;white-space:nowrap;transition:background .12s}
+    .btn:hover{background:var(--border)}
+    .btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+    .btn.pri:hover{background:var(--accent2)}
+    .btn.active{border-color:var(--accent);color:var(--accent)}
+    input[type=file]{display:none}
+
+    /* ── TIMELINE BAR (full width) ── */
+    #tlbar{background:var(--surface);border-bottom:1px solid var(--border);
+      padding:5px 12px;display:flex;align-items:center;gap:8px;flex-shrink:0}
+    #play-btn{width:28px;height:28px;border-radius:50%;background:var(--accent);
+      border:none;color:#fff;cursor:pointer;font-size:12px;display:flex;
+      align-items:center;justify-content:center;flex-shrink:0}
+    #play-btn:hover{background:var(--accent2)}
+    .tlabel{font-size:11px;color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums;flex-shrink:0}
+    #tl-wrap{flex:1;position:relative;height:44px;min-width:0;display:flex;align-items:center}
+    #tl-canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;border-radius:3px}
+    #timeline{position:absolute;left:0;width:100%;-webkit-appearance:none;
+      height:4px;background:transparent;outline:none;cursor:pointer;z-index:2;top:60%}
+    #timeline::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
+      border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 4px rgba(0,0,0,.5)}
+    #kf-hit{position:absolute;bottom:0;left:0;width:100%;height:16px;z-index:4;cursor:default}
+    #kf-tip{position:absolute;bottom:calc(100% + 2px);background:rgba(0,0,0,.92);
+      border:2px solid var(--accent);border-radius:6px;padding:3px 9px;font-size:11px;
+      color:#fff;white-space:nowrap;pointer-events:none;display:none;z-index:20;
+      transform:translateX(-50%)}
+    #spd{background:var(--surface2);border:1px solid var(--border);color:var(--text);
+      padding:3px 5px;border-radius:4px;font-size:12px;cursor:pointer;flex-shrink:0}
+    .trim-btn{padding:3px 8px;border:1px solid var(--border);background:var(--surface2);
+      color:var(--dim);border-radius:4px;cursor:pointer;font-size:11px;flex-shrink:0}
+    .trim-btn:hover{background:var(--border)}
+    .trim-btn.set{border-color:#f39c12;color:#f39c12}
+    #trim-range{font-size:10px;color:#f39c12;white-space:nowrap;flex-shrink:0;font-variant-numeric:tabular-nums}
+
+    /* ── MAIN ── */
+    #main{display:flex;flex:1;overflow:hidden}
+
+    /* sidebar */
+    #sidebar{width:var(--sidebar-w);background:var(--surface);border-right:1px solid var(--border);
+      display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto;
+      transition:width .2s}
+    #sidebar.collapsed{width:0;overflow:hidden}
+    .ph{padding:7px 12px 4px;font-size:10px;font-weight:600;color:var(--dim);
+      text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);
+      flex-shrink:0;display:flex;align-items:center;justify-content:space-between}
+    .ph-sort{background:none;border:1px solid var(--border);color:var(--dim);
+      border-radius:3px;font-size:9px;padding:1px 5px;cursor:pointer;white-space:nowrap}
+    .ph-sort.active{border-color:var(--accent);color:var(--accent)}
+    .apos{font-size:9px;color:var(--dim);font-weight:700;width:14px;text-align:right;flex-shrink:0}
+    .apos.lead{color:var(--yellow)}
+    .aprog{width:34px;height:3px;background:var(--border);border-radius:2px;margin-top:2px}
+    .aprog-fill{height:100%;border-radius:2px;transition:width .3s}
+    #alist{padding:3px 0;flex:1;overflow-y:auto}
+    .aitem{display:flex;align-items:center;gap:7px;padding:5px 12px;cursor:pointer;
+      transition:background .1s;user-select:none}
+    .aitem:hover{background:var(--surface2)}
+    .aitem.off{opacity:.35}
+    .adot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+    .ainfo{flex:1;min-width:0}
+    .aname{font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ameta{font-size:9px;color:var(--dim)}
+    .astatus{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+    .mybadge{display:inline-block;background:var(--accent);color:#fff;font-size:8px;
+      padding:1px 3px;border-radius:2px;font-weight:700;letter-spacing:.4px}
+
+    /* map */
+    #mapwrap{flex:1;position:relative}
+    #map{width:100%;height:100%}
+    #nodatamsg{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+      text-align:center;color:var(--dim);pointer-events:none;z-index:500}
+    #nodatamsg .ico{font-size:40px;margin-bottom:8px}
+    #nodatamsg p{font-size:13px}
+    #mapbadge{position:absolute;top:10px;right:10px;background:rgba(26,26,26,.88);
+      border:1px solid var(--border);border-radius:6px;padding:4px 9px;font-size:11px;
+      z-index:1000;pointer-events:none;display:none}
+    #caption{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
+      background:rgba(0,0,0,.87);border:2px solid var(--accent);border-radius:10px;
+      padding:7px 16px;color:#fff;font-size:13px;font-weight:600;z-index:1000;
+      pointer-events:none;max-width:75%;text-align:center;display:none;
+      text-shadow:0 1px 3px rgba(0,0,0,.6)}
+
+    /* Leaflet tooltip speech bubble */
+    .flyby-tip{background:rgba(0,0,0,.88)!important;border:2px solid var(--accent)!important;
+      border-radius:8px!important;color:#fff!important;font-weight:600!important;
+      font-size:12px!important;padding:4px 10px!important;white-space:nowrap!important;
+      box-shadow:0 2px 8px rgba(0,0,0,.5)!important}
+    .flyby-tip.leaflet-tooltip-top::before{border-top-color:var(--accent)!important}
+
+    /* ── METRICS / GAUGES ── */
+    #metrics{height:var(--metrics-h);background:var(--surface);border-top:1px solid var(--border);
+      display:flex;flex-shrink:0;overflow:hidden}
+    .gauge-cell{flex:1;display:flex;flex-direction:column;align-items:center;
+      justify-content:center;border-right:1px solid var(--border);padding:4px 0;min-width:0}
+    .gauge-cell:last-child{border-right:none}
+    #alt-cell{flex:2;align-items:stretch;padding:6px 10px 4px}
+    .gauge-label{font-size:10px;font-weight:600;color:var(--dim);text-transform:uppercase;
+      letter-spacing:.5px;margin-bottom:2px}
+    .gauge-canvas-wrap{flex:1;width:100%;position:relative;min-height:0}
+    .gauge-canvas-wrap canvas{position:absolute;inset:0;width:100%!important;height:100%!important}
+
+    /* ── MODAL ── */
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;
+      align-items:center;justify-content:center;z-index:9999}
+    .overlay.hide{display:none}
+    .modal{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+      padding:22px;max-width:560px;width:90%;max-height:82vh;overflow-y:auto}
+    .modal h2{font-size:15px;margin-bottom:10px}
+    .modal h3{font-size:11px;color:var(--dim);margin:14px 0 5px;text-transform:uppercase;letter-spacing:.4px}
+    .modal p{font-size:12px;line-height:1.65;color:var(--dim);margin-bottom:6px}
+    .modal pre{background:var(--bg);border:1px solid var(--border);border-radius:4px;
+      padding:9px 11px;font-size:11px;white-space:pre-wrap;word-break:break-all;
+      color:var(--green);margin:6px 0;overflow-x:auto}
+    .mfooter{margin-top:14px;display:flex;gap:8px;justify-content:flex-end}
+
+    /* ── DRAG-DROP OVERLAY ── */
+    #drop-overlay{position:fixed;inset:0;background:rgba(252,82,0,.18);
+      border:4px dashed var(--accent);z-index:8000;
+      display:none;align-items:center;justify-content:center;pointer-events:none}
+    #drop-overlay.active{display:flex}
+    #drop-overlay span{background:rgba(0,0,0,.85);color:#fff;font-size:18px;
+      font-weight:700;padding:18px 36px;border-radius:12px;border:2px solid var(--accent)}
+
+    /* ── TOAST ── */
+    #toast{position:fixed;bottom:18px;right:18px;background:var(--surface2);border:1px solid var(--border);
+      border-radius:6px;padding:8px 14px;font-size:12px;z-index:9998;
+      transform:translateY(50px);opacity:0;transition:all .25s;pointer-events:none}
+    #toast.show{transform:translateY(0);opacity:1}
+    #toast.success{border-color:var(--green);color:var(--green)}
+    #toast.error{border-color:var(--red);color:var(--red)}
+    #toast.warn{border-color:var(--yellow);color:var(--yellow)}
+  </style>
+</head>
+<body>
+
+<!-- ROTATE PROMPT (portrait mobile) -->
+<div id="rotate-prompt">
+  <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="16" y="4" width="32" height="52" rx="5" stroke="#fc5200" stroke-width="3" fill="none"/>
+    <circle cx="32" cy="49" r="2.5" fill="#fc5200"/>
+    <path d="M44 22 L54 32 L44 42" stroke="#888" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M54 32 H26" stroke="#888" stroke-width="2.5" stroke-linecap="round"/>
+  </svg>
+  <p>Rotate your device to landscape for the best experience</p>
+</div>
+
+<!-- BUTTONS BAR -->
+<div id="topbar">
+  <span class="logo">⚡ Flyby Editor</span>
+  <div class="sep"></div>
+  <button class="btn pri" onclick="$f('load-ath').click()" title="Select one or more flyby-export JSON files, or drag &amp; drop onto the page">Load Athletes JSON ✦</button>
+  <input type="file" id="load-ath" accept=".json" multiple onchange="loadAthletes(event)">
+  <button class="btn" onclick="$f('load-tl').click()">Load Timeline</button>
+  <input type="file" id="load-tl" accept=".js,.json" onchange="loadTimeline(event)">
+  <button class="btn" onclick="$f('load-fit').click()">Load My FIT</button>
+  <input type="file" id="load-fit" accept=".fit,.FIT" onchange="loadFit(event)">
+  <button class="btn" id="fit-rm" onclick="clearFit()" style="display:none">✕ FIT</button>
+  <div class="sep"></div>
+  <button class="btn" onclick="loadSample()">Sample</button>
+  <button class="btn" onclick="exportData()">💾 Export JSON</button>
+  <button class="btn" id="follow-btn" onclick="toggleFollow()" title="Keep me in frame">📍 Follow</button>
+  <button class="btn" onclick="fitBounds()" title="Fit all">⛶ Fit</button>
+</div>
+
+<!-- TIMELINE BAR -->
+<div id="tlbar">
+  <button id="play-btn" onclick="togglePlay()">▶</button>
+  <span class="tlabel" id="t-cur">0:00:00</span>
+  <div id="tl-wrap">
+    <canvas id="tl-canvas"></canvas>
+    <div id="kf-tip"></div>
+    <input type="range" id="timeline" min="0" max="100" value="0" oninput="scrub(event)">
+    <div id="kf-hit"></div>
+  </div>
+  <span class="tlabel" id="t-tot">0:00:00</span>
+  <div class="sep" style="width:1px;height:20px;background:var(--border);flex-shrink:0"></div>
+  <button class="trim-btn" id="trim-in-btn"  onclick="setTrimStart()" title="Set trim start here [I]">⬤ In</button>
+  <span id="trim-range" style="display:none"></span>
+  <button class="trim-btn" id="trim-out-btn" onclick="setTrimEnd()"   title="Set trim end here [O]">⬤ Out</button>
+  <button class="trim-btn" id="trim-clr-btn" onclick="clearTrim()"    title="Clear trim" style="display:none">✕ Trim</button>
+  <div class="sep" style="width:1px;height:20px;background:var(--border);flex-shrink:0"></div>
+  <select id="spd" onchange="setSpeed(this.value)">
+    <option value="1">1×</option>
+    <option value="5">5×</option>
+    <option value="10" selected>10×</option>
+    <option value="30">30×</option>
+    <option value="60">60×</option>
+    <option value="120">120×</option>
+  </select>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+  <div id="sidebar">
+    <div class="ph">
+      <span>Athletes (<span id="acnt">0</span>)</span>
+      <button class="ph-sort" id="sort-btn" onclick="toggleSort()" title="Toggle position sort">⇅ pos</button>
+    </div>
+    <div id="alist"><div style="padding:10px 12px;font-size:11px;color:var(--dim)">Load athletes JSON or click Sample</div></div>
+  </div>
+  <div id="mapwrap">
+    <div id="map"></div>
+    <div id="nodatamsg"><div class="ico">🗺️</div><p>Load Athletes JSON or drag &amp; drop files here</p></div>
+    <div id="mapbadge"><span id="badge-t">—</span></div>
+    <div id="caption"></div>
+  </div>
+</div>
+
+<!-- GAUGES + ALTITUDE -->
+<div id="metrics">
+  <div class="gauge-cell">
+    <div class="gauge-label">Heart Rate</div>
+    <div class="gauge-canvas-wrap"><canvas id="g-hr"></canvas></div>
+  </div>
+  <div class="gauge-cell">
+    <div class="gauge-label">Power</div>
+    <div class="gauge-canvas-wrap"><canvas id="g-pwr"></canvas></div>
+  </div>
+  <div class="gauge-cell">
+    <div class="gauge-label">Cadence</div>
+    <div class="gauge-canvas-wrap"><canvas id="g-cad"></canvas></div>
+  </div>
+  <div class="gauge-cell" id="temp-cell" style="display:none">
+    <div class="gauge-label">Temp</div>
+    <div class="gauge-canvas-wrap"><canvas id="g-temp"></canvas></div>
+  </div>
+  <div class="gauge-cell" id="spd-cell" style="display:none">
+    <div class="gauge-label">Speed</div>
+    <div class="gauge-canvas-wrap"><canvas id="g-spd"></canvas></div>
+  </div>
+  <div class="gauge-cell" id="alt-cell">
+    <div class="gauge-label">Elevation</div>
+    <div class="gauge-canvas-wrap"><canvas id="g-alt"></canvas></div>
+  </div>
+</div>
+
+<!-- DRAG-DROP OVERLAY -->
+<div id="drop-overlay"><span>Drop athlete JSON files here</span></div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="flyby-shared.js"></script>
+<script>
+'use strict';
+
+// ────────────────────────────────────────────────────────────────
+// FIT PARSER
+// ────────────────────────────────────────────────────────────────
+
+class FitParser {
+  parse(buf) {
+    const v = new DataView(buf), b = new Uint8Array(buf);
+    if (b.length < 12) throw new Error('File too small');
+    if (String.fromCharCode(b[8],b[9],b[10],b[11]) !== '.FIT') throw new Error('Not a FIT file');
+    const hdr = v.getUint8(0), dataSize = v.getUint32(4,true);
+    let off = hdr;
+    const end = Math.min(hdr + dataSize, b.length - 2);
+    const defs = {}, recs = [];
+    while (off < end) {
+      if (off >= b.length) break;
+      const h = v.getUint8(off++);
+      if (h & 0x80) {
+        const d = defs[(h>>5)&3]; if(d){recs.push(this._data(v,off,d));off+=d.sz;} continue;
+      }
+      const isDef=!!(h&0x40), hasDev=!!(h&0x20), lt=h&0x0F;
+      if (isDef) {
+        off++; const le=v.getUint8(off++)===0;
+        const gm=le?v.getUint16(off,true):v.getUint16(off,false); off+=2;
+        const nf=v.getUint8(off++); const fields=[]; let sz=0;
+        for(let i=0;i<nf;i++){const fn=v.getUint8(off++),fs=v.getUint8(off++),ft=v.getUint8(off++);fields.push({fn,fs,ft});sz+=fs;}
+        if(hasDev){const nd=v.getUint8(off++);for(let i=0;i<nd;i++){sz+=v.getUint8(off+1);off+=3;}}
+        defs[lt]={gm,le,fields,sz};
+      } else {
+        const d=defs[lt]; if(!d)break; recs.push(this._data(v,off,d)); off+=d.sz;
+      }
+    }
+    return this._process(recs);
+  }
+  _data(v,off,def){const f={};let p=off;for(const fd of def.fields){f[fd.fn]=this._val(v,p,fd.fs,fd.ft,def.le);p+=fd.fs;}return{gm:def.gm,f};}
+  _val(v,off,sz,bt,le){const t=bt&0x9F;try{switch(t){case 0:case 2:case 0x0A:return v.getUint8(off);case 1:return v.getInt8(off);case 0x83:return v.getInt16(off,le);case 0x84:case 0x8B:return v.getUint16(off,le);case 0x85:return v.getInt32(off,le);case 0x86:case 0x8C:return v.getUint32(off,le);case 0x88:return v.getFloat32(off,le);case 0x89:return v.getFloat64(off,le);case 7:{let s='';for(let i=0;i<sz;i++){const c=v.getUint8(off+i);if(!c)break;s+=String.fromCharCode(c);}return s;}default:return v.getUint8(off);}}catch(_){return null;}}
+  _process(recs){
+    const r={latlng:[],time:[],altitude:[],heartrate:[],cadence:[],power:[],distance:[],temperature:[],speed:[]};
+    let t0=null;
+    for(const rec of recs){
+      if(rec.gm!==20)continue;const f=rec.f;
+      const ts=f[253];if(ts==null||ts===0xFFFFFFFF)continue;
+      const unix=ts+FIT_EPOCH;if(!t0)t0=unix;r.time.push(Math.round(unix-t0));
+      const lat=f[0],lng=f[1];
+      r.latlng.push(lat!=null&&lat!==0x7FFFFFFF&&lng!=null&&lng!==0x7FFFFFFF?[lat*(180/2147483648),lng*(180/2147483648)]:null);
+      const ealt=f[78], balt=f[2];
+      let altVal=null;
+      if(ealt!=null&&ealt!==0xFFFFFFFF) altVal=(ealt/5)-500;
+      else if(balt!=null&&balt!==0xFFFF) altVal=(balt/5)-500;
+      r.altitude.push(altVal);
+      const hr=f[3];r.heartrate.push(hr!=null&&hr!==0xFF?hr:null);
+      const cad=f[4];r.cadence.push(cad!=null&&cad!==0xFF?cad:null);
+      const dist=f[5];r.distance.push(dist!=null&&dist!==0xFFFFFFFF?dist/100:null);
+      const pwr=f[7];r.power.push(pwr!=null&&pwr!==0xFFFF?pwr:null);
+      const tmp=f[13];r.temperature.push(tmp!=null&&tmp!==0x7F?tmp:null);
+      const espd=f[68],gspd=f[73],bspd=f[6];
+      let spdVal=null;
+      if(espd!=null&&espd!==0xFFFFFFFF)       spdVal=espd/277.778;
+      else if(gspd!=null&&gspd!==0xFFFF&&gspd!==0xFFFFFFFF) spdVal=gspd/277.778;
+      else if(bspd!=null&&bspd!==0xFFFF)       spdVal=bspd/277.778;
+      r.speed.push(spdVal!=null?Math.round(spdVal*10)/10:null);
+    }
+    r.startTime=t0; r.duration=r.time.length?r.time[r.time.length-1]:0;
+    const sample=recs.find(r=>r.gm===20);
+    if(sample){
+      console.log('[FIT] Record field numbers:',Object.keys(sample.f).map(Number).sort((a,b)=>a-b).join(', '));
+      console.log('[FIT] Speed raw — f6:',sample.f[6],'f68:',sample.f[68],'f73:',sample.f[73]);
+    }
+    return r;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────
+// NORMALISE ATHLETE JSON
+// ────────────────────────────────────────────────────────────────
+
+function normalise(raw, i, colorHint) {
+  const color = raw.color || colorHint || COLORS[i % COLORS.length];
+  const id    = String(raw.id || raw.activity_id || raw.activityId || i);
+
+  let streams = raw.streams || {};
+  if (streams.latlng && streams.latlng.data) {
+    streams = {
+      latlng:   streams.latlng.data   || [],
+      time:     (streams.time||{}).data     || [],
+      altitude: (streams.altitude||{}).data || [],
+    };
+  }
+
+  let startTime = raw.startTime != null ? raw.startTime : (raw.start_time != null ? raw.start_time : null);
+  if (typeof startTime==='string') startTime=Date.parse(startTime)/1000;
+  if (!startTime) startTime=Date.now()/1000;
+
+  const name = raw.name ||
+    (raw.athlete ? ((raw.athlete.firstName||raw.athlete.firstname||'')+' '+(raw.athlete.lastName||raw.athlete.lastname||'')).trim() : null) ||
+    raw.athlete_name || ('Athlete '+(i+1));
+
+  const athleteId = String(raw.athleteId || raw.athlete_id ||
+    (raw.athlete&&(raw.athlete.id||raw.athlete.athleteId)) || '');
+
+  const times = streams.time || [];
+  const endTime = startTime + (times[times.length-1]||0);
+
+  return { id, athleteId, name, startTime, endTime, color,
+           streams:{ latlng:streams.latlng||[], time:times, altitude:streams.altitude||[] } };
+}
+
+// ────────────────────────────────────────────────────────────────
+// MERGE STREAMS
+// ────────────────────────────────────────────────────────────────
+
+function mergeStreams(target, src) {
+  const combined = [];
+  const addPts = (streams, start) => {
+    for(let i=0;i<streams.time.length;i++){
+      const absT=start+streams.time[i];
+      combined.push({absT, ll:streams.latlng[i], alt:streams.altitude?streams.altitude[i]:null});
+    }
+  };
+  addPts(target.streams, target.startTime);
+  addPts(src.streams, src.startTime);
+  combined.sort((a,b)=>a.absT-b.absT);
+  const seen=new Set();
+  const uniq=combined.filter(p=>{if(seen.has(p.absT))return false;seen.add(p.absT);return true;});
+  target.startTime=uniq[0].absT;
+  target.endTime=uniq[uniq.length-1].absT;
+  target.streams.time=uniq.map(p=>Math.round(p.absT-target.startTime));
+  target.streams.latlng=uniq.map(p=>p.ll);
+  target.streams.altitude=uniq.map(p=>p.alt);
+}
+
+// ────────────────────────────────────────────────────────────────
+// FILE LOADING
+// ────────────────────────────────────────────────────────────────
+
+async function loadAthletes(e) {
+  const files=Array.from(e.target.files); e.target.value='';
+  if(!files.length)return;
+  let totalAdded=0, totalMerged=0;
+
+  for(const file of files){
+    console.log('[Import] '+file.name+' ('+Math.round(file.size/1024)+' KB)');
+    try{
+      const raw=JSON.parse(await file.text());
+      const arr=Array.isArray(raw)?raw:(raw.athletes||raw.activities||raw.data||[]);
+      console.log('[Import] '+file.name+': '+arr.length+' athletes found');
+
+      arr.forEach((a,i)=>{
+        const norm=normalise(a,i);
+        if(!norm.streams.latlng.some(Boolean)){
+          console.warn('[Import]   skip "'+norm.name+'" — no valid GPS');return;
+        }
+        const existing=S.athletes.find(e=>e.id===norm.id);
+        if(existing){
+          console.log('[Import]   merge "'+norm.name+'" (id:'+norm.id+') — '+norm.streams.time.length+' pts + existing '+existing.streams.time.length+' pts');
+          mergeStreams(existing,norm);
+          totalMerged++;
+        } else {
+          S.athletes.push(norm);
+          console.log('[Import]   add "'+norm.name+'" (id:'+norm.id+', athleteId:'+norm.athleteId+', '+norm.streams.time.length+' pts, color:'+norm.color+')');
+          totalAdded++;
+        }
+      });
+    }catch(err){
+      console.error('[Import] '+file.name+': '+err.message);
+      toast('Error in '+file.name+': '+err.message,'error');
+    }
+  }
+
+  console.log('[Import] Done — added:'+totalAdded+' merged:'+totalMerged+' total:'+S.athletes.length);
+  recomputeRange();
+  redrawAthletes();
+  renderList();
+  seekTo(S.tl.start);
+  toast(S.athletes.length+' athletes loaded ('+totalAdded+' new, '+totalMerged+' merged)','success');
+}
+
+async function loadTimeline(e) {
+  const file=e.target.files[0]; if(!file)return; e.target.value='';
+  console.log('[Timeline] Loading '+file.name+'...');
+  try{
+    let text=await file.text();
+    let kfRaw=null;
+    try{ kfRaw=JSON.parse(text); }
+    catch(_){
+      const m=text.match(/=\s*(\[[\s\S]*?\]);?\s*$/m)||text.match(/(\[[\s\S]*\])/);
+      if(m) kfRaw=new Function('return '+m[1])();
+    }
+    if(!Array.isArray(kfRaw))throw new Error('Expected an array of keyframe objects');
+    if(!S.tl.start)console.warn('[Timeline] No athletes loaded yet — times will be computed against today\'s date');
+    buildKeyframes(kfRaw);
+    S.lastKfUnix=null;
+    drawTimeline();
+    toast('Timeline: '+S.keyframes.length+' keyframes','success');
+  }catch(err){
+    console.error('[Timeline] '+err.message);
+    toast('Timeline error: '+err.message,'error');
+  }
+}
+
+async function loadFit(e) {
+  const file=e.target.files[0]; if(!file)return; e.target.value='';
+  console.log('[FIT] Loading '+file.name+' ('+Math.round(file.size/1024)+' KB)...');
+  try{
+    const data=new FitParser().parse(await file.arrayBuffer());
+    if(!data.time.length)throw new Error('No GPS records found');
+    S.me=data;
+    const hasAlt=data.altitude.some(v=>v!=null);
+    const hasTemp=data.temperature.some(v=>v!=null);
+    const hasSpd=data.speed.some(v=>v!=null);
+    console.log('[FIT] '+data.time.length+' records  HR:'+data.heartrate.some(v=>v!=null)+'  Power:'+data.power.some(v=>v!=null)+'  Cadence:'+data.cadence.some(v=>v!=null)+'  Alt:'+hasAlt+'  Temp:'+hasTemp+'  Speed:'+hasSpd);
+    showTempGauge(hasTemp);
+    showSpeedGauge(hasSpd);
+    redrawMe();
+    recomputeRange();
+    renderList();
+    seekTo(S.tl.cur);
+    $f('fit-rm').style.display='';
+    toast('FIT loaded · '+data.time.length+' pts'+(hasTemp?' · temp':'')+(hasAlt?' · alt':'')+(hasSpd?' · speed':''));
+  }catch(err){
+    console.error('[FIT] '+err.message);
+    toast('FIT error: '+err.message,'error');
+  }
+}
+
+function clearFit(){
+  S.me=null; showTempGauge(false); S.gauges.temp=null; showSpeedGauge(false); S.gauges.spd=null;
+  if(S.meMarker){S.meMarker.remove();S.meMarker=null;}
+  if(S.meTrack){S.meTrack.remove();S.meTrack=null;}
+  GAUGE_META.forEach(m=>drawGauge(S.gauges[m.key],null,m.max,m.color,m.label));
+  $f('fit-rm').style.display='none';
+  recomputeRange(); renderList();
+  toast('FIT removed','warn');
+}
+
+// ────────────────────────────────────────────────────────────────
+// SAMPLE DATA
+// ────────────────────────────────────────────────────────────────
+
+function loadSample(){
+  const BASE=Math.floor(Date.now()/1000)-7200;
+  function mkRoute(latOff,lngOff,secs){
+    const ll=[],t=[];let lat=51.505+latOff,lng=-0.09+lngOff;
+    for(let i=0;i<120;i++){lat+=(Math.random()-.48)*.0006;lng+=(Math.random()-.45)*.0008;ll.push([lat,lng]);t.push(i*secs);}
+    return{latlng:ll,time:t,altitude:[]};
+  }
+  S.athletes=[
+    {id:'s1',athleteId:'1001',name:'Alice', startTime:BASE,     endTime:BASE+360,  color:'#4fc3f7',streams:mkRoute(0,0,3)},
+    {id:'s2',athleteId:'1002',name:'Bob',   startTime:BASE+120, endTime:BASE+600,  color:'#81c784',streams:mkRoute(.002,-.003,4)},
+    {id:'s3',athleteId:'1003',name:'Charlie',startTime:BASE+300,endTime:BASE+720, color:'#ffb74d',streams:mkRoute(-.001,.002,3.5)},
+  ];
+  recomputeRange(); redrawAthletes(); renderList(); seekTo(S.tl.start);
+  toast('Sample loaded — try Play ▶','success');
+}
+
+// ────────────────────────────────────────────────────────────────
+// TRIM CONTROLS
+// ────────────────────────────────────────────────────────────────
+
+function setTrimStart() {
+  S.trim.start=S.tl.cur;
+  if(S.trim.end&&S.trim.end<=S.trim.start) S.trim.end=null;
+  recomputeRange(); updateTrimUI();
+  toast('Trim start: '+fmtTime(S.trim.start),'info');
+}
+function setTrimEnd() {
+  S.trim.end=S.tl.cur;
+  if(S.trim.start&&S.trim.start>=S.trim.end) S.trim.start=null;
+  recomputeRange(); updateTrimUI();
+  toast('Trim end: '+fmtTime(S.trim.end),'info');
+}
+function clearTrim() {
+  S.trim={start:null,end:null};
+  recomputeRange(); updateTrimUI();
+  toast('Trim cleared','warn');
+}
+function updateTrimUI() {
+  const hasIn=S.trim.start!=null, hasOut=S.trim.end!=null, hasTrim=hasIn||hasOut;
+  $f('trim-in-btn').classList.toggle('set',hasIn);
+  $f('trim-out-btn').classList.toggle('set',hasOut);
+  $f('trim-clr-btn').style.display=hasTrim?'':'none';
+  const rng=$f('trim-range');
+  if(hasTrim){
+    const s=hasIn?fmtTime(S.trim.start):'start';
+    const e=hasOut?fmtTime(S.trim.end):'end';
+    rng.textContent=s+' → '+e;
+    rng.style.display='';
+  } else {
+    rng.style.display='none';
+  }
+}
+
+// ────────────────────────────────────────────────────────────────
+// STREAM TRIMMING HELPERS
+// ────────────────────────────────────────────────────────────────
+
+function trimAthleteStream(a, tStart, tEnd) {
+  const times=a.streams.time, n=times.length;
+  const relS=tStart-a.startTime, relE=tEnd-a.startTime;
+  let i0=0; while(i0<n&&times[i0]<relS)i0++;
+  let i1=n-1; while(i1>i0&&times[i1]>relE)i1--;
+  if(i0>i1)return null;
+  const offset=times[i0];
+  const sl=(arr)=>arr?arr.slice(i0,i1+1):[];
+  return{...a,
+    startTime: a.startTime+offset,
+    endTime:   a.startTime+times[i1],
+    streams:{
+      latlng:   sl(a.streams.latlng),
+      time:     sl(times).map(t=>t-offset),
+      altitude: sl(a.streams.altitude),
+    }
+  };
+}
+
+function trimFitStream(me, tStart, tEnd) {
+  if(!me)return null;
+  const times=me.time, n=times.length;
+  const relS=tStart-me.startTime, relE=tEnd-me.startTime;
+  let i0=0; while(i0<n&&times[i0]<relS)i0++;
+  let i1=n-1; while(i1>i0&&times[i1]>relE)i1--;
+  if(i0>i1)return null;
+  const offset=times[i0];
+  const sl=(arr)=>arr?arr.slice(i0,i1+1):[];
+  return{...me,
+    startTime: me.startTime+offset,
+    duration:  times[i1]-times[i0],
+    time:      sl(times).map(t=>t-offset),
+    latlng:    sl(me.latlng),    altitude:   sl(me.altitude),
+    heartrate: sl(me.heartrate), cadence:    sl(me.cadence),
+    power:     sl(me.power),     distance:   sl(me.distance),
+    temperature: sl(me.temperature), speed: sl(me.speed||[]),
+  };
+}
+
+// ────────────────────────────────────────────────────────────────
+// DOWNLOAD HELPER
+// ────────────────────────────────────────────────────────────────
+
+function _triggerDownload(blob, filename){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+// ────────────────────────────────────────────────────────────────
+// EXPORT JSON
+// ────────────────────────────────────────────────────────────────
+
+async function exportData(){
+  if(!S.athletes.length){toast('No data to export','warn');return;}
+  const tStart=S.trim.start||S.tl.start, tEnd=S.trim.end||S.tl.end;
+  const hasTrim=S.trim.start!=null||S.trim.end!=null;
+  function compactAthlete(a){const streams={};for(const[k,arr]of Object.entries(a.streams||{}))streams[k]=Array.isArray(arr)&&arr.every(v=>v===null)?[]:arr;return{...a,streams};}
+  let athletes=hasTrim?S.athletes.map(a=>trimAthleteStream(a,tStart,tEnd)).filter(Boolean):S.athletes;
+  athletes=athletes.map(compactAthlete);
+  const me=hasTrim?trimFitStream(S.me,tStart,tEnd):S.me;
+  const keyframes=S.keyframes.filter(kf=>kf.unix>=tStart&&kf.unix<=tEnd);
+  const data={athletes,me,keyframes,myActivityId:MY_ACTIVITY_ID,trim:hasTrim?{start:tStart,end:tEnd}:null};
+  const ts=Date.now();
+  const filename='flyby-'+ts+'.json';
+  _triggerDownload(new Blob([JSON.stringify(data)],{type:'application/json'}),filename);
+  const kb=Math.round(JSON.stringify(data).length/1024);
+  console.log('[Export] '+filename+' ~'+kb+' KB');
+  toast('Exported '+athletes.length+' riders · '+keyframes.length+' kf · '+kb+' KB — upload with flyby-viewer.html and open as ?data='+filename,'success');
+}
+
+// ────────────────────────────────────────────────────────────────
+// DRAG-AND-DROP
+// ────────────────────────────────────────────────────────────────
+
+(function(){
+  let depth=0;
+  const ov=$f('drop-overlay');
+
+  function isJson(f){ return f.type==='application/json'||f.name.endsWith('.json'); }
+  function isFit(f){ return f.name.toLowerCase().endsWith('.fit'); }
+
+  document.addEventListener('dragenter',e=>{
+    if(!e.dataTransfer.types.includes('Files'))return;
+    depth++;
+    ov.classList.add('active');
+    e.preventDefault();
+  });
+  document.addEventListener('dragleave',e=>{
+    depth--;
+    if(depth<=0){depth=0;ov.classList.remove('active');}
+  });
+  document.addEventListener('dragover',e=>{ e.preventDefault(); });
+  document.addEventListener('drop',e=>{
+    e.preventDefault();
+    depth=0; ov.classList.remove('active');
+    const files=Array.from(e.dataTransfer.files);
+    const jsonFiles=files.filter(isJson);
+    const fitFiles=files.filter(isFit);
+    if(jsonFiles.length){
+      loadAthletes({ target:{ files:jsonFiles, value:'' } });
+    }
+    if(fitFiles.length){
+      loadFit({ target:{ files:fitFiles, value:'' } });
+    }
+    if(!jsonFiles.length&&!fitFiles.length){
+      toast('Drop JSON (athletes) or FIT (your ride) files','warn');
+    }
+  });
+})();
+
+// ────────────────────────────────────────────────────────────────
+// INIT
+// ────────────────────────────────────────────────────────────────
+
+function init(){
+  initShared();
+}
+init();
+updateRotatePrompt();
+</script>
+</body>
+</html>
