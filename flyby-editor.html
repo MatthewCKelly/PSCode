@@ -164,6 +164,14 @@
       padding:9px 11px;font-size:11px;white-space:pre-wrap;word-break:break-all;
       color:var(--green);margin:6px 0;overflow-x:auto}
     .mfooter{margin-top:14px;display:flex;gap:8px;justify-content:flex-end}
+    .modal-lbl{font-size:11px;color:var(--dim);margin-bottom:4px;text-transform:uppercase;letter-spacing:.4px}
+    .modal input[type=datetime-local]{width:100%;background:var(--bg);border:1px solid var(--border);
+      color:var(--text);padding:6px 9px;border-radius:4px;font-size:12px}
+    .modal input[type=datetime-local]:focus{outline:none;border-color:var(--accent)}
+
+    /* ── ROUTE CHECKBOX ── */
+    .route-chk{accent-color:var(--accent);cursor:pointer;flex-shrink:0;width:13px;height:13px}
+    #sidebar.playing .route-chk{pointer-events:none;opacity:.3;cursor:default}
 
     /* ── DRAG-DROP OVERLAY ── */
     #drop-overlay{position:fixed;inset:0;background:rgba(252,82,0,.18);
@@ -283,6 +291,28 @@
   <div class="gauge-cell" id="alt-cell">
     <div class="gauge-label">Elevation</div>
     <div class="gauge-canvas-wrap"><canvas id="g-alt"></canvas></div>
+  </div>
+</div>
+
+<!-- EXPORT DIALOG -->
+<div id="export-modal" class="overlay hide">
+  <div class="modal" style="max-width:400px">
+    <h2>Export Data</h2>
+    <p>Adjust start and end times then click Export.</p>
+    <div style="display:grid;gap:14px;margin-top:14px">
+      <div>
+        <div class="modal-lbl">Start</div>
+        <input type="datetime-local" id="export-start">
+      </div>
+      <div>
+        <div class="modal-lbl">End</div>
+        <input type="datetime-local" id="export-end">
+      </div>
+    </div>
+    <div class="mfooter">
+      <button class="btn" onclick="$f('export-modal').classList.add('hide')">Cancel</button>
+      <button class="btn pri" onclick="doExport()">💾 Export JSON</button>
+    </div>
   </div>
 </div>
 
@@ -646,22 +676,39 @@ function _triggerDownload(blob, filename){
 // EXPORT JSON
 // ────────────────────────────────────────────────────────────────
 
-async function exportData(){
+function _toDatetimeLocal(unix){
+  const d=new Date(unix*1000);
+  const p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes());
+}
+
+function exportData(){
   if(!S.athletes.length){toast('No data to export','warn');return;}
   const tStart=S.trim.start||S.tl.start, tEnd=S.trim.end||S.tl.end;
-  const hasTrim=S.trim.start!=null||S.trim.end!=null;
+  $f('export-start').value=_toDatetimeLocal(tStart);
+  $f('export-end').value=_toDatetimeLocal(tEnd);
+  $f('export-modal').classList.remove('hide');
+}
+
+function doExport(){
+  const sv=$f('export-start').value, ev=$f('export-end').value;
+  if(!sv||!ev){toast('Set both start and end times','warn');return;}
+  const tStart=new Date(sv).getTime()/1000, tEnd=new Date(ev).getTime()/1000;
+  if(tEnd<=tStart){toast('End must be after start','warn');return;}
+  $f('export-modal').classList.add('hide');
+
   function compactAthlete(a){const streams={};for(const[k,arr]of Object.entries(a.streams||{}))streams[k]=Array.isArray(arr)&&arr.every(v=>v===null)?[]:arr;return{...a,streams};}
-  let athletes=hasTrim?S.athletes.map(a=>trimAthleteStream(a,tStart,tEnd)).filter(Boolean):S.athletes;
+  let athletes=S.athletes.map(a=>trimAthleteStream(a,tStart,tEnd)).filter(Boolean);
   athletes=athletes.map(compactAthlete);
-  const me=hasTrim?trimFitStream(S.me,tStart,tEnd):S.me;
+  const me=trimFitStream(S.me,tStart,tEnd);
   const keyframes=S.keyframes.filter(kf=>kf.unix>=tStart&&kf.unix<=tEnd);
-  const data={athletes,me,keyframes,myActivityId:MY_ACTIVITY_ID,trim:hasTrim?{start:tStart,end:tEnd}:null};
-  const ts=Date.now();
-  const filename='flyby-'+ts+'.json';
+  const data={athletes,me,keyframes,myActivityId:MY_ACTIVITY_ID,trim:{start:tStart,end:tEnd}};
+
+  const filename='flyby-'+Date.now()+'.json';
   _triggerDownload(new Blob([JSON.stringify(data)],{type:'application/json'}),filename);
   const kb=Math.round(JSON.stringify(data).length/1024);
-  console.log('[Export] '+filename+' ~'+kb+' KB');
-  toast('Exported '+athletes.length+' riders · '+keyframes.length+' kf · '+kb+' KB — upload with flyby-viewer.html and open as ?data='+filename,'success');
+  console.log('[Export] '+filename+' ~'+kb+' KB  athletes:'+athletes.length+' kf:'+keyframes.length);
+  toast('Exported '+athletes.length+' riders · '+keyframes.length+' kf · '+kb+' KB — upload with flyby-viewer.html as ?data='+filename,'success');
 }
 
 // ────────────────────────────────────────────────────────────────

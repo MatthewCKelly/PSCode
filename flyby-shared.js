@@ -21,7 +21,7 @@ const GAUGE_META = [
 // ────────────────────────────────────────────────────────────────
 
 const S = {
-  athletes:[], me:null, keyframes:[], hidden:new Set(),
+  athletes:[], me:null, keyframes:[], hidden:new Set(), selectedTracks:new Set(),
   followCam:true, sortMode:'load', sidebarOpen:true, hoveredKf:null,
   trim:{start:null,end:null},
   tl:{start:0,end:0,cur:0,playing:false,speed:10,lastTick:null},
@@ -95,7 +95,8 @@ function redrawAthletes() {
   for(const a of S.athletes){
     const coords=a.streams.latlng.filter(Boolean);
     if(!coords.length)continue;
-    S.tracks[a.id]=L.polyline(coords,{color:a.color,weight:2,opacity:0.28}).addTo(S.map);
+    const sel=S.selectedTracks.has(a.id);
+    S.tracks[a.id]=L.polyline(coords,{color:a.color,weight:sel?4:2,opacity:sel?1:0.28}).addTo(S.map);
     const mk=L.marker(coords[0],{icon:mkIcon(a.color),zIndexOffset:500});
     mk.addTo(S.map);
     mk.bindTooltip(a.name,{permanent:false,direction:'top',offset:[0,-7],className:'flyby-tip'});
@@ -357,6 +358,7 @@ function togglePlay(){
   }
   S.tl.playing=!S.tl.playing;
   $f('play-btn').innerHTML=S.tl.playing?'⏸':'▶';
+  const sb=$f('sidebar');if(sb)sb.classList.toggle('playing',S.tl.playing);
   console.log('[Viewer] play:',S.tl.playing,'cur:',fmtTime(S.tl.cur),'→',fmtTime(S.tl.end),'speed:',S.tl.speed+'x');
   if(S.tl.playing){S.tl.lastTick=performance.now();raf=requestAnimationFrame(tick);}
   else if(raf)cancelAnimationFrame(raf);
@@ -581,8 +583,12 @@ function renderList(){
       const progBar=S.sortMode==='position'&&active
         ?'<div class="aprog"><div class="aprog-fill" style="width:'+Math.round(Math.min(frac,1)*100)+'%;background:'+a.color+'"></div></div>':''
       ;
+      const chk='<input type="checkbox" class="route-chk" title="Highlight route"'
+        +(S.selectedTracks.has(a.id)?' checked':'')
+        +' onclick="event.stopPropagation();toggleRouteSelect(\''+a.id+'\')">';
       return '<div class="aitem'+(S.hidden.has(a.id)?' off':'')+'" data-aid="'+a.id+'" onclick="toggleAth(\''+a.id+'\')">'
         +rankBadge
+        +chk
         +'<div class="adot" style="background:'+a.color+(isMe?';border:2px solid #fff':'')+'"></div>'
         +'<div class="ainfo">'
         +'<div class="aname">'+esc(a.name)+(isMe?'<span class="mybadge" style="margin-left:4px">ME</span>':'')+'</div>'
@@ -609,9 +615,39 @@ function renderList(){
 function toggleAth(id){
   S.hidden.has(id)?S.hidden.delete(id):S.hidden.add(id);
   const mk=S.markers[id],tr=S.tracks[id];
-  if(S.hidden.has(id)){if(mk)mk.setOpacity(0);if(tr)tr.setStyle({opacity:0});}
-  else{if(tr)tr.setStyle({opacity:0.28});seekTo(S.tl.cur);}
+  if(S.hidden.has(id)){
+    if(mk)mk.setOpacity(0);if(tr)tr.setStyle({opacity:0});
+    S.selectedTracks.delete(id);
+  } else {
+    const sel=S.selectedTracks.has(id);
+    if(tr)tr.setStyle({opacity:sel?1:0.28,weight:sel?4:2});
+    seekTo(S.tl.cur);
+  }
   renderList();
+}
+
+function toggleRouteSelect(id){
+  if(S.tl.playing)return;
+  const tr=S.tracks[id];
+  if(S.selectedTracks.has(id)){
+    S.selectedTracks.delete(id);
+    if(tr)tr.setStyle({opacity:S.hidden.has(id)?0:0.28,weight:2});
+  } else {
+    S.selectedTracks.add(id);
+    if(tr)tr.setStyle({opacity:1,weight:4});
+  }
+  renderList();
+  fitSelectedBounds();
+}
+
+function fitSelectedBounds(){
+  if(!S.selectedTracks.size)return;
+  const pts=[];
+  for(const id of S.selectedTracks){
+    const a=S.athletes.find(a=>a.id===id);
+    if(a)a.streams.latlng.filter(Boolean).forEach(p=>pts.push(p));
+  }
+  if(pts.length)S.map.fitBounds(L.latLngBounds(pts),{padding:[30,30]});
 }
 
 // ────────────────────────────────────────────────────────────────
